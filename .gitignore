@@ -173,9 +173,12 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# dataset or data
-data/
-datasets/
+# すべての data/ フォルダを無視
+**/data/
+**/datasets/
+
+# 例外: すべての data フォルダ内の .py ファイルは追跡する
+!**/data/*.py
 
 # checkpointss
 checkpoints/
