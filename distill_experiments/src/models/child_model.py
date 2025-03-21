@@ -2,16 +2,17 @@ import torch
 import torch.nn as nn
 
 class ChildModel(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, input_shape):
         super().__init__()
-
-        self.fc_in = nn.Linear(28 * 28, 28 * 16)
-        self.norm_in = nn.BatchNorm1d(28 * 16)
+        h, w = input_shape
+        input_square = h * w
+        self.fc_in = nn.Linear(input_square, input_square // 2)
+        self.norm_in = nn.BatchNorm1d(input_square // 2)
         self.ac_in = nn.ReLU()
-        self.fc_middle = nn.Linear(28 * 16, 28 * 4)
-        self.norm_middle = nn.BatchNorm1d(28 * 4)
+        self.fc_middle = nn.Linear(input_square // 2, input_square // 4)
+        self.norm_middle = nn.BatchNorm1d(input_square // 4)
         self.ac_middle = nn.ReLU()
-        self.fc_out = nn.Linear(28 * 4, num_classes)
+        self.fc_out = nn.Linear(input_square // 4, num_classes)
 
     def forward(self, x):
         x = x.view(x.size(0), -1)

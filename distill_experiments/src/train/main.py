@@ -1,77 +1,66 @@
 import os
 import torch
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.train.dataloader.datamodule import DataModule
-from src.train.model_trainer.parent import MNISTLightningModule
+from src.train.model_trainer.parent import ParentLightningModule
 from src.train.model_trainer.child import ChildModelTrainer
 
-def get_latest_checkpoint(directory):
-    """ 指定したディレクトリ内で最新のチェックポイントを取得 """
-    if not os.path.exists(directory):
-        return None
-    checkpoints = [f for f in os.listdir(directory) if f.endswith('.ckpt')]
-    if not checkpoints:
-        return None
-    checkpoints.sort(reverse=True)  # 一番新しいものを取得
-    return os.path.join(directory, checkpoints[0])
+def model_train(checkpoint_path, model_trainer, datamodule):
+    # checkpoint_path: checkpoints/version_name/model_name.ckpt
+    model_name = os.path.splitext(os.path.basename(checkpoint_path))[0]
+    version_name = os.path.basename(os.path.dirname(checkpoint_path))
+    checkpoint = ModelCheckpoint(
+        dirpath=f'checkpoints/{version_name}/',
+        filename=f'{model_name}' + '-{epoch}-{val_loss:.2f}',
+        monitor='val_loss',
+        mode='min',
+        save_top_k=1
+    )
+    trainer = pl.Trainer(
+        max_epochs=5,
+        callbacks=[checkpoint],
+        logger=TensorBoardLogger("tb_logs", name=model_name, version=version_name)
+    )
+    if os.path.exists(checkpoint_path):
+        print(f"{model_name} モデルの学習を再開")
+        trainer.fit(model_trainer, datamodule=datamodule, ckpt_path=checkpoint_path)
+    else:
+        print(f"{model_name} モデルの学習を新規開始")
+        trainer.fit(model_trainer, datamodule=datamodule)
 
-def train():
+def train(version_name, num_classes, in_channels, input_shape):
     datamodule = DataModule()
 
+    # 親モデルの学習
     model_names = ['simple_conv', 'maxpool', 'inception']
+    for model_name in model_names:
+        model_trainer = ParentLightningModule(model_name,
+                                              num_classes=num_classes,
+                                              in_channels=in_channels
+                                              )
+        checkpoint_path = f'checkpoints/{version_name}/{model_name}.ckpt'
+        model_train(checkpoint_path, model_trainer, datamodule)
     
-    # Parent Model の学習をスキップし、child モデルから再開
-    print("Parentモデルの学習は完了しているためスキップします。Childモデルのトレーニングを開始します。")
-
-    # Child model training with knowledge distillation
-    checkpoint_kd_path = get_latest_checkpoint('checkpoints/child_model_kd/')
-    child_trainer_kd = ChildModelTrainer(num_classes=10, use_kd=True)
-    child_checkpoint_kd = ModelCheckpoint(
-        dirpath='checkpoints/child_model_kd/',
-        filename='{epoch}-{val_loss:.2f}',
-        monitor='val_loss',
-        mode='min',
-        save_top_k=1
-    )
-    
-    trainer = pl.Trainer(
-        max_epochs=5,
-        callbacks=[child_checkpoint_kd],
-        logger=pl.loggers.TensorBoardLogger("tb_logs", name="child_model_kd")
-    )
-    
-    if checkpoint_kd_path:
-        print(f"蒸留モデルの学習を再開: {checkpoint_kd_path}")
-        trainer.fit(child_trainer_kd, datamodule=datamodule, ckpt_path=checkpoint_kd_path)
-    else:
-        print("蒸留モデルの学習を新規開始")
-        trainer.fit(child_trainer_kd, datamodule=datamodule)
-
-    # Child model training without knowledge distillation
-    checkpoint_no_kd_path = get_latest_checkpoint('checkpoints/child_model_no_kd/')
-    child_trainer_no_kd = ChildModelTrainer(num_classes=10, use_kd=False)
-    child_checkpoint_no_kd = ModelCheckpoint(
-        dirpath='checkpoints/child_model_no_kd/',
-        filename='{epoch}-{val_loss:.2f}',
-        monitor='val_loss',
-        mode='min',
-        save_top_k=1
-    )
-
-    trainer = pl.Trainer(
-        max_epochs=5,
-        callbacks=[child_checkpoint_no_kd],
-        logger=pl.loggers.TensorBoardLogger("tb_logs", name="child_model_no_kd")
-    )
-
-    if checkpoint_no_kd_path:
-        print(f"非蒸留モデルの学習を再開: {checkpoint_no_kd_path}")
-        trainer.fit(child_trainer_no_kd, datamodule=datamodule, ckpt_path=checkpoint_no_kd_path)
-    else:
-        print("非蒸留モデルの学習を新規開始")
-        trainer.fit(child_trainer_no_kd, datamodule=datamodule)
+    is_kd = True
+    for _ in range(2):
+        model_trainer = ChildModelTrainer(num_classes=num_classes,
+                                          use_kd=is_kd,
+                                          in_channels=in_channels,
+                                          input_shape=input_shape
+                                          )
+        if is_kd:
+            checkpoint_path = f'checkpoints/{version_name}/child_model_kd.ckpt'
+        else:
+            checkpoint_path = f'checkpoints/{version_name}/child_model.ckpt'
+        model_train(checkpoint_path, model_trainer, datamodule)
+        is_kd = False
 
 if __name__ == "__main__":
+    version_name='mnist'
+    num_classes=10
+    in_channels=1
+    input_shape=(28, 28)
     train()

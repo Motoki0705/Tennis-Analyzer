@@ -6,8 +6,8 @@ from torchmetrics import Accuracy
 
 from src.models.parents_model import ParentModelSimpleConv, ParentModelMaxpool, ParentModelInception
 
-class MNISTLightningModule(pl.LightningModule):
-    def __init__(self, model_name: str, in_channels: int = 1, num_classes: int = 10, lr: float = 1e-3):
+class ParentLightningModule(pl.LightningModule):
+    def __init__(self, model_name: str, in_channels: int = None, num_classes: int = None, lr: float = 1e-3):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
