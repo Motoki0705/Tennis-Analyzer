@@ -3,7 +3,7 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from src.train.data.datamodule import DataModule
+from src.train.dataloader.datamodule import DataModule
 from src.train.model_trainer.parent import MNISTLightningModule
 from src.train.model_trainer.child import ChildModelTrainer
 
