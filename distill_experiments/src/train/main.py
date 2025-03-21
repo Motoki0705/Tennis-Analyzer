@@ -63,4 +63,4 @@ if __name__ == "__main__":
     num_classes=10
     in_channels=1
     input_shape=(28, 28)
-    train()
+    train(version_name, num_classes, in_channels, input_shape)
