@@ -11,9 +11,10 @@ from src.train.model_trainer.child import ChildModelTrainer
 def model_train(checkpoint_path, model_trainer, datamodule):
     # checkpoint_path: checkpoints/version_name/model_name.ckpt
     model_name = os.path.splitext(os.path.basename(checkpoint_path))[0]
-    version_name = os.path.basename(os.path.dirname(checkpoint_path))
+    checkpoint_dir = os.path.dirname(checkpoint_path)
+    version_name = os.path.basename(checkpoint_dir)
     checkpoint = ModelCheckpoint(
-        dirpath=f'checkpoints/{version_name}/',
+        dirpath=checkpoint_dir,
         filename=f'{model_name}' + '-{epoch}-{val_loss:.2f}',
         monitor='val_loss',
         mode='min',
