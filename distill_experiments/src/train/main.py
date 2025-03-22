@@ -1,7 +1,6 @@
 import os
 import torch
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.train.dataloader.datamodule import DataModule
@@ -20,10 +19,14 @@ def model_train(checkpoint_path, model_trainer, datamodule):
         mode='min',
         save_top_k=1
     )
+    logger = pl.loggers.TensorBoardLogger(
+    save_dir="C:/temp/tb_logs",  # tb_logs 以下にログディレクトリを作成
+    name=version_name    # 例: mnist
+    )
     trainer = pl.Trainer(
-        max_epochs=5,
+        max_epochs=10,
         callbacks=[checkpoint],
-        logger=TensorBoardLogger("tb_logs", name=model_name, version=version_name)
+        logger=logger
     )
     if os.path.exists(checkpoint_path):
         print(f"{model_name} モデルの学習を再開")
