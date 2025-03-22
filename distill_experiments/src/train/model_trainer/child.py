@@ -6,7 +6,15 @@ from src.models.child_model import ChildModel
 from src.models.parents_model import ParentModelSimpleConv, ParentModelMaxpool, ParentModelInception
 
 class ChildModelTrainer(pl.LightningModule):
-    def __init__(self, num_classes, lr=1e-3, in_channels=None, input_shape=None, use_kd=True):
+    def __init__(self,
+                 num_classes,
+                 lr=1e-3,
+                 in_channels=None,
+                 input_shape=None,
+                 use_kd=True,
+                 temperature=3,
+                 alpha=0.5
+                 ):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
@@ -24,7 +32,8 @@ class ChildModelTrainer(pl.LightningModule):
                     param.requires_grad = False
 
             self.criterion_kd = nn.KLDivLoss(reduction='batchmean')
-            self.temperature = 3.0
+            self.temperature = temperature
+            self.alpha = alpha
 
         self.criterion_ce = nn.CrossEntropyLoss()
 
@@ -44,11 +53,14 @@ class ChildModelTrainer(pl.LightningModule):
             mean_parents_logits = (inception_logits + maxpool_logits + simple_logits) / 3
 
             # Knowledge Distillation Loss (soft targets)
+            print(child_logits.shape)
+            print(mean_parents_logits.shape)
+
             loss_kd = self.criterion_kd(
                 nn.functional.log_softmax(child_logits / self.temperature, dim=1),
                 nn.functional.softmax(mean_parents_logits / self.temperature, dim=1)
             )
-            loss = loss_ce + loss_kd * (self.temperature ** 2)
+            loss = (1 - self.alpha) * loss_ce + self.alpha * loss_kd * (self.temperature ** 2)
         else:
             loss_kd = torch.tensor(0.0, device=self.device)
             loss = loss_ce  # 通常のCrossEntropyLossのみ適用
@@ -74,3 +86,11 @@ class ChildModelTrainer(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.child_model.parameters(), lr=self.lr)
         return optimizer
+    
+if __name__ == '__main__':
+    inputs = torch.rand(1, 224, 224)
+    model = ChildModelTrainer(10, 0.0001, 1, (224, 224), True, 3, 0.5)
+    model.eval()
+    with torch.no_grad():
+        output = model(inputs)
+    print(output.shape)

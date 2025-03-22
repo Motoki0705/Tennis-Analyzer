@@ -1,6 +1,7 @@
 import os
 import torch
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.train.dataloader.datamodule import DataModule
@@ -19,7 +20,7 @@ def model_train(checkpoint_path, model_trainer, datamodule):
         mode='min',
         save_top_k=1
     )
-    logger = pl.loggers.TensorBoardLogger(
+    logger = TensorBoardLogger(
     save_dir="C:/temp/tb_logs",  # tb_logs 以下にログディレクトリを作成
     name=version_name    # 例: mnist
     )
