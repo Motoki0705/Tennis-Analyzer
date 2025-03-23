@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from collections import OrderedDict
 import pytorch_lightning as pl
 
 from src.models.child_model import ChildModel
@@ -12,8 +13,9 @@ class ChildModelTrainer(pl.LightningModule):
                  in_channels=None,
                  input_shape=None,
                  use_kd=True,
+                 teacher_checkpoint_paths=None,
                  temperature=3,
-                 alpha=0.5
+                 alpha=0.5,
                  ):
         super().__init__()
         self.save_hyperparameters()
@@ -22,9 +24,21 @@ class ChildModelTrainer(pl.LightningModule):
         self.child_model = ChildModel(num_classes, input_shape)
         
         if self.use_kd:
+            self.parent_model_simpleconv = ParentModelSimpleConv(in_channels, num_classes)
             self.parent_model_inception = ParentModelInception(in_channels, num_classes)
             self.parent_model_maxpool = ParentModelMaxpool(in_channels, num_classes)
-            self.parent_model_simpleconv = ParentModelSimpleConv(in_channels, num_classes)
+
+            simpleconv_checkpoint = torch.load(teacher_checkpoint_paths['simple_conv'], map_location=self.device)
+            maxpool_checkpoint = torch.load(teacher_checkpoint_paths['maxpool'], map_location=self.device)
+            inception_checkpoint = torch.load(teacher_checkpoint_paths['inception'], map_location=self.device)
+
+            replaced_simpleconv_state_dict = self.del_model_from_state_dict_keys(simpleconv_checkpoint)
+            replaced_maxpool_state_dict = self.del_model_from_state_dict_keys(maxpool_checkpoint)
+            replaced_inception_state_dict = self.del_model_from_state_dict_keys(inception_checkpoint)
+
+            self.parent_model_simpleconv.load_state_dict(replaced_simpleconv_state_dict)
+            self.parent_model_maxpool.load_state_dict(replaced_maxpool_state_dict)
+            self.parent_model_inception.load_state_dict(replaced_inception_state_dict)
 
             for model in [self.parent_model_inception, self.parent_model_simpleconv, self.parent_model_maxpool]:
                 model.eval()
@@ -51,10 +65,6 @@ class ChildModelTrainer(pl.LightningModule):
                 maxpool_logits = self.parent_model_maxpool(inputs)
                 simple_logits = self.parent_model_simpleconv(inputs)
             mean_parents_logits = (inception_logits + maxpool_logits + simple_logits) / 3
-
-            # Knowledge Distillation Loss (soft targets)
-            print(child_logits.shape)
-            print(mean_parents_logits.shape)
 
             loss_kd = self.criterion_kd(
                 nn.functional.log_softmax(child_logits / self.temperature, dim=1),
@@ -86,6 +96,13 @@ class ChildModelTrainer(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.child_model.parameters(), lr=self.lr)
         return optimizer
+    
+    def del_model_from_state_dict_keys(self, checkpoint):
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint['state_dict'].items():
+            new_key = k.replace('model.', '')
+            new_state_dict[new_key] = v
+        return new_state_dict
     
 if __name__ == '__main__':
     inputs = torch.rand(1, 224, 224)
