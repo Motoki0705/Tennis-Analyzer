@@ -188,3 +188,5 @@ outputs/
 
 # logs
 tb_logs/
+
+.zip
