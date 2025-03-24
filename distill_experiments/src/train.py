@@ -1,4 +1,6 @@
 import os
+import glob
+
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -6,6 +8,28 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from src.train.dataloader.datamodule import DataModule
 from src.train.model_trainer.parent import ParentLightningModule
 from src.train.model_trainer.child import ChildModelTrainer
+
+def find_latest_checkpoint(checkpoint_dir: str, model_name: str):
+    """
+    指定ディレクトリ内の model_name に対応する最新（= val_lossが最も小さい）チェックポイントを返す。
+    """
+    pattern = os.path.join(checkpoint_dir, f"{model_name}-epoch=*-val_loss=*.ckpt")
+    candidates = glob.glob(pattern)
+    
+    if not candidates:
+        return None
+    
+    # val_lossの値を抽出して最小のものを選ぶ
+    def extract_val_loss(filepath):
+        filename = os.path.basename(filepath)
+        try:
+            val_loss_str = filename.split("val_loss=")[-1].replace(".ckpt", "")
+            return float(val_loss_str)
+        except Exception:
+            return float("inf")
+
+    best_ckpt = min(candidates, key=extract_val_loss)
+    return best_ckpt
 
 def model_train(checkpoint_path, model_trainer, datamodule, max_epochs, log_dir="C:/temp/tb_logs", skip_if_trained=False):
     """
@@ -68,11 +92,12 @@ def train_parent_models(new_version_name, prev_version_name, num_classes, in_cha
             teacher_checkpoint_paths[model_name] = checkpoint_path
         else:
             # 前回のバージョンのチェックポイントを教師モデルとして利用
-            checkpoint_path = f'checkpoints/{prev_version_name}/{model_name}.ckpt'
-            teacher_checkpoint_paths[model_name] = checkpoint_path
+            checkpoint_path = f'checkpoints/{prev_version_name}'
+            find_ckpt = find_latest_checkpoint(checkpoint_path, model_name)
             if not os.path.exists(checkpoint_path):
                 print(f"警告: {model_name} の教師モデルのチェックポイントが見つかりません: {checkpoint_path}")
-    
+            else:
+                teacher_checkpoint_paths[model_name] = find_ckpt
     return teacher_checkpoint_paths
 
 def train_child_models(new_version_name, num_classes, in_channels, input_shape, child_max_epochs, teacher_checkpoint_paths, log_dir="C:/temp/tb_logs"):
