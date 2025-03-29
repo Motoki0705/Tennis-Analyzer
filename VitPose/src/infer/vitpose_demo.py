@@ -50,6 +50,7 @@ results = person_image_processor.post_process_object_detection(
     outputs, target_sizes=torch.tensor([(image.height, image.width)]), threshold=0.3
 )
 result = results[0]
+print(result)
 
 # 人物クラス (COCOのクラスID 0) のバウンディングボックスを取得
 person_boxes = result["boxes"][result["labels"] == 0].cpu().numpy()
@@ -70,6 +71,8 @@ with torch.no_grad():
     outputs = pose_model(**inputs)
 
 pose_results = pose_processor.post_process_pose_estimation(outputs, boxes=[person_boxes])
+print(pose_results)
+
 print(f'person_boxes: {person_boxes}')
 print(f'pose_results: {pose_results}')
 

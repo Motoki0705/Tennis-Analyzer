@@ -188,3 +188,9 @@ outputs/
 
 # logs
 tb_logs/
+
+# onnx
+onnx/
+
+# court model weights
+model_tennis_court_det.pt
