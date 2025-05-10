@@ -1,12 +1,12 @@
 # JSON 入出力
-json_in:   'data\ball\coco_annotations_globally_tracked.json'
-json_out:  'data\ball\coco_annotations_pose.json'
+json_in:   'data\ball\coco_annotations_ball_ranged.json'
+json_out:  'data\ball\coco_annotations_ball_pose.json'
 img_root:  'data\ball\images'
 
 # デバイス／バッチサイズ
-device:       "cpu"
-batch_size:   4
-num_workers:  4     # ← 追加：DataLoader のワーカー数
+device:       "cuda"
+batch_size:   32
+num_workers:  8     # ← 追加：DataLoader のワーカー数
 
 # ── Player（DETR）検出モデル設定 ─────────────────────────
 det_processor:
@@ -16,10 +16,10 @@ det_processor:
 det_model:
   _target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
   pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
-  num_labels: 3
+  num_labels: 1
   ignore_mismatched_sizes: True
 
-det_checkpoint: "checkpoints/player/rt_detr_tracking/rt_detr_trackepoch=02-val_loss_total=3.29.ckpt"
+det_checkpoint: "checkpoints/player/rt_detr_tracking/best-epoch=05-val_loss_total=2.2782.ckpt"
 player_label_id: 0
 det_score_thresh: 0.6
 

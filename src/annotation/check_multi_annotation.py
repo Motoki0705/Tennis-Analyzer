@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 """Annotation Viewer: play dataset frames like a video with overlays.
 
@@ -46,10 +45,18 @@ COLORS = {
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--coco_json', default=r"data\ball\coco_annotations_globally_tracked.json", required=False)
+    p.add_argument('--coco_json', default=r"data\ball\coco_annotations_ball_pose.json", required=False)
     p.add_argument('--image_root', default=r"data\ball\images", required=False)
     p.add_argument('--fps', type=float, default=30.0)
     return p.parse_args()
+
+def safe_get(d, key, default=None):
+    """安全に辞書のキーを取得する関数"""
+    return d.get(key, default)
+
+def safe_list(lst, idx, default=None):
+    """安全にリストのインデックスを取得する関数"""
+    return lst[idx] if idx < len(lst) else default
 
 def build_index(coco):
     ann_by_image = defaultdict(list)
@@ -58,9 +65,9 @@ def build_index(coco):
     return ann_by_image
 
 def build_skeleton_map(coco):
-    for cat in coco['categories']:
-        if cat['id'] == PLAYER_ID:
-            return cat['skeleton']
+    for cat in coco.get('categories', []):
+        if cat.get('id') == PLAYER_ID:
+            return cat.get('skeleton', [])
     return []
 
 def build_court_map(coco):
@@ -103,7 +110,7 @@ def main():
 
         # overlay court keypoints
         kp_vec = court_map.get(game_id)
-        if kp_vec:
+        if kp_vec and len(kp_vec) >= 3:
             pts = [(kp_vec[i], kp_vec[i+1]) for i in range(0, len(kp_vec), 3)]
             for x, y in pts:
                 cv2.circle(frame, (int(x), int(y)), 3, COLORS['court'], -1)
@@ -111,27 +118,42 @@ def main():
         # overlay annotations
         for ann in ann_by_image.get(img_info['id'], []):
             if ann['category_id'] == BALL_ID:
-                x, y, v = ann['keypoints']
-                color = COLORS['ball_event'] if ann.get('event_status', 0) else COLORS['ball_default']
-                cv2.circle(frame, (int(x), int(y)), 4, color, -1)
+                # キーポイント
+                keypoints = ann.get('keypoints', [])
+                if len(keypoints) >= 3:
+                    x, y, v = keypoints[:3]
+                    color = COLORS['ball_event'] if ann.get('event_status', 0) else COLORS['ball_default']
+                    cv2.circle(frame, (int(x), int(y)), 4, color, -1)
+
+                # BBox
+                bbox = ann.get('bbox')
+                if bbox and len(bbox) == 4:
+                    bx, by, bw, bh = bbox
+                    cv2.rectangle(frame, (int(bx), int(by)), (int(bx + bw), int(by + bh)), COLORS['bbox'], 2)
+
             elif ann['category_id'] == PLAYER_ID:
-                # bbox
-                bx, by, bw, bh = ann['bbox']
-                cv2.rectangle(frame, (int(bx), int(by)), (int(bx+bw), int(by+bh)), COLORS['bbox'], 2)
-                # pose
-                kps = [(ann['keypoints'][i], ann['keypoints'][i+1], ann['keypoints'][i+2])
-                       for i in range(0, len(ann['keypoints']), 3)]
-                # draw lines
-                for a, b in skeleton:
-                    if a < len(kps) and b < len(kps):
-                        xa, ya, va = kps[a]
-                        xb, yb, vb = kps[b]
-                        if va > 0 and vb > 0:
-                            cv2.line(frame, (int(xa), int(ya)), (int(xb), int(yb)), COLORS['pose'], 1)
-                # draw joints
-                for x, y, v in kps:
-                    if v > 0:
-                        cv2.circle(frame, (int(x), int(y)), 2, COLORS['pose'], -1)
+                # BBox
+                bbox = ann.get('bbox')
+                if bbox and len(bbox) == 4:
+                    bx, by, bw, bh = bbox
+                    cv2.rectangle(frame, (int(bx), int(by)), (int(bx + bw), int(by + bh)), COLORS['bbox'], 2)
+
+                # Pose
+                keypoints = ann.get('keypoints', [])
+                if len(keypoints) >= 3:
+                    kps = [(keypoints[i], keypoints[i + 1], keypoints[i + 2]) for i in range(0, len(keypoints), 3)]
+                    # draw lines
+                    for a, b in skeleton:
+                        if a < len(kps) and b < len(kps):
+                            xa, ya, va = kps[a]
+                            xb, yb, vb = kps[b]
+                            if va > 0 and vb > 0:
+                                cv2.line(frame, (int(xa), int(ya)), (int(xb), int(yb)), COLORS['pose'], 1)
+
+                    # draw joints
+                    for x, y, v in kps:
+                        if v > 0:
+                            cv2.circle(frame, (int(x), int(y)), 2, COLORS['pose'], -1)
 
         # text overlay
         txt = f'Game {game_id}  Clip {clip_id}  Frame {idx+1}/{total}'

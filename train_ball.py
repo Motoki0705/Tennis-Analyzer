@@ -5,7 +5,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from src.ball.dataset.datamodule import TennisBallDataModule
 from src.ball.trainer.video_trainer import KeypointModule
-from src.ball.models.video.mobile_gru_unet import MobileNetUHeatmapNet, MobileNetUHeatmapWrapper, TemporalHeatmapModel
+from src.ball.models.video.uniformer import UniformerUNet
 from src.utils.load_model import load_model_weights
 
 @hydra.main(version_base="1.1", config_path="configs/train", config_name="ball")
@@ -26,24 +26,32 @@ def main(cfg):
     dm.setup()
 
     # ─── モデル（MobileNet-U-HeatmapNet） の準備 ───
-    pretrained = MobileNetUHeatmapNet(
-        in_channels=3,
-        base_channels=cfg.model.base_ch,
-        out_channels=1,
-        repeats=cfg.model.repeats,
-        expansion=cfg.model.expansion,
-        use_se=cfg.model.use_se,
-        act=cfg.model.act
+    uniformer_cfg = dict(
+        depth=cfg.model.depth,
+        embed_dim=cfg.model.embed_dim,
+        head_dim=cfg.model.head_dim,
+        mlp_ratio=cfg.model.mlp_ratio,
+        drop_rate=cfg.model.drop_rate,
+        attn_drop_rate=cfg.model.attn_drop_rate,
+        drop_path_rate=cfg.model.drop_path_rate,
+        num_classes=cfg.model.num_classes,
+        img_size=cfg.model.img_size,
+        in_chans=cfg.model.in_chans,
+        split=cfg.model.split
     )
-    pretrained = load_model_weights(pretrained, ckpt_path=cfg.backbone_ckpt)
-    wapper = MobileNetUHeatmapWrapper(pretrained)
-    model = TemporalHeatmapModel(wapper, hidden_dim=cfg.model.base_ch * 8)
+
+    model = UniformerUNet(
+        uniformer_cfg=uniformer_cfg,
+        weight_path=to_absolute_path(cfg.model.backbone_ckpt),
+        up_t=True  # 必要ならオプションで切り替え
+    )
 
     # ─── LightningModule の準備 ───
     lit_model = KeypointModule(
         model=model,
         lr=cfg.model.lr,
         weight_decay=cfg.model.weight_decay,
+        freeze_backbone_epochs=3,
         use_visibility_weighting=cfg.model.use_visibility_weighting
     )
 

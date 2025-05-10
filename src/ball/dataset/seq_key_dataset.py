@@ -180,11 +180,11 @@ class SequenceKeypointDataset(Dataset):
         if self.input_type == "cat":
             input_tensor = torch.cat(frames, dim=0)  # [C*N, H, W]
         else:
-            input_tensor = torch.stack(frames, dim=0)  # [N, C, H, W]
+            input_tensor = torch.stack(frames, dim=1)  # [N, C, H, W]
 
         # 出力フォーマット
         if self.output_type == "all":
-            heatmap_tensor = torch.stack(heatmaps, dim=0)  # [N, H, W]
+            heatmap_tensor = torch.stack(heatmaps, dim=0).unsqueeze(0)  # [N, H, W]
             visibility_tensor = torch.tensor(visibilities, dtype=torch.float32)  # [N]
         else:
             heatmap_tensor = heatmaps[-1]  # [H, W]
@@ -220,8 +220,8 @@ class SequenceKeypointDataset(Dataset):
 
 
 if __name__ == '__main__':
-    input_size = [512, 512]
-    heatmap_size = [512, 512]
+    input_size = [320, 640]
+    heatmap_size = [80, 160]
 
     transform = A.ReplayCompose([
         A.Resize(height=input_size[0], width=input_size[1]),
