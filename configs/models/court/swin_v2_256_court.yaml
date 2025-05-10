@@ -1,0 +1,6 @@
+_target_: src.court.models.swin_v2_256.SwinCourtUNet
+num_keypoints: 15
+final_channels: [64, 32]
+swin_model: 'swinv2_large_window12to16_192to256.ms_in22k_ft_in1k'
+pretrained: True
+img_size: 256

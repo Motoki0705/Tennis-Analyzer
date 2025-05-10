@@ -1,0 +1,16 @@
+# モデル checkpoint のパス
+model:
+  ckpt_path: 'checkpoints\ball\video\3DUnet\ball3d-epoch=01-val_loss=0.2345.ckpt'
+
+# 入出力動画パス
+input_video: "data/test/video_input2.mp4"
+output_video: "outputs/ball/overlay_video_ball_v4.mp4"
+
+# 推論・前処理パラメータ
+input_size: [360, 640]      # [height, width]
+heatmap_size: [360, 640]    # [width, height] scale 用
+base_ch: 16
+num_frames: 6               # 何フレームをまとめて推論するか
+batch_size: 4
+device: "cpu"               # "cuda" も可
+threshold: 0.5

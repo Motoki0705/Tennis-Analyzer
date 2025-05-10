@@ -1,0 +1,38 @@
+# PlayerPredictor 用 (検出器) 設定
+det_processor:
+  _target_: transformers.AutoImageProcessor.from_pretrained
+  pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+
+det_model:
+  _target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
+  pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  num_labels: 3
+  ignore_mismatched_sizes: True
+
+det_checkpoint: "checkpoints/player/rt_detr_tracking/rt_detr_trackepoch=02-val_loss_total=3.29.ckpt"
+
+# PosePredictor 用設定
+pose_processor:
+  _target_: transformers.AutoProcessor.from_pretrained
+  pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+
+pose_model:
+  _target_: transformers.VitPoseForPoseEstimation.from_pretrained
+  pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+
+# 入出力
+input_video: "data/test/video_input2.mp4"
+output_video: "outputs/integrated_with_pose.mp4"
+
+# デバイス／バッチサイズ
+device: "cpu"
+batch_size: 4
+
+# 閾値
+det_score_thresh: 0.6
+pose_score_thresh: 0.6
+
+# PlayerPredictor 用ラベルマップ
+label_map:
+  0: "player"
+  1: "non_player_person"

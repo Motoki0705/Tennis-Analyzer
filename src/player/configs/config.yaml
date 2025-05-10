@@ -1,0 +1,11 @@
+defaults:
+  - _self_
+  - data: coco
+  - model: rt_detr
+  - processor: rt_detr_processor
+  - model_trainer: freeze_first_1_epoch
+  - saves: vanilla
+
+seed: 42
+max_epochs: 7
+patience: 3

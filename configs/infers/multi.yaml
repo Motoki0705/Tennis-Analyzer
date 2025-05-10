@@ -1,0 +1,56 @@
+# 入出力
+input_video: "data/test/video_input2.mp4"
+output_video: "outputs/multi_overlay.mp4"
+
+# 全体共通
+device: "cpu"
+
+# 推論間隔 (フレーム数)
+intervals:
+  ball: 1     # ボール検出は毎フレーム
+  court: 30   # コート抽出は30フレームに1回
+  pose: 5     # 姿勢推定は5フレームに1回
+
+# BallPredictor 設定
+ball:
+  model:
+    ckpt_path: "checkpoints/ball/swin_448/best_model-v4.ckpt"
+  input_size: [448, 448]
+  heatmap_size: [448, 448]
+  num_frames: 3
+  threshold: 0.5
+
+# CourtPredictor 設定
+court:
+  model:
+    path: "checkpoints/court/swin_v2/best_model.ckpt"
+  input_size: [256, 256]
+  num_keypoints: 1
+  threshold: 0.5
+  min_distance: 10
+  radius: 5
+  kp_color: [0, 255, 0]
+
+# PosePredictor 設定（内部で人物検出＋姿勢推定）
+pose:
+  # DETR 検出器
+  det_processor:
+    _target_: transformers.AutoImageProcessor.from_pretrained
+    pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  det_model:
+    _target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
+    pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+    num_labels: 3
+    ignore_mismatched_sizes: True
+  det_checkpoint: "checkpoints/player/rt_detr_tracking/rt_detr_trackepoch=02-val_loss_total=3.29.ckpt"
+  player_label_id: 0
+  det_score_thresh: 0.6
+
+  # Pose モデル
+  pose_processor:
+    _target_: transformers.AutoProcessor.from_pretrained
+    pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+  pose_model:
+    _target_: transformers.VitPoseForPoseEstimation.from_pretrained
+    pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+  pose_score_thresh: 0.6

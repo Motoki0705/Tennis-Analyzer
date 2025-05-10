@@ -1,0 +1,7 @@
+_target_: src.ball.models.cat_frames.swin_448.SwinBallUNet
+num_keypoints: 1
+in_channels: 9
+final_channels: [64, 32]
+swin_model: 'swin_base_patch4_window7_224'
+pretrained: True
+img_size: 448

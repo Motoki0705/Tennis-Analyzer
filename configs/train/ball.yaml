@@ -1,0 +1,35 @@
+# データパス／基本設定
+annotation_file: 'data/ball/coco_annotations_globally_tracked.json'
+image_root:        'data/ball/images'
+backbone_ckpt: 'checkpoints/ball/mobilenet/mobilenet-epoch=18-val_loss=0.0032.ckpt'
+
+# 入力フレーム数、バッチサイズなど
+T: 10
+batch_size: 4
+num_workers: 8
+skip_frames_range: [1, 5]   # train 時に 1〜5 フレーム間隔でサンプリング
+input_type: "track"      # "cat" or "stack"
+output_type: "all"     # "all" or "last"
+
+# 画像／ヒートマップのリサイズ先
+input_size:   [360, 640]
+heatmap_size: [360, 640]
+
+# モデル＆Optimizer設定
+model:
+  base_ch: 32
+  repeats: [1,2,3,3,2,1]
+  expansion: 4
+  use_se: true
+  act: "hswish"
+  lr: 1e-4
+  weight_decay: 1e-4
+  use_visibility_weighting: true
+
+# Trainer設定
+trainer:
+  max_epochs: 10
+  precision: 16                  # 16 or 32
+  default_root_dir: "logs/train_ball"
+  log_every_n_steps: 50
+  do_test: false                 # true にすると fit後に test も回す

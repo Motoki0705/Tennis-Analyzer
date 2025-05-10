@@ -1,0 +1,6 @@
+defaults:
+  - _self_
+  - tb_logs: vanilla
+  - infer: pose
+
+

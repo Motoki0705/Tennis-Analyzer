@@ -1,0 +1,15 @@
+# モデル checkpoint のパス
+model:
+  ckpt_path: "checkpoints/ball/mobilenet/mobilenet-epoch=18-val_loss=0.0032.ckpt"
+
+# 入出力動画パス
+input_video: "data/test/video_input2.mp4"
+output_video: "outputs/ball/moblenet_1.mp4"
+
+# 推論・前処理パラメータ
+input_size: [360, 640]      # [height, width]
+heatmap_size: [360, 640]    # [width, height] scale 用
+num_frames: 1               # 何フレームをまとめて推論するか
+batch_size: 1
+device: "cpu"               # "cuda" も可
+threshold: 0.5
