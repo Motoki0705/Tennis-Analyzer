@@ -17,7 +17,8 @@ def main(cfg):
         num_frames=cfg.num_frames,
         threshold=cfg.threshold,
         device=cfg.device,
-        visualize_features=False
+        visualize_mode="heatmap",
+        use_half=False
     )
     predictor.run(
         input_path= input_video,

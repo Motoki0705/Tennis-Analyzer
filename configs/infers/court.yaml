@@ -1,5 +1,5 @@
 model:
-  path: 'checkpoints\court\fpn\court-epoch=00-val_loss=0.0042.ckpt'
+  path: 'checkpoints/court/fpn/court-epoch=00-val_loss=0.0042.ckpt'
 
 input_video: "data/test/video_input2.mp4"
 output_video: "outputs/court/overlay_fpn.mp4"
@@ -15,3 +15,4 @@ kp_color: [0, 255, 0]
 
 batch_size: 1
 device: "cpu"
+use_half: False

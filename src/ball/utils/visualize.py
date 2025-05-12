@@ -122,3 +122,69 @@ def play_overlay_sequence_xy(frames, coords, vis, fps=5.0, r=4):
 
     plt.ioff()
     plt.show()
+
+import matplotlib.pyplot as plt
+import cv2
+import numpy as np
+import torch
+from torchvision.transforms.functional import to_pil_image
+from typing import Union
+from pathlib import Path
+
+
+def overlay_heatmaps_on_frames(
+    frames: torch.Tensor,
+    heatmaps: torch.Tensor,
+    alpha: float = 0.5,
+    cmap: str = "jet",
+    output_dir: Union[str, Path] = None
+):
+    """
+    フレームとヒートマップをオーバーレイして可視化・保存する
+
+    Args:
+        frames (torch.Tensor): [B, C*T, H, W] or [B, T, C, H, W]
+        heatmaps (torch.Tensor): [B, H, W] or [B, T, H, W]
+        alpha (float): ヒートマップと元画像の合成比率
+        cmap (str): matplotlib のカラーマップ
+        output_dir (str or Path): 保存先ディレクトリ（None の場合は保存しない）
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True) if output_dir else None
+
+    is_cat = frames.dim() == 4 and frames.shape[1] % 3 == 0  # [B, C*T, H, W]
+    is_stack = frames.dim() == 5  # [B, T, C, H, W]
+
+    B = frames.shape[0]
+    T = frames.shape[1] // 3 if is_cat else frames.shape[1]
+
+    for b in range(B):
+        for t in range(T):
+            # 画像取得
+            if is_cat:
+                img = frames[b, t * 3:(t + 1) * 3]  # [3, H, W]
+            else:
+                img = frames[b, t]  # [3, H, W]
+            img_np = to_pil_image(img.cpu()).convert("RGB")
+            img_np = np.array(img_np)
+
+            # ヒートマップ取得
+            if heatmaps.dim() == 3:
+                hm = heatmaps[b]
+            else:
+                hm = heatmaps[b, t]
+
+            hm_np = hm.cpu().numpy()
+            hm_np = cv2.resize(hm_np, (img_np.shape[1], img_np.shape[0]))
+            hm_colored = cv2.applyColorMap((hm_np * 255).astype(np.uint8), getattr(cv2, f'COLORMAP_{cmap.upper()}'))
+
+            overlay = cv2.addWeighted(img_np, 1 - alpha, hm_colored, alpha, 0)
+
+            if output_dir:
+                out_path = Path(output_dir) / f"b{b:02d}_t{t:02d}.png"
+                cv2.imwrite(str(out_path), overlay[:, :, ::-1])  # BGR -> RGB
+            else:
+                plt.imshow(overlay)
+                plt.axis("off")
+                plt.title(f"Sample {b}, Frame {t}")
+                plt.show()

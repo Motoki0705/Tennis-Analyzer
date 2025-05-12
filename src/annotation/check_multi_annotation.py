@@ -45,7 +45,7 @@ COLORS = {
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--coco_json', default=r"data\ball\coco_annotations_ball_pose.json", required=False)
+    p.add_argument('--coco_json', default=r"data\ball\coco_annotations_ball_pose_court.json", required=False)
     p.add_argument('--image_root', default=r"data\ball\images", required=False)
     p.add_argument('--fps', type=float, default=30.0)
     return p.parse_args()

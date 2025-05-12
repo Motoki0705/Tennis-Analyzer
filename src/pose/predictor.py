@@ -27,6 +27,7 @@ class PosePredictor:
         player_label_id: int = 0,
         det_score_thresh: float = 0.6,
         pose_score_thresh: float = 0.6,
+        use_half: bool = False
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.logger.handlers:
@@ -35,7 +36,7 @@ class PosePredictor:
             self.logger.addHandler(h)
         self.logger.setLevel(logging.INFO)
 
-        self.device = torch.device(device)
+        self.device = device
         self.det_model = det_model.to(self.device).eval()
         self.det_processor = det_processor
         self.pose_model = pose_model.to(self.device).eval()
@@ -44,6 +45,7 @@ class PosePredictor:
         self.player_label_id = player_label_id
         self.det_score_thresh = det_score_thresh
         self.pose_score_thresh = pose_score_thresh
+        self.use_half = use_half
 
     def predict(self, frames: List[np.ndarray]) -> List[List[dict]]:
         """
@@ -58,8 +60,12 @@ class PosePredictor:
         det_inputs = self.det_processor(images=batch_rgb, return_tensors="pt").to(self.device)
 
         # DETR 推論
-        with torch.no_grad():
-            det_outputs = self.det_model(pixel_values=det_inputs["pixel_values"])
+        if self.use_half:
+            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                det_outputs = self.det_model(pixel_values=det_inputs["pixel_values"])
+        else:
+            with torch.no_grad():
+                det_outputs = self.det_model(pixel_values=det_inputs["pixel_values"])
 
         # 後処理：バウンディングボックス抽出
         target_sizes = [f.shape[:2] for f in frames]
@@ -110,9 +116,13 @@ class PosePredictor:
         ).to(self.device)
 
         # ViTPose 推論
-        with torch.no_grad():
-            pose_outputs = self.pose_model(**pose_inputs)
-
+        if self.use_half:
+            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                pose_outputs = self.pose_model(**pose_inputs)
+        else:
+            with torch.no_grad():
+                pose_outputs = self.pose_model(**pose_inputs)
+                
         # 後処理：キーポイント抽出
         pose_results = self.pose_processor.post_process_pose_estimation(
             pose_outputs, boxes=batch_boxes

@@ -13,7 +13,7 @@ import albumentations as A
 from torch.utils.data import DataLoader
 
 from src.ball.utils.heatmap import generate_gaussian_heatmap
-from src.ball.utils.visualize import play_overlay_sequence
+from src.ball.utils.visualize import overlay_heatmaps_on_frames
 
 class SequenceKeypointDataset(Dataset):
     """
@@ -53,8 +53,8 @@ class SequenceKeypointDataset(Dataset):
         transform: A.ReplayCompose,
         split: str = "train",
         use_group_split: bool = True,
-        train_ratio: float = 0.7,
-        val_ratio: float = 0.2,
+        train_ratio: float = 0.8,
+        val_ratio: float = 0.1,
         seed: int = 42,
         input_type: str = "stack",
         output_type: str = "all",
@@ -220,29 +220,26 @@ class SequenceKeypointDataset(Dataset):
 
 
 if __name__ == '__main__':
-    input_size = [320, 640]
-    heatmap_size = [80, 160]
+    input_size = [360, 640]
+    heatmap_size = [360, 640]
 
     transform = A.ReplayCompose([
         A.Resize(height=input_size[0], width=input_size[1]),
-        A.HorizontalFlip(),
-        A.ShiftScaleRotate(),
-        A.ColorJitter(),
-        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        A.Normalize(),
         A.pytorch.ToTensorV2()
     ], keypoint_params=A.KeypointParams(format='xy', remove_invisible=True))
 
     dataset = SequenceKeypointDataset(
         annotation_file=r"data\ball\coco_annotations_globally_tracked.json",
         image_root=r"data\ball\images",
-        T=4,
+        T=3,
         input_size=input_size,
         heatmap_size=heatmap_size,
         transform=transform,
         split="train",
         use_group_split=True,
-        input_type="stack",    # cat or stack
-        output_type="all",   # all or last
+        input_type="cat",    # cat or stack
+        output_type="last",   # all or last
         skip_frames_range=(1, 5)
     )
 
@@ -250,6 +247,8 @@ if __name__ == '__main__':
     for frames, heatmaps, visibility in dataloader:
         print(f"frames shape: {frames.shape}")
         print(f"heatmaps shape: {heatmaps.shape}")
+        print(heatmaps.max())
         print(f"visibility shape: {visibility.shape}")
         break
 
+    overlay_heatmaps_on_frames(frames=frames, heatmaps=heatmaps)

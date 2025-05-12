@@ -4,8 +4,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from src.ball.dataset.datamodule import TennisBallDataModule
-from src.ball.trainer.video_trainer import KeypointModule
-from src.ball.models.video.uniformer import UniformerUNet
+from src.ball.trainer.cat_frames_trainer import CatFramesLitModule
+from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
+from src.ball.models.cat_frames.tracknet import BallTrackerNet
 from src.utils.load_model import load_model_weights
 
 @hydra.main(version_base="1.1", config_path="configs/train", config_name="ball")
@@ -26,60 +27,38 @@ def main(cfg):
     dm.setup()
 
     # ─── モデル（MobileNet-U-HeatmapNet） の準備 ───
-    uniformer_cfg = dict(
-        depth=cfg.model.depth,
-        embed_dim=cfg.model.embed_dim,
-        head_dim=cfg.model.head_dim,
-        mlp_ratio=cfg.model.mlp_ratio,
-        drop_rate=cfg.model.drop_rate,
-        attn_drop_rate=cfg.model.attn_drop_rate,
-        drop_path_rate=cfg.model.drop_path_rate,
-        num_classes=cfg.model.num_classes,
-        img_size=cfg.model.img_size,
-        in_chans=cfg.model.in_chans,
-        split=cfg.model.split
-    )
+    tracknet = BallTrackerNet()
+    lite_tracknet = LiteBallTracker()
+    model_name = ["tracknet", "lite_tracknet"]
 
-    model = UniformerUNet(
-        uniformer_cfg=uniformer_cfg,
-        weight_path=to_absolute_path(cfg.model.backbone_ckpt),
-        up_t=True  # 必要ならオプションで切り替え
-    )
+    for model, name in zip([tracknet, lite_tracknet], model_name):
+        # ─── LightningModule の準備 ───
+        lit_model = CatFramesLitModule(
+            model=model,
+        )
 
-    # ─── LightningModule の準備 ───
-    lit_model = KeypointModule(
-        model=model,
-        lr=cfg.model.lr,
-        weight_decay=cfg.model.weight_decay,
-        freeze_backbone_epochs=3,
-        use_visibility_weighting=cfg.model.use_visibility_weighting
-    )
+        # ─── コールバック ───
+        ckpt_cb = ModelCheckpoint(
+            dirpath="checkpoints",
+            monitor="val_loss",
+            save_top_k=3,
+            mode="min",
+            filename=f"{name}" + "-{epoch:02d}-{val_loss:.4f}"
+        )
+        lr_cb = LearningRateMonitor(logging_interval="epoch")
 
-    # ─── コールバック ───
-    ckpt_cb = ModelCheckpoint(
-        dirpath="checkpoints",
-        monitor="val_loss",
-        save_top_k=3,
-        mode="min",
-        filename="mobilenet_temporal-{epoch:02d}-{val_loss:.4f}"
-    )
-    lr_cb = LearningRateMonitor(logging_interval="epoch")
+        # ─── Trainer の起動 ───
+        trainer = pl.Trainer(
+            max_epochs=cfg.trainer.max_epochs,
+            precision=cfg.trainer.precision,
+            default_root_dir=to_absolute_path(cfg.trainer.default_root_dir),
+            callbacks=[ckpt_cb, lr_cb],
+            log_every_n_steps=cfg.trainer.log_every_n_steps
+        )
 
-    # ─── Trainer の起動 ───
-    trainer = pl.Trainer(
-        max_epochs=cfg.trainer.max_epochs,
-        precision=cfg.trainer.precision,
-        default_root_dir=to_absolute_path(cfg.trainer.default_root_dir),
-        callbacks=[ckpt_cb, lr_cb],
-        log_every_n_steps=cfg.trainer.log_every_n_steps
-    )
+        # ─── 学習／検証実行 ───
+        trainer.fit(lit_model, datamodule=dm)
 
-    # ─── 学習／検証実行 ───
-    trainer.fit(lit_model, datamodule=dm)
-
-    # ─── 必要ならテストも実行 ───
-    if cfg.trainer.do_test:
-        trainer.test(lit_model, datamodule=dm)
 
 if __name__ == "__main__":
     main()

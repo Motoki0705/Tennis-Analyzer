@@ -18,6 +18,7 @@ def main(cfg):
         min_distance=  cfg.min_distance,
         radius=        cfg.radius,
         kp_color=      tuple(cfg.kp_color),
+        use_half=      cfg.use_half
     )
     predictor.run(
         input_path=  input_video,

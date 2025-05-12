@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-def generate_gaussian_heatmap(raw_label, input_size, output_size, base_sigma=1.5, base_size=128):
+def generate_gaussian_heatmap(raw_label, input_size, output_size, base_sigma=1.0, base_size=320):
     """
     キーポイント情報からガウスヒートマップを生成（動的なσスケーリングあり）
 

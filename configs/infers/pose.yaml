@@ -6,10 +6,10 @@ det_processor:
 det_model:
   _target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
   pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
-  num_labels: 3
+  num_labels: 1
   ignore_mismatched_sizes: True
 
-det_checkpoint: "checkpoints/player/rt_detr_tracking/rt_detr_trackepoch=02-val_loss_total=3.29.ckpt"
+det_checkpoint: "checkpoints/player/rt_detr_tracking/best-epoch=05-val_loss_total=2.2782.ckpt"
 
 # PosePredictor 用設定
 pose_processor:
@@ -31,8 +31,8 @@ batch_size: 4
 # 閾値
 det_score_thresh: 0.6
 pose_score_thresh: 0.6
+use_half: False
 
 # PlayerPredictor 用ラベルマップ
 label_map:
   0: "player"
-  1: "non_player_person"

@@ -24,6 +24,7 @@ class CourtPredictor:
         min_distance: int = 10,
         radius: int = 5,
         kp_color: Tuple[int, int, int] = (0, 255, 0),
+        use_half: bool = False
     ):
         # Logger
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -33,13 +34,14 @@ class CourtPredictor:
             self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
 
-        self.device = torch.device(device)
+        self.device = device
         self.input_size = input_size
         self.threshold = threshold
         self.min_distance = min_distance
         self.radius = radius
         self.kp_color = kp_color
-
+        self.use_half = use_half
+        
         # モデルロード
         self.model = self._load_model(model_path, num_keypoints)
 
@@ -70,8 +72,12 @@ class CourtPredictor:
             tensors.append(aug["image"])
         batch = torch.stack(tensors).to(self.device)  # (B, C, H, W)
 
-        with torch.no_grad():
-            outputs = self.model(batch)  # (B, num_keypoints or 1, h, w)
+        if self.use_half:
+            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                outputs = self.model(batch)
+        else:
+            with torch.no_grad():
+                outputs = self.model(batch)
 
         if outputs.ndim == 4 and outputs.shape[1] == 1:
             heatmaps = outputs[:, 0]

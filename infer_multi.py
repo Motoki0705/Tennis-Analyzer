@@ -16,6 +16,8 @@ def main(cfg):
         num_frames=cfg.ball.num_frames,
         threshold=cfg.ball.threshold,
         device=cfg.device,
+        visualize_mode="overlay",
+        use_half=cfg.use_half
     )
 
     # CourtPredictor
@@ -28,6 +30,7 @@ def main(cfg):
         min_distance=cfg.court.min_distance,
         radius=cfg.court.radius,
         kp_color=tuple(cfg.court.kp_color),
+        use_half=cfg.use_half
     )
 
     # PosePredictor (内部で人物検出＋姿勢推定)

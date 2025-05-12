@@ -7,7 +7,7 @@ from typing import Tuple, List, Union
 from tqdm import tqdm
 import albumentations as A
 
-from src.ball.models.single_frame.mobilenet import MobileNetUHeatmapNet
+from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
 from src.utils.load_model import load_model_weights
 
 
@@ -18,7 +18,7 @@ class BallPredictor:
         input_size: Tuple[int, int],
         heatmap_size: Tuple[int, int],
         num_frames: int,
-        threshold: float = 0.5,
+        threshold: float = 0.6,
         device: str = "cuda",
         visualize_mode: str = "overlay",
         feature_layer: int = -1,
@@ -37,7 +37,7 @@ class BallPredictor:
         self.heatmap_size = heatmap_size
         self.num_frames = num_frames
         self.threshold = threshold
-        self.device = torch.device(device)
+        self.device = device
         self.visualize_mode = visualize_mode
         self.feature_layer = feature_layer
         self.use_half = use_half  # ★ 追加
@@ -55,7 +55,7 @@ class BallPredictor:
 
     def _load_model(self, ckpt_path: Union[str, Path]) -> torch.nn.Module:
         self.logger.info(f"Loading model from {ckpt_path}")
-        model = MobileNetUHeatmapNet()
+        model = LiteBallTracker()
         model = load_model_weights(model, ckpt_path)
         sample_param = next(model.parameters()).detach().cpu().numpy().ravel()[:5]
         self.logger.info(f"  → sample weights: {sample_param}")
@@ -80,17 +80,17 @@ class BallPredictor:
         if self.use_half:
             with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
                 preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds[:, 0])
+                heatmaps = torch.sigmoid(preds)
         else:
             with torch.no_grad():
                 preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds[:, 0])
+                heatmaps = torch.sigmoid(preds)
 
         heatmaps = heatmaps.cpu().numpy()
         results = []
         for heat, clip in zip(heatmaps, clips):
             xh, yh = self._argmax_coord(heat)
-            xb, yb = self._to_original_scale((xh, yh), self.heatmap_size, clip[-1].shape[:2][::-1])
+            xb, yb = self._to_original_scale((xh, yh), self.heatmap_size, clip[-1].shape[:2])
             conf = float(np.max(heat))
             results.append({"x": xb, "y": yb, "confidence": conf})
         return results
@@ -127,11 +127,11 @@ class BallPredictor:
         if self.use_half:
             with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
                 preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds[:, 0])
+                heatmaps = torch.sigmoid(preds)
         else:
             with torch.no_grad():
                 preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds[:, 0])
+                heatmaps = torch.sigmoid(preds)
 
         arr = heatmaps.cpu().numpy()
 

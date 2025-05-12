@@ -1,40 +1,26 @@
 # データパス／基本設定
-annotation_file: 'data/ball/coco_annotations_globally_tracked.json'
+annotation_file: 'data/ball/coco_annotations_ball_pose.json'
 image_root:        'data/ball/images'
 
 # 入力フレーム数、バッチサイズなど
-T: 4
+T: 3
 batch_size: 2
 num_workers: 8
 skip_frames_range: [1, 5]   # train 時に 1〜5 フレーム間隔でサンプリング
-input_type: "stack"      # "cat" or "stack"
-output_type: "all"     # "all" or "last"
+input_type: "cat"      # "cat" or "stack"
+output_type: "last"     # "all" or "last"
 
 # 画像／ヒートマップのリサイズ先
-input_size:   [320, 640]
-heatmap_size: [80, 160]
+input_size:   [360, 640]
+heatmap_size: [360, 640]
 
 # モデル＆Optimizer設定
 model:
-  type: uniformer_unet   # NEW: 識別しやすいように型を書く
-  depth: [3, 4, 8, 3]
-  embed_dim: [64, 128, 320, 512]
-  head_dim: 64
-  mlp_ratio: 4
-  drop_rate: 0.5
-  attn_drop_rate: 0.0
-  drop_path_rate: 0.1
-  num_classes: 400
-  img_size: 224
-  in_chans: 3
-  split: false
-  backbone_ckpt: checkpoints/ball/uniformer/uniformer_small_k400_8x8.pth
-
   lr: 1e-4
   weight_decay: 1e-4
-  freeze_backbone_epochs: 5  # ❗追加: 最初はバックボーンfreeze
-  use_visibility_weighting: false
-
+  warmup_epochs: 1
+  bce_weight: 0.7
+  
 # Trainer設定
 trainer:
   max_epochs: 10

@@ -437,7 +437,23 @@ class DecoderBlock(nn.Module):
 # ★ 2) Uniformer UNet ラッパ
 # ------------------------------------------------------------
 class UniformerUNet(nn.Module):
-    def __init__(self, uniformer_cfg, weight_path, up_t: bool = True):
+    def __init__(
+            self,
+            uniformer_cfg={
+                "depth": [3, 4, 8, 3],
+                "embed_dim": [64, 128, 320, 512],
+                "head_dim": 64,
+                "mlp_ratio": 4,
+                "drop_rate": 0.5,
+                "attn_drop_rate": 0.0,
+                "drop_path_rate": 0.1,
+                "num_classes": 400,
+                "img_size": 224,
+                "in_chans": 3,
+                "split": False,
+            },
+            weight_path="checkpoints/ball/uniformer/uniformer_small_k400_8x8.pth",
+            up_t: bool = True):
         """
         uniformer_cfg: dict of Uniformer __init__ params
         weight_path:   事前学習済み .pth のパス

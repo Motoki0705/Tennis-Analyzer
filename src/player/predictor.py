@@ -15,6 +15,7 @@ class PlayerPredictor:
         label_map: Dict[int, str],
         device: Union[str, torch.device] = "cpu",
         threshold: float = 0.6,
+        use_half: bool = False
     ):
         # ─── logger 初期化 ───
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -25,11 +26,12 @@ class PlayerPredictor:
         self.logger.setLevel(logging.INFO)
 
         # ─── モデル・設定 ───
-        self.device = torch.device(device)
+        self.device = device
         self.model = self._prepare_model(model)
         self.processor = processor
         self.label_map = label_map
         self.threshold = threshold
+        self.use_half = use_half
 
     def _prepare_model(self, model: torch.nn.Module) -> torch.nn.Module:
         """モデルをデバイスに送って eval モードに設定"""
@@ -63,9 +65,13 @@ class PlayerPredictor:
         inputs = self.processor(images=batch_rgb, return_tensors="pt").to(self.device)
 
         # 推論
-        with torch.no_grad():
-            outputs = self.model(pixel_values=inputs["pixel_values"])
-
+        if self.use_half:
+            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                outputs = self.model(pixel_values=inputs["pixel_values"])
+        else:
+            with torch.no_grad():
+                outputs = self.model(pixel_values=inputs["pixel_values"])
+                
         # 後処理
         target_sizes = [f.shape[:2] for f in frames]  # (height, width)
         results_batch = self.processor.post_process_object_detection(
