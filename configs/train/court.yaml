@@ -1,0 +1,17 @@
+annotation_root: 'data\court'  # ← あなたが実行時に指定するため空欄
+image_root: 'data\court\images'
+batch_size: 8
+num_workers: 8
+base_ch: 64
+default_num_keypoints: 15
+sigma: 2
+
+lr: 1e-4
+weight_decay: 1e-4
+optim_t_max: 10
+min_lr: 1e-6
+
+max_epochs: 50
+precision: 16
+log_every_n_steps: 10
+output_dir: outputs/court_training

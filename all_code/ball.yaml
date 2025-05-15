@@ -1,0 +1,16 @@
+# モデル checkpoint のパス
+model:
+  ckpt_path: "checkpoints/ball/lite_tracknet/lite_tracknet-epoch=46-val_loss=0.0000.ckpt"
+
+# 入出力動画パス
+input_video: "data/test/video_input2.mp4"
+output_video: "lite_tracknet_1.mp4"
+
+# 推論・前処理パラメータ
+input_size: [360, 640]      # [height, width]
+heatmap_size: [360, 640]    # [width, height] scale 用
+num_frames: 3               # 何フレームをまとめて推論するか
+batch_size: 32
+device: "cuda"               # "cuda" も可
+threshold: 0.65
+use_half: True

@@ -1,0 +1,4 @@
+_target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
+pretrained_model_name_or_path: PekingU/rtdetr_v2_r18vd
+num_labels: 3
+ignore_mismatched_sizes: True

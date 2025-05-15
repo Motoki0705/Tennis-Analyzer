@@ -1,0 +1,8 @@
+paths:
+  tb_log_dir: 'C:\Users\kamim\code\Tennis-Analyzer\BallDetection\tb_logs\xception\version_4'                # event ファイルが入っているディレクトリ
+  output_img_dir: ./metric_plots       # PNG を出力する先
+  test_log_path: ./metric_plots/test_metrics.csv
+
+plot:
+  figsize: [6, 4]      # 1 グラフのサイズ (inch)
+  dpi: 150             # 画像解像度

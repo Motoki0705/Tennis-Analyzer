@@ -1,0 +1,7 @@
+_target_: src.ball.models.cat_frames.swin_448.SwinBallUNet # Corrected path
+num_keypoints: 1 # Or 3 if that's what your SwinBallUNet outputs
+in_channels: 9
+img_size: 448
+swin_model: 'swin_base_patch4_window7_224'
+pretrained: true # This will be passed to SwinBallUNet constructor
+ckpt_path: "checkpoints/ball/swin_448/best_model-v4.ckpt"

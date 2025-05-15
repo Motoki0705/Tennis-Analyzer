@@ -1,0 +1,78 @@
+defaults:
+  - _self_
+  - ball: lite_tracknet      # Ball 用モデル
+  - court: lite_tracknet     # Court 用モデル
+  - player: rt_detr          # Player 用モデル
+  - pose: vitpose_base       # Pose 用モデル
+
+
+hydra:
+  run:
+    dir: hydra_outputs/infer/${mode}/${now:%Y-%m-%d_%H-%M-%S}
+
+# --- Top-level Parameters ---
+mode: "court" # Default mode. Override with: python infer.py mode=court models=court/swin_court
+
+# --- Common Settings ---
+common:
+  device: "cpu"
+  use_half: false
+  batch_size: 1
+
+# --- Paths ---
+input_path: "data/test/video_input2.mp4" # Override this
+output_path: "outputs/${mode}/${now:%Y-%m-%d_%H-%M-%S}.mp4"
+output_jsonl_path: null
+
+# --- Processors Configurations (these don't change often based on model variant) ---
+processors:
+  player:
+    _target_: transformers.AutoImageProcessor.from_pretrained
+    pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  pose:
+    _target_: transformers.AutoImageProcessor.from_pretrained
+    pretrained_model_name_or_path: "facebook/vit-pose-base" # Example, match your pose model
+
+# --- Predictors Configurations (these now take instantiated models) ---
+predictors:
+  ball:
+    _target_: src.ball.predictor.BallPredictor
+    # Model is passed by main.py
+    input_size: [360, 640] # These params are still needed by the predictor for pre/post processing
+    heatmap_size: [360, 640]
+    num_frames: 3 # Specific to the model type (e.g. LiteBallTracker needs 3)
+    threshold: 0.6
+    visualize_mode: "overlay"
+  
+  court:
+    _target_: src.court.predictor.CourtPredictor
+    input_size: [360, 640]
+    num_keypoints: 15 # This might be specific to the model's output head (e.g. FPN outputs 1 channel)
+    threshold: 0.5
+    visualize_mode: "heatmap_channels"
+
+  player:
+    _target_: src.player.predictor.PlayerPredictor
+    # model & processor are passed by main.py
+    label_map: {0: "player"} # Adjust based on your player_detector model
+    threshold: 0.5
+
+  pose:
+    _target_: src.pose.predictor.PosePredictor
+    # det_model, det_processor, pose_model, pose_processor passed by main.py
+    player_label_id: 0 # Label ID for 'person' in the detection model
+    det_score_thresh: 0.6
+    pose_score_thresh: 0.6
+
+  multi:
+    _target_: src.multi.multi_predictor.MultiPredictor
+    # ball_predictor, court_predictor, pose_predictor are instantiated and passed by main.py
+    ball_interval: 1
+    court_interval: 1
+    pose_interval: 1
+
+  frames_annotator:
+    _target_: src.multi.frames_predictor.FrameAnnotator
+    # ball_predictor, court_predictor, pose_predictor are instantiated and passed by main.py
+    intervals: {"ball": 1, "court": 1, "pose": 1}
+    frame_fmt: "frame_{:06d}.jpg"

@@ -1,0 +1,5 @@
+_target_: src.court.models.lite_tracknet.LiteBallTracker
+in_channels: 3
+heatmap_channels: 15
+
+ckpt_path: checkpoints/court/lite_tracknet/court-epoch=49-val_loss=0.0006.ckpt

@@ -5,11 +5,11 @@ from omegaconf import DictConfig
 
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
-from src.court.models.fpn import CourtDetectorFPN
+from src.court.models.lite_tracknet import LiteBallTracker
 from src.court.trainer.cnn import CourtLModule
 from src.court.dataset.datamodule import CourtDataModule
 
-@hydra.main(version_base="1.1", config_path="configs/train/court", config_name="1_frame_shot_1_heatmap")
+@hydra.main(version_base="1.1", config_path="configs/train", config_name="court")
 def main(cfg: DictConfig):
     # データモジュール（データセットパスは空欄でユーザーが指定）
 
@@ -25,7 +25,7 @@ def main(cfg: DictConfig):
     )
 
     # モデル
-    model = CourtDetectorFPN(in_channels=3, base_ch=cfg.base_ch)
+    model = LiteBallTracker(in_channels=3, heatmap_channels=15)
 
     # LightningModule
     lmodule = CourtLModule(

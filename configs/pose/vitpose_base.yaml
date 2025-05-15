@@ -1,0 +1,2 @@
+_target_: transformers.VitPoseForPoseEstimation.from_pretrained
+pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"

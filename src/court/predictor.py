@@ -3,30 +3,31 @@ import torch
 import numpy as np
 import albumentations as A
 import logging
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Callable
 from pathlib import Path
 from tqdm import tqdm
 from scipy.special import expit
-from PIL import Image
-
-from src.court.models.fpn import CourtDetectorFPN
-from src.utils.load_model import load_model_weights
-
 
 class CourtPredictor:
+    """
+    動画フレームに対してコートのキーポイントを推論し、
+    ・円だけ重ねる overlay モード
+    ・ヒートマップを重ねる heatmap モード
+    のいずれかで動画として書き出す。
+    """
     def __init__(
         self,
-        model_path: Union[str, Path],
+        model: torch.nn.Module,
         device: str = "cpu",
         input_size: Tuple[int, int] = (256, 256),
-        num_keypoints: int = 1,
+        num_keypoints: int = 15,
         threshold: float = 0.5,
-        min_distance: int = 10,
         radius: int = 5,
         kp_color: Tuple[int, int, int] = (0, 255, 0),
-        use_half: bool = False
+        use_half: bool = False,
+        visualize_mode: str = "overlay"  # "overlay" | "heatmap" | "heatmap_channels"
     ):
-        # Logger
+        # ロガー設定
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.logger.handlers:
             handler = logging.StreamHandler()
@@ -35,17 +36,17 @@ class CourtPredictor:
         self.logger.setLevel(logging.INFO)
 
         self.device = device
-        self.input_size = input_size
+        self.num_keypoints = num_keypoints
         self.threshold = threshold
-        self.min_distance = min_distance
         self.radius = radius
         self.kp_color = kp_color
         self.use_half = use_half
-        
-        # モデルロード
-        self.model = self._load_model(model_path, num_keypoints)
+        self.visualize_mode = visualize_mode
 
-        # 変換
+        # モデル
+        self.model = model.to(self.device).eval()
+
+        # 変換パイプライン
         self.transform = A.Compose([
             A.Resize(height=input_size[0], width=input_size[1]),
             A.Normalize(mean=(0.485, 0.456, 0.406),
@@ -53,59 +54,82 @@ class CourtPredictor:
             A.pytorch.ToTensorV2()
         ])
 
-    def _load_model(self, model_path: str, num_keypoints: int) -> torch.nn.Module:
-        self.logger.info(f"Loading model with num_keypoints={num_keypoints} from {model_path}")
-        model = CourtDetectorFPN()
-        model = load_model_weights(model, model_path)
-        model = model.eval().to(self.device)
-        return model
-
-    def predict(self, frames: List[np.ndarray]) -> List[List[dict]]:
+    def predict(
+        self,
+        frames: List[np.ndarray]
+    ) -> Tuple[List[List[dict]], List[np.ndarray]]:
         """
-        入力フレーム群に対してコートキーポイント推論を行う。
-        returns: List of List of {"x": int, "y": int, "confidence": float}
+        B 枚のフレームに対して、
+        - keypoints: List[List[{"x","y","confidence"}]]
+        - raw_heatmaps: List[np.ndarray]（shape=(1,H,W) か (C,H,W)）
+        を返す。
         """
+        # 前処理 → バッチテンソル
         tensors = []
         for img in frames:
             rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             aug = self.transform(image=rgb)
             tensors.append(aug["image"])
-        batch = torch.stack(tensors).to(self.device)  # (B, C, H, W)
+        batch = torch.stack(tensors).to(self.device)
 
-        if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+        # 推論
+        with torch.no_grad():
+            if self.use_half:
+                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                    outputs = self.model(batch)
+            else:
                 outputs = self.model(batch)
-        else:
-            with torch.no_grad():
-                outputs = self.model(batch)
 
-        if outputs.ndim == 4 and outputs.shape[1] == 1:
-            heatmaps = outputs[:, 0]
-        else:
-            heatmaps = outputs.sum(dim=1)
+        # sigmoid → numpy
+        heatmaps = expit(outputs.cpu().numpy())
 
-        heatmaps = expit(heatmaps.cpu().numpy())  # シグモイド正規化
-
-        results = []
+        kps_list, hm_list = [], []
         for hm, frame in zip(heatmaps, frames):
-            keypoints = self._extract_keypoints(hm, frame.shape[:2])
-            results.append(keypoints)
+            # hm の shape によって単一 or マルチチャネルを自動判定
+            if hm.ndim == 3 and hm.shape[0] == self.num_keypoints:
+                keypoints = self._extract_keypoints_multichannel(hm, frame.shape[:2])
+            else:
+                keypoints = self._extract_keypoints_singlechannel(hm, frame.shape[:2])
+            kps_list.append(keypoints)
+            hm_list.append(hm)
+        return kps_list, hm_list
 
-        return results
+    def _extract_keypoints_multichannel(
+        self,
+        heatmaps: np.ndarray,
+        orig_shape: Tuple[int, int]
+    ) -> List[dict]:
+        """
+        各チャンネル最大値位置を 1 点ずつ取り出す。
+        """
+        H, W = orig_shape
+        _, h_hm, w_hm = heatmaps.shape
+        kps = []
+        for c in range(self.num_keypoints):
+            hm_c = heatmaps[c]
+            y, x = np.unravel_index(np.argmax(hm_c), hm_c.shape)
+            conf = float(hm_c[y, x])
+            X = int(x * W / w_hm)
+            Y = int(y * H / h_hm)
+            kps.append({"x": X, "y": Y, "confidence": conf})
+        return kps
 
-    def _extract_keypoints(self, heatmap: np.ndarray, orig_shape: Tuple[int, int]) -> List[dict]:
+    def _extract_keypoints_singlechannel(
+        self,
+        heatmap: np.ndarray,
+        orig_shape: Tuple[int, int]
+    ) -> List[dict]:
         """
-        シグモイド後のヒートマップからキーポイント座標を抽出する。
-        returns: [{"x": int, "y": int, "confidence": float}, ...]
+        単一チャネルのヒートマップから局所最大点を NMS で取り出す（従来方式）。
         """
-        h_heat, w_heat = heatmap.shape
+        h_hm, w_hm = heatmap.shape
         H, W = orig_shape
 
-        # 局所最大検出
-        kernel = np.ones((3, 3), np.uint8)
+        # 局所最大
+        kernel = np.ones((3,3), np.uint8)
         dilated = cv2.dilate(heatmap, kernel)
-        peaks_mask = (heatmap == dilated) & (heatmap > self.threshold)
-        ys, xs = np.where(peaks_mask)
+        peaks = np.where((heatmap == dilated) & (heatmap > self.threshold))
+        ys, xs = peaks
 
         # NMS
         scores = heatmap[ys, xs]
@@ -113,54 +137,72 @@ class CourtPredictor:
         selected = []
         for idx in order:
             y, x = int(ys[idx]), int(xs[idx])
-            if all(abs(y - yy) + abs(x - xx) > self.min_distance for yy, xx in selected):
+            if all(abs(y - yy) + abs(x - xx) > 5 for yy, xx in selected):
                 selected.append((y, x))
 
-        keypoints = []
+        kps = []
         for y, x in selected:
-            X = int(x * W / w_heat)
-            Y = int(y * H / h_heat)
-            confidence = float(heatmap[y, x])
-            keypoints.append({
-                "x": X,
-                "y": Y,
-                "confidence": confidence
-            })
-
-        return keypoints
+            X = int(x * W / w_hm)
+            Y = int(y * H / h_hm)
+            conf = float(heatmap[y, x])
+            kps.append({"x": X, "y": Y, "confidence": conf})
+        return kps
 
     def overlay(self, frame: np.ndarray, keypoints: List[dict]) -> np.ndarray:
         """
-        入力フレームとキーポイント群を受け取り、描画して返す。
+        円だけを重ねる。
         """
+        out = frame.copy()
         for kp in keypoints:
             if kp["confidence"] >= self.threshold:
                 cv2.circle(
-                    frame,
+                    out,
                     (kp["x"], kp["y"]),
                     self.radius,
                     self.kp_color,
                     thickness=-1,
                     lineType=cv2.LINE_AA
                 )
-        return frame
-    
+        return out
+
+    def overlay_heatmap(self, frame: np.ndarray, hm: np.ndarray) -> np.ndarray:
+        """
+        ヒートマップカラーを α ブレンドで重ねる。
+        マルチチャネル時は最大値合成して可視化。
+        """
+        if hm.ndim == 3:
+            hm_vis = hm.max(axis=0)
+        else:
+            hm_vis = hm
+
+        if hm_vis.max() > 0:
+            hm_uint8 = np.uint8(hm_vis / hm_vis.max() * 255)
+            color   = cv2.applyColorMap(hm_uint8, cv2.COLORMAP_JET)
+            color   = cv2.resize(color, (frame.shape[1], frame.shape[0]),
+                                  interpolation=cv2.INTER_LINEAR)
+            out = cv2.addWeighted(frame, 0.6, color, 0.4, 0)
+        else:
+            out = frame.copy()
+        return out
+
     def run(
         self,
         input_path: Union[str, Path],
         output_path: Union[str, Path],
-        batch_size: int = 8
+        batch_size: int = 8,
     ) -> None:
         """
-        動画を読み込み、batch_size フレームずつまとめて推論→オーバーレイし、
-        出力動画に書き出します。
+        input_path の動画を読み込み、
+        ・overlay: 円のみ重ねる
+        ・heatmap: 全チャネルを max 合成して重ねる
+        ・heatmap_channels: チャネルごとに別動画を出力
+        のいずれかで output_path に書き出す。
         """
-        input_path = Path(input_path)
+        input_path  = Path(input_path)
         output_path = Path(output_path)
-
         cap = cv2.VideoCapture(str(input_path))
         if not cap.isOpened():
-            self.logger.error(f"動画ファイルを開けませんでした: {input_path}")
+            self.logger.error(f"動画を開けません: {input_path}")
             return
 
         fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -168,39 +210,74 @@ class CourtPredictor:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        # 出力ライター準備
+        if self.visualize_mode != "heatmap_channels":
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        else:
+            # チャネル数分のライターを作る
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            stem   = output_path.stem
+            parent = output_path.parent
+            writers = [
+                cv2.VideoWriter(str(parent / f"{stem}_kp{c}.mp4"),
+                                fourcc, fps, (width, height))
+                for c in range(self.num_keypoints)
+            ]
 
         self.logger.info(
             f"読み込み完了 → フレーム数: {total}, FPS: {fps:.2f}, 解像度: {width}×{height}"
         )
 
-        batch: List[np.ndarray] = []
-        with tqdm(total=total, desc="Court 推論処理") as pbar:
-            # フレームの読み込み＋バッチ推論ループ
+        batch_frames: List[np.ndarray] = []
+        with tqdm(total=total, desc="Court 推論") as pbar:
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
+                batch_frames.append(frame)
 
-                batch.append(frame)
-                # バッチがたまったらまとめて推論
-                if len(batch) == batch_size:
-                    kps_batch = self.predict(batch)
-                    for frm, kps in zip(batch, kps_batch):
-                        overlaid = self.overlay(frm, kps)
-                        writer.write(overlaid)
+                if len(batch_frames) == batch_size:
+                    kps_batch, hm_batch = self.predict(batch_frames)
+                    for frm, kps, hm in zip(batch_frames, kps_batch, hm_batch):
+                        if self.visualize_mode == "overlay":
+                            out = self.overlay(frm, kps)
+                            writer.write(out)
+
+                        elif self.visualize_mode == "heatmap":
+                            out = self.overlay_heatmap(frm, hm)
+                            writer.write(out)
+
+                        else:  # heatmap_channels
+                            # 各チャネルごとに 2D ヒートマップを重ねて書き出し
+                            for c, w in enumerate(writers):
+                                # hm[c] が (h,w) の 2D ヒートマップ
+                                out_c = self.overlay_heatmap(frm, hm[c])
+                                w.write(out_c)
+
                         pbar.update(1)
-                    batch.clear()
+                    batch_frames.clear()
 
-            # 残りフレームの処理
-            if batch:
-                kps_batch = self.predict(batch)
-                for frm, kps in zip(batch, kps_batch):
-                    overlaid = self.overlay(frm, kps)
-                    writer.write(overlaid)
+            # 残りフレーム
+            if batch_frames:
+                kps_batch, hm_batch = self.predict(batch_frames)
+                for frm, kps, hm in zip(batch_frames, kps_batch, hm_batch):
+                    if self.visualize_mode == "overlay":
+                        writer.write(self.overlay(frm, kps))
+                    elif self.visualize_mode == "heatmap":
+                        writer.write(self.overlay_heatmap(frm, hm))
+                    else:
+                        for c, w in enumerate(writers):
+                            w.write(self.overlay_heatmap(frm, hm[c]))
                     pbar.update(1)
 
         cap.release()
-        writer.release()
-        self.logger.info(f"処理完了 → 出力ファイル: {output_path}")
+        if self.visualize_mode != "heatmap_channels":
+            writer.release()
+            self.logger.info(f"処理完了 → 出力: {output_path}")
+        else:
+            for w in writers:
+                w.release()
+            self.logger.info(
+                f"処理完了 → チャネルごとの動画を {parent}/ に出力しました"
+            )

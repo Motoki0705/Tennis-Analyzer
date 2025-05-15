@@ -1,0 +1,30 @@
+# データパス／基本設定
+annotation_file: 'data/ball/coco_annotations_ball_pose.json'
+image_root:        'data/ball/images'
+
+# 入力フレーム数、バッチサイズなど
+T: 3
+batch_size: 2
+num_workers: 8
+skip_frames_range: [1, 5]   # train 時に 1〜5 フレーム間隔でサンプリング
+input_type: "cat"      # "cat" or "stack"
+output_type: "last"     # "all" or "last"
+
+# 画像／ヒートマップのリサイズ先
+input_size:   [360, 640]
+heatmap_size: [360, 640]
+
+# モデル＆Optimizer設定
+model:
+  lr: 1e-4
+  weight_decay: 1e-4
+  warmup_epochs: 1
+  bce_weight: 0.7
+  
+# Trainer設定
+trainer:
+  max_epochs: 10
+  precision: 16                  # 16 or 32
+  default_root_dir: "logs/train_ball"
+  log_every_n_steps: 50
+  do_test: false                 # true にすると fit後に test も回す

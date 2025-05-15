@@ -1,0 +1,4 @@
+_target_: src.court.models.fpn.CourtDetectorFPN
+# in_channels: 3 # Default
+# base_ch: 64 # Default
+ckpt_path: "checkpoints/court/fpn/court-epoch=02-val_loss=0.0033.ckpt"

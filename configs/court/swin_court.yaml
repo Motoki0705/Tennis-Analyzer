@@ -1,0 +1,6 @@
+_target_: src.court.models.swin_court.SwinCourtUNet # Assuming swin_court.py
+num_keypoints: 15 # SwinCourtUNet typically outputs 15 for court
+swin_model: 'swin_base_patch4_window7_224'
+pretrained: true
+# final_channels: [64, 32] # Default
+ckpt_path: "checkpoints/court/swin/best_model-v3.ckpt"

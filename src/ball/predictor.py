@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import logging
 from pathlib import Path
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Callable
 from tqdm import tqdm
 import albumentations as A
 
@@ -14,7 +14,7 @@ from src.utils.load_model import load_model_weights
 class BallPredictor:
     def __init__(
         self,
-        ckpt_path: Union[str, Path],
+        model: Callable,
         input_size: Tuple[int, int],
         heatmap_size: Tuple[int, int],
         num_frames: int,
@@ -42,9 +42,8 @@ class BallPredictor:
         self.feature_layer = feature_layer
         self.use_half = use_half  # ★ 追加
 
-        # ────────── モデルロード ──────────
-        self.model = self._load_model(ckpt_path)
-        self.model.eval().to(self.device)
+        # ────────── モデル ──────────
+        self.model = model.eval()
 
         # ────────── 前処理定義 ──────────
         self.transform = A.Compose([
@@ -52,14 +51,6 @@ class BallPredictor:
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             A.pytorch.ToTensorV2()
         ])
-
-    def _load_model(self, ckpt_path: Union[str, Path]) -> torch.nn.Module:
-        self.logger.info(f"Loading model from {ckpt_path}")
-        model = LiteBallTracker()
-        model = load_model_weights(model, ckpt_path)
-        sample_param = next(model.parameters()).detach().cpu().numpy().ravel()[:5]
-        self.logger.info(f"  → sample weights: {sample_param}")
-        return model
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
         tens_list = []
