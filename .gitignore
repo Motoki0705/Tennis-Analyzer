@@ -189,3 +189,6 @@ outputs/
 # logs
 tb_logs/
 logs/
+
+# all code
+all_code/
