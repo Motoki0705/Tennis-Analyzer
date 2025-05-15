@@ -1,4 +1,0 @@
-_target_: src.ball.models.video.3D_UNet.UNet3D
-in_ch: 3
-base_ch: 32
-t_frames: 3

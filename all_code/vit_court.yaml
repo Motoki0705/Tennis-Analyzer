@@ -1,3 +1,0 @@
-_target_: src.court.models.vit_court.ViTCourt
-num_keypoints: 15
-pretrained_model: "google/vit-base-patch16-224-in21k"

@@ -1,6 +1,0 @@
-_target_: src.court.models.swin_384_court.SwinCourtUNet
-num_keypoints: 15
-final_channels: [64, 32]
-swin_model: 'swin_base_patch4_window7_224'
-pretrained: True
-img_size: 384

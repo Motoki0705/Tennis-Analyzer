@@ -1,3 +1,0 @@
-_target_: src.ball.models.video.TSformer_ball.TimeSformerBall
-num_keypoints: 1
-pretrained_model: 'facebook/timesformer-base-finetuned-k400'

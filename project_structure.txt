@@ -1,4 +1,84 @@
 ├── README.md
+├── all_code
+│   ├── LSTM_UNet.py
+│   ├── TSformer_ball.py
+│   ├── UNet_3D.py
+│   ├── auto_court_annotator.py
+│   ├── cat_frames_trainer.py
+│   ├── change_ball_range.py
+│   ├── check_multi_annotation.py
+│   ├── clip_dataset.py
+│   ├── clip_visualizer.py
+│   ├── clipwise_player_tracking.py
+│   ├── cnn.py
+│   ├── coco_bbox.py
+│   ├── coco_dataset.py
+│   ├── colormap.py
+│   ├── const.py
+│   ├── copy_to_flatten_src.py
+│   ├── court_dataset.py
+│   ├── cpu_core.py
+│   ├── datamodule.py
+│   ├── datamodule_1.py
+│   ├── datamodule_2.py
+│   ├── datamodule_3.py
+│   ├── dataset_convertor.py
+│   ├── detr.py
+│   ├── feature_gru.py
+│   ├── fpn.py
+│   ├── frames_predictor.py
+│   ├── freeze_param.py
+│   ├── generate_dataset_json.py
+│   ├── generate_final_dataset.py
+│   ├── generate_pose.py
+│   ├── heatmap.py
+│   ├── keypoint_dataset.py
+│   ├── lite_tracknet.py
+│   ├── lite_tracknet_1.py
+│   ├── load_model.py
+│   ├── merge_coco_datasets.py
+│   ├── mobile_gru_unet.py
+│   ├── mobile_trans.py
+│   ├── mobilenet.py
+│   ├── multi_predictor.py
+│   ├── orig_to_coco.py
+│   ├── person_detector_conditional_detr.py
+│   ├── predictor.py
+│   ├── predictor_1.py
+│   ├── predictor_2.py
+│   ├── predictor_3.py
+│   ├── predictor_4.py
+│   ├── prepare_transform.py
+│   ├── prepare_transform_1.py
+│   ├── prerare_teansforms.py
+│   ├── prerare_teansforms_1.py
+│   ├── regression_dataset.py
+│   ├── regression_trainer.py
+│   ├── save_tree.py
+│   ├── seq_key_dataset.py
+│   ├── specify_players.py
+│   ├── specipy_player_by_FT_detr.py
+│   ├── swin_384_court.py
+│   ├── swin_448.py
+│   ├── swin_court.py
+│   ├── swin_layer.py
+│   ├── swin_v2_256_court.py
+│   ├── track_clip_globally.py
+│   ├── tracknet.py
+│   ├── train_vit_court.py
+│   ├── uniformer.py
+│   ├── uniformer_1.py
+│   ├── utils.py
+│   ├── video_predictor.py
+│   ├── video_trainer.py
+│   ├── visualize.py
+│   ├── visualize_1.py
+│   ├── visualize_dataset.py
+│   ├── visualize_tb_logs.py
+│   ├── vit_court.py
+│   ├── vit_court_1.py
+│   ├── xception.py
+│   └── xy_keypoint.py
 ├── checkpoints
 │   ├── ball
 │   │   ├── lite_tracknet
@@ -27,6 +107,8 @@
 │   │   ├── fpn
 │   │   │   ├── court-epoch=00-val_loss=0.0042.ckpt
 │   │   │   └── court-epoch=02-val_loss=0.0033.ckpt
+│   │   ├── lite_tracknet
+│   │   │   └── court-epoch=49-val_loss=0.0006.ckpt
 │   │   ├── swin
 │   │   │   ├── best_model-v1.ckpt
 │   │   │   └── best_model-v3.ckpt
@@ -45,11 +127,11 @@
 │   └── pose
 ├── configs
 │   ├── annotations
+│   ├── ball
+│   ├── court
 │   ├── infers
-│   ├── models
-│   │   ├── ball
-│   │   ├── court
-│   │   └── player
+│   ├── player
+│   ├── pose
 │   └── train
 ├── data
 │   ├── annotation_structure.md
@@ -163,19 +245,36 @@
 │   ├── court
 │   │   └── images
 │   └── test
-├── infer_ball.py
-├── infer_court.py
-├── infer_frames.py
-├── infer_multi.py
-├── infer_player.py
-├── infer_pose.py
+├── hydra_outputs
+│   └── infer
+│       ├── ball
+│       │   ├── 2025-05-15_15-51-17
+│       │   ├── 2025-05-15_15-53-28
+│       │   ├── 2025-05-15_15-58-00
+│       │   ├── 2025-05-15_16-00-16
+│       │   └── 2025-05-15_16-02-36
+│       └── court
+│           ├── 2025-05-15_16-03-42
+│           ├── 2025-05-15_16-05-34
+│           ├── 2025-05-15_16-06-19
+│           ├── 2025-05-15_16-08-01
+│           ├── 2025-05-15_16-10-26
+│           ├── 2025-05-15_16-11-05
+│           ├── 2025-05-15_16-12-58
+│           ├── 2025-05-15_16-15-11
+│           ├── 2025-05-15_16-16-48
+│           ├── 2025-05-15_16-38-21
+│           ├── 2025-05-15_16-38-54
+│           ├── 2025-05-15_16-39-04
+│           ├── 2025-05-15_17-15-49
+│           └── 2025-05-15_17-18-36
+├── infer.py
 ├── infer_video.ball.py
 ├── logs
 │   └── train_ball
 │       └── lightning_logs
 │           ├── version_0
 │           └── version_1
-├── project_overview.md
 ├── samples
 ├── src
 │   ├── annotation
@@ -317,6 +416,7 @@
 │       ├── colormap.py
 │       ├── copy_to_flatten_src.py
 │       ├── load_model.py
+│       ├── model_factory.py
 │       ├── save_tree.py
 │       ├── transforms
 │       │   ├── coco_bbox.py
@@ -324,5 +424,4 @@
 │       └── visualize_tb_logs.py
 ├── train_ball.py
 ├── train_court.py
-├── train_lite.py
 └── train_player.py
