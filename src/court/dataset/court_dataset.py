@@ -6,8 +6,8 @@ from typing import Tuple
 import os
 import json
 import numpy as np
-
 from src.court.utils.visualize_dataset import visualize_overlay
+
 
 class CourtDataset(Dataset):
     def __init__(self, annotation_path, image_root, input_size=(360, 640), heatmap_size=(360, 640), default_num_keypoints=15, transform=None, sigma=2, is_each_keypoint=True):
@@ -17,7 +17,6 @@ class CourtDataset(Dataset):
         self.default_num_keypoints = default_num_keypoints
         self.sigma = sigma
         self.is_each_keypoint = is_each_keypoint
-
         # Provide default transforms if none are given (resize, normalize, to_tensor)
         if transform is not None:
             self.transform = transform
@@ -34,7 +33,7 @@ class CourtDataset(Dataset):
             A.Normalize(),
             A.pytorch.ToTensorV2()
         ], keypoint_params=A.KeypointParams(format="xy", remove_invisible=False))
-    
+
     def __len__(self):
         return len(self.data)
 
@@ -54,8 +53,8 @@ class CourtDataset(Dataset):
 
         if keypoints.size(0) != default_num_keypoints:
             raise ValueError(f"Keypoint count mismatch before augmentation.\n"
-                             f"Actual: {keypoints.size(0)}\n"
-                             f"Expected: {default_num_keypoints}\n")
+                            f"Actual: {keypoints.size(0)}\n"
+                            f"Expected: {default_num_keypoints}\n")
 
         # Apply data augmentation (resizing, normalizing, to_tensor)
         image = np.array(image)
@@ -65,8 +64,8 @@ class CourtDataset(Dataset):
         arged_keypoints: torch.Tensor = torch.tensor(arged_keypoints)
         if arged_keypoints.size(0) != default_num_keypoints:
             raise ValueError(f"Keypoint count mismatch after augmentation.\n"
-                             f"After: {arged_keypoints.size(0)}\n"
-                             f"Expected: {default_num_keypoints}\n")
+                            f"After: {arged_keypoints.size(0)}\n"
+                            f"Expected: {default_num_keypoints}\n")
 
         # Set visibility = 0 for keypoints outside the image
         self.filtering_outside_screen_keypoints(arged_keypoints, self.input_size)
@@ -151,7 +150,7 @@ class CourtDataset(Dataset):
         scaled_keypoints[:, 1] *= scale_y
 
         return scaled_keypoints        
-    
+
     def draw_each_gaussian(self, heatmap, center, sigma=2):
         """Draw a 2D Gaussian on the heatmap centered at the given point.
 
@@ -186,7 +185,7 @@ class CourtDataset(Dataset):
             g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
         )
         return heatmap
-
+    
 if __name__ == '__main__':
     json_path = r"C:\Users\kamim\code\Tennis-Analyzer\data\court\converted_train.json"
     image_root = r"C:\Users\kamim\code\Tennis-Analyzer\data\court\images"

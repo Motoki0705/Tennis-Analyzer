@@ -127,7 +127,7 @@ def get_predictor(cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] 
 # ╭──────────────────────────────────────────────────╮
 # │  4. メイン                                      │
 # ╰──────────────────────────────────────────────────╯
-@hydra.main(config_path="configs", config_name="infer", version_base="1.2")
+@hydra.main(config_path="infer/configs", config_name="infer", version_base="1.2")
 def main(cfg: DictConfig):
     logger.info("Starting inference…")
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg, resolve=True)}")
@@ -178,7 +178,7 @@ def main(cfg: DictConfig):
                 cfg.predictors.multi,
                 ball_predictor=ball_pred,
                 court_predictor=court_pred,
-                pose_predictor=pose_pred,
+                pose_predictor=pose_pred
             )
             if not out_path:
                 out_path = inp.with_name(f"{inp.stem}_multi.mp4")

@@ -18,7 +18,7 @@ class CourtLModule(pl.LightningModule):
         self.model = model
         self.save_hyperparameters(ignore=["model"])
 
-        self.bce = nn.BCEWithLogitsLoss()
+        self.mse = nn.MSELoss()
 
     def forward(self, x):
         return self.model(x)
@@ -26,7 +26,7 @@ class CourtLModule(pl.LightningModule):
     def common_step(self, batch, batch_idx, stage: str):
         frames, heatmaps = batch  # frames: [B, C, H, W], heatmaps: [B, 1, H_out, W_out]
         preds = self(frames)
-        loss = self.bce(preds, heatmaps)
+        loss = self.mse(preds, heatmaps)
 
         self.log(
             f"{stage}_loss",

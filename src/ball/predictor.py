@@ -84,6 +84,14 @@ class BallPredictor:
             xb, yb = self._to_original_scale((xh, yh), self.heatmap_size, clip[-1].shape[:2])
             conf = float(np.max(heat))
             results.append({"x": xb, "y": yb, "confidence": conf})
+
+        # 外れ値の除去
+        if len(results) >= 2:
+            results = self.remove_jumps(results)
+
+        # 欠損地の線形補完
+        if len(results) >= 3:
+            results = self.interpolate_track(results)
         return results
 
     def _extract_feature_sequence(self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]) -> List[np.ndarray]:
@@ -216,3 +224,55 @@ class BallPredictor:
         w_to, h_to = to_size
         x, y = coord
         return int(x * w_to / w_from), int(y * h_to / h_from)
+    
+    @staticmethod
+    def remove_jumps(track, max_dist=80):
+        """
+        大きく飛ぶ箇所を除外する
+        Args:
+            track: [{'x':..., 'y':..., 'confidence':...}, ...]
+            max_dist: 許容最大距離（ピクセル）
+        Returns:
+            track: 同形式で、ジャンプ地点は{'x':None, 'y':None, 'confidence':0.0}
+        """
+        cleaned = [track[0]]
+        for prev, curr in zip(track, track[1:]):
+            if prev["x"] is not None and curr["x"] is not None:
+                dist = distance.euclidean((prev["x"], prev["y"]), (curr["x"], curr["y"]))
+                if dist > max_dist:
+                    curr = {'x': None, 'y': None, 'confidence': 0.0}
+            cleaned.append(curr)
+        return cleaned
+
+    @staticmethod
+    def interpolate_track(track):
+        """
+        線形補完によってNoneを埋める
+        Args:
+            track: [{'x':..., 'y':..., 'confidence':...}, ...]
+        Returns:
+            track: 補完済みの同形式リスト
+        """
+        xs = np.array([p['x'] if p['x'] is not None else np.nan for p in track])
+        ys = np.array([p['y'] if p['y'] is not None else np.nan for p in track])
+        confs = np.array([p['confidence'] for p in track])
+
+        def interp_nan(arr):
+            nans = np.isnan(arr)
+            if nans.all():
+                return arr
+            arr[nans] = np.interp(np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans])
+            return arr
+
+        xs = interp_nan(xs)
+        ys = interp_nan(ys)
+        # confidenceは補完せず、元の値を維持
+
+        # nan全体の場合は全てNone
+        result = []
+        for x, y, c in zip(xs, ys, confs):
+            if np.isnan(x) or np.isnan(y):
+                result.append({'x': None, 'y': None, 'confidence': 0.0})
+            else:
+                result.append({'x': int(round(x)), 'y': int(round(y)), 'confidence': c})
+        return result

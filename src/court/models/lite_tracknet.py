@@ -153,7 +153,7 @@ class LiteBallTracker(nn.Module):
         out = self.head(torch.cat([d1, s1], dim=1))  # → (B, 1, H, W)
         # Sigmoid をかけてヒートマップにする場合は以下を有効化:
         # out = torch.sigmoid(out)
-        return out.squeeze(1)
+        return out
 
 if __name__ == "__main__":
     # テスト実行例

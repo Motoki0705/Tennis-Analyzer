@@ -42,10 +42,8 @@ def collect_files_by_extension(
                     shutil.copy(src_path, dst_path)
 
 collect_files_by_extension(
-    src_dirs=['src', 'configs'],     # 収集対象のフォルダ
-    dst_dir='all_code',                         # 保存先
+    src_dirs=['TrackNet'],     # 収集対象のフォルダ
+    dst_dir='ballgit',                         # 保存先
     extensions=['.py', '.yaml'],                   # 対象拡張子
     exclude_filenames=['__init__.py']
 )
-import hydra 
-hydra.utils.instantiate

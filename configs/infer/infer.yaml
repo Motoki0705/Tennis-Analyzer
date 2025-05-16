@@ -70,9 +70,13 @@ predictors:
     ball_interval: 1
     court_interval: 1
     pose_interval: 1
+    ball_batch_size: 16  # Default to 1 if not specified, matching old behavior
+    court_batch_size: 16
+    pose_batch_size: 16
 
   frames_annotator:
     _target_: src.multi.frames_predictor.FrameAnnotator
     # ball_predictor, court_predictor, pose_predictor are instantiated and passed by main.py
     intervals: {"ball": 1, "court": 1, "pose": 1}
+    batch_size: {"ball": 16, "court": 16, "poose": 16}
     frame_fmt: "frame_{:06d}.jpg"

@@ -20,7 +20,8 @@ def main(cfg: DictConfig):
         num_workers=cfg.num_workers,
         input_size=[360, 640],
         heatmap_size=[360, 640],
-        default_num_keypoints=cfg.default_num_keypoints,
+        default_keypoints=cfg.default_keypoints,
+        is_each_keypoint=cfg.is_each_keypoint,
         sigma=cfg.sigma,
     )
 

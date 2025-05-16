@@ -3,7 +3,8 @@ image_root: 'data\court\images'
 batch_size: 8
 num_workers: 8
 base_ch: 64
-default_num_keypoints: 15
+default_keypoints: 15
+is_each_keypoint: True
 sigma: 2
 
 lr: 1e-4
