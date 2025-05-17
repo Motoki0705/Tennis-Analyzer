@@ -127,7 +127,7 @@ def get_predictor(cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] 
 # ╭──────────────────────────────────────────────────╮
 # │  4. メイン                                      │
 # ╰──────────────────────────────────────────────────╯
-@hydra.main(config_path="infer/configs", config_name="infer", version_base="1.2")
+@hydra.main(config_path="configs/infer", config_name="infer", version_base="1.2")
 def main(cfg: DictConfig):
     logger.info("Starting inference…")
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg, resolve=True)}")
@@ -135,7 +135,11 @@ def main(cfg: DictConfig):
     mode = cfg.mode
     inp = Path(to_absolute_path(cfg.input_path))
     out_cfg = cfg.get("output_path")
-    out_path = Path(to_absolute_path(out_cfg)) if out_cfg else None
+    raw_out = cfg.get("output_path")
+    if mode == "frames" and raw_out:
+        out_path = Path(to_absolute_path(raw_out)).with_suffix("")
+    else:
+        out_path = Path(to_absolute_path(raw_out)) if raw_out else None
     batch = cfg.common.batch_size
     device = cfg.common.device
 
@@ -195,8 +199,8 @@ def main(cfg: DictConfig):
             if not out_path:
                 out_path = inp.with_name(f"{inp.stem}_frames")
             out_path.mkdir(parents=True, exist_ok=True)
-            jsonl_cfg = cfg.get("output_jsonl_path")
-            jsonl_path = Path(to_absolute_path(jsonl_cfg)) if jsonl_cfg else out_path / "annotations.jsonl"
+            jsonl_cfg = cfg.get("output_json_path")
+            jsonl_path = Path(to_absolute_path(jsonl_cfg)) if jsonl_cfg else out_path / "annotations.json"
             logger.info(f"[frames] Dir: {out_path}, JSONL: {jsonl_path}")
             frames_ann.run(inp, out_path, jsonl_path)
 

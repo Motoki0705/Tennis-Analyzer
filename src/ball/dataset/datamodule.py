@@ -1,27 +1,39 @@
 import os
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from typing import Optional, Tuple, Callable, Union, List
 from pathlib import Path
+import random
+from typing import Optional, Tuple, Callable, Union, List
+
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
+import albumentations as A
 
 from src.ball.dataset.seq_key_dataset import SequenceKeypointDataset
+from src.ball.dataset.seq_coord_dataset import SequenceCoordDataset  # コーディネート回帰版
 from src.ball.arguments.prepare_transform import prepare_transform
 
+
 class TennisBallDataModule(pl.LightningDataModule):
+    """
+    DataModule: ヒートマップ型 or 回帰型 を選択できます。
+    dataset_type="heatmap"  → SequenceKeypointDataset
+    dataset_type="coord"    → SequenceCoordDataset
+    """
     def __init__(
-            self,
-            annotation_file: Union[str, Path] = r"data\annotation_jsons\coco_annotations_globally_tracked.json",
-            image_root: Union[str, Path] = r"data/images",
-            T: int = 3,
-            batch_size: int = 32,
-            num_workers: int = 8,
-            input_size: List[int] = [512, 512],
-            heatmap_size: List[int] = [512, 512],
-            skip_frames_range: List[int] = [1, 5],
-            input_type: str = "cat",
-            output_type: str = "all"
-                    ):
+        self,
+        annotation_file: Union[str, Path] = r"data/annotation_jsons/coco_annotations_globally_tracked.json",
+        image_root: Union[str, Path] = r"data/images",
+        T: int = 3,
+        batch_size: int = 32,
+        num_workers: int = 8,
+        input_size: List[int] = [512, 512],
+        heatmap_size: List[int] = [512, 512],
+        skip_frames_range: Tuple[int,int] = (1, 5),
+        input_type: str = "cat",
+        output_type: str = "all",
+        dataset_type: str = "heatmap",  # "heatmap" or "coord"
+    ):
         super().__init__()
+        assert dataset_type in {"heatmap", "coord"}, "`dataset_type` must be 'heatmap' or 'coord'"
         self.annotation_file = annotation_file
         self.image_root = image_root
         self.T = T
@@ -32,56 +44,64 @@ class TennisBallDataModule(pl.LightningDataModule):
         self.skip_frames_range = skip_frames_range
         self.input_type = input_type
         self.output_type = output_type
+        self.dataset_type = dataset_type
 
-    def setup(self, stage=None):
-        # transformの初期化
+    def setup(self, stage: Optional[str] = None):
+        # transformの準備
         train_transform, val_test_transform = prepare_transform(self.input_size)
 
-        # モードによってデータを切り替え
-        if stage in (None, "fit"):        
-            self.train_dataset = self._prepare_dataset(
-                split="train",
-                transform=train_transform
+        # fitフェーズ
+        if stage in (None, "fit"):
+            self.train_dataset = self._prepare_dataset("train", train_transform)
+            self.val_dataset   = self._prepare_dataset("val",   val_test_transform)
+
+        # testフェーズ
+        if stage in (None, "test"):
+            self.test_dataset  = self._prepare_dataset("test",  val_test_transform)
+
+    def _prepare_dataset(self, split: str, transform: A.ReplayCompose):
+        if self.dataset_type == "heatmap":
+            # ヒートマップ学習用データセット
+            return SequenceKeypointDataset(
+                annotation_file   = self.annotation_file,
+                image_root        = self.image_root,
+                T                 = self.T,
+                input_size        = self.input_size,
+                heatmap_size      = self.heatmap_size,
+                transform         = transform,
+                split             = split,
+                skip_frames_range = self.skip_frames_range,
+                input_type        = self.input_type,
+                output_type       = self.output_type,
+            )
+        else:
+            # 座標回帰用データセット
+            return SequenceCoordDataset(
+                annotation_file   = self.annotation_file,
+                image_root        = self.image_root,
+                T                 = self.T,
+                input_size        = self.input_size,
+                transform         = transform,
+                split             = split,
+                skip_frames_range = self.skip_frames_range,
+                input_type        = self.input_type,
+                output_type       = self.output_type,
             )
 
-            self.val_dataset = self._prepare_dataset(
-                split="val",
-                transform=val_test_transform
-            )
-        elif stage in (None, "test"):
-            self.test_dataset = self._prepare_dataset(
-                split="test",
-                transform=val_test_transform
-            )
-
-    def _prepare_dataset(self, split, transform):
-        return SequenceKeypointDataset(
-            annotation_file=self.annotation_file,
-            image_root=self.image_root,
-            T=self.T,
-            transform=transform,
-            input_size=self.input_size,
-            heatmap_size=self.heatmap_size,
-            split=split,
-            skip_frames_range=self.skip_frames_range,
-            input_type=self.input_type,
-            output_type=self.output_type
-        )
-    
     def train_dataloader(self):
-        return self._prepare_dataloader(self.train_dataset, shuffle=True)
+        return self._make_dataloader(self.train_dataset, shuffle=True)
 
     def val_dataloader(self):
-        return self._prepare_dataloader(self.val_dataset, shuffle=False)
+        return self._make_dataloader(self.val_dataset, shuffle=False)
 
     def test_dataloader(self):
-        return self._prepare_dataloader(self.test_dataset, shuffle=False)
-    
-    def _prepare_dataloader(self, dataset, shuffle):
+        return self._make_dataloader(self.test_dataset, shuffle=False)
+
+    def _make_dataloader(self, dataset, shuffle: bool):
         return DataLoader(
-            dataset=dataset,
-            batch_size=self.batch_size,
-            shuffle=shuffle,
-            num_workers=self.num_workers,
-            pin_memory=True,
+            dataset     = dataset,
+            batch_size  = self.batch_size,
+            shuffle     = shuffle,
+            num_workers = self.num_workers,
+            pin_memory  = True,
         )

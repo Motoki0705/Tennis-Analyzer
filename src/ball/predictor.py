@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Tuple, List, Union, Callable
 from tqdm import tqdm
 import albumentations as A
+from scipy.spatial import distance
 
 from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
 from src.utils.load_model import load_model_weights

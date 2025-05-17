@@ -1,347 +1,146 @@
-├── README.md
-├── checkpoints
-│   ├── ball
-│   │   ├── lite_tracknet
-│   │   │   ├── lite_tracknet-epoch=08-val_loss=0.0561.ckpt
-│   │   │   └── lite_tracknet-epoch=46-val_loss=0.0000.ckpt
-│   │   ├── mobilenet
-│   │   │   └── mobilenet-epoch=18-val_loss=0.0032.ckpt
-│   │   ├── swin_448
-│   │   │   ├── best_model-v1.ckpt
-│   │   │   ├── best_model-v3.ckpt
-│   │   │   └── best_model-v4.ckpt
-│   │   ├── tracknet
-│   │   │   ├── tracknet-epoch=06-val_loss=0.4539.ckpt
-│   │   │   └── tracknet-epoch=36-val_loss=0.0000.ckpt
-│   │   ├── uniformer
-│   │   ├── video
-│   │   │   └── 3DUnet
-│   │   │       ├── ball3d-epoch=00-val_loss=0.3972.ckpt
-│   │   │       └── ball3d-epoch=01-val_loss=0.2345.ckpt
-│   │   ├── xception
-│   │   │   ├── xception-v2.ckpt
-│   │   │   └── xception.ckpt
-│   │   └── xception_n_frames
-│   │       └── best_model-v1.ckpt
-│   ├── court
-│   │   ├── fpn
-│   │   │   ├── court-epoch=00-val_loss=0.0042.ckpt
-│   │   │   └── court-epoch=02-val_loss=0.0033.ckpt
-│   │   ├── lite_tracknet
-│   │   │   └── court-epoch=49-val_loss=0.0006.ckpt
-│   │   ├── swin
-│   │   │   ├── best_model-v1.ckpt
-│   │   │   └── best_model-v3.ckpt
-│   │   └── swin_v2
-│   │       └── best_model.ckpt
-│   ├── player
-│   │   ├── conditional_detr_self_training
-│   │   │   ├── conditional_detrepoch=02-val_loss=0.00.ckpt
-│   │   │   └── conditional_detrepoch=06-val_loss_total=0.76.ckpt
-│   │   ├── conditional_detr_tracking
-│   │   │   ├── conditional_detr_trackedepoch=00-val_loss_total=0.92.ckpt
-│   │   │   └── conditional_detr_trackedepoch=01-val_loss_total=0.72.ckpt
-│   │   └── rt_detr_tracking
-│   │       ├── best-epoch=05-val_loss_total=2.2782.ckpt
-│   │       └── rt_detr_trackepoch=02-val_loss_total=3.29.ckpt
-│   └── pose
-├── configs
-│   ├── annotations
-│   ├── ball
-│   ├── court
-│   ├── infers
-│   ├── player
-│   ├── pose
-│   └── train
-├── data
-│   ├── annotation_structure.md
-│   ├── ball
-│   │   └── images
-│   │       ├── game1
-│   │       │   ├── Clip1
-│   │       │   ├── Clip10
-│   │       │   ├── Clip11
-│   │       │   ├── Clip12
-│   │       │   ├── Clip13
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       ├── game10
-│   │       │   ├── Clip1
-│   │       │   ├── Clip10
-│   │       │   ├── Clip11
-│   │       │   ├── Clip12
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       ├── game2
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   └── Clip8
-│   │       ├── game3
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       ├── game4
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   └── Clip7
-│   │       ├── game5
-│   │       │   ├── Clip1
-│   │       │   ├── Clip10
-│   │       │   ├── Clip11
-│   │       │   ├── Clip12
-│   │       │   ├── Clip13
-│   │       │   ├── Clip14
-│   │       │   ├── Clip15
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       ├── game6
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   └── Clip4
-│   │       ├── game7
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       ├── game8
-│   │       │   ├── Clip1
-│   │       │   ├── Clip2
-│   │       │   ├── Clip3
-│   │       │   ├── Clip4
-│   │       │   ├── Clip5
-│   │       │   ├── Clip6
-│   │       │   ├── Clip7
-│   │       │   ├── Clip8
-│   │       │   └── Clip9
-│   │       └── game9
-│   │           ├── Clip1
-│   │           ├── Clip2
-│   │           ├── Clip3
-│   │           ├── Clip4
-│   │           ├── Clip5
-│   │           ├── Clip6
-│   │           ├── Clip7
-│   │           ├── Clip8
-│   │           └── Clip9
-│   ├── court
-│   │   └── images
-│   └── test
-├── hydra_outputs
-│   └── infer
-│       ├── ball
-│       │   ├── 2025-05-15_15-51-17
-│       │   ├── 2025-05-15_15-53-28
-│       │   ├── 2025-05-15_15-58-00
-│       │   ├── 2025-05-15_16-00-16
-│       │   └── 2025-05-15_16-02-36
-│       └── court
-│           ├── 2025-05-15_16-03-42
-│           ├── 2025-05-15_16-05-34
-│           ├── 2025-05-15_16-06-19
-│           ├── 2025-05-15_16-08-01
-│           ├── 2025-05-15_16-10-26
-│           ├── 2025-05-15_16-11-05
-│           ├── 2025-05-15_16-12-58
-│           ├── 2025-05-15_16-15-11
-│           ├── 2025-05-15_16-16-48
-│           ├── 2025-05-15_16-38-21
-│           ├── 2025-05-15_16-38-54
-│           ├── 2025-05-15_16-39-04
-│           ├── 2025-05-15_17-15-49
-│           └── 2025-05-15_17-18-36
-├── infer.py
-├── infer_video.ball.py
-├── logs
-│   └── train_ball
-│       └── lightning_logs
-│           ├── version_0
-│           └── version_1
-├── samples
-├── src
-│   ├── annotation
-│   │   ├── auto_court_annotator.py
-│   │   ├── change_ball_range.py
-│   │   ├── check_multi_annotation.py
-│   │   ├── const.py
-│   │   └── generate_pose.py
-│   ├── ball
+├── annotation
+│   ├── auto_court_annotator.py
+│   ├── change_ball_range.py
+│   ├── check_multi_annotation.py
+│   ├── const.py
+│   └── generate_pose.py
+├── ball
+│   ├── __init__.py
+│   ├── arguments
 │   │   ├── __init__.py
-│   │   ├── arguments
-│   │   │   ├── __init__.py
-│   │   │   └── prepare_transform.py
-│   │   ├── dataset
-│   │   │   ├── __init__.py
-│   │   │   ├── create
-│   │   │   │   ├── generate_final_dataset.py
-│   │   │   │   ├── merge_coco_datasets.py
-│   │   │   │   ├── orig_to_coco.py
-│   │   │   │   ├── person_detector_conditional_detr.py
-│   │   │   │   └── specify_players.py
-│   │   │   ├── datamodule.py
-│   │   │   ├── keypoint_dataset.py
-│   │   │   ├── regression_dataset.py
-│   │   │   └── seq_key_dataset.py
-│   │   ├── demo
-│   │   │   ├── cpu_core.py
-│   │   │   ├── swin_layer.py
-│   │   │   └── uniformer.py
-│   │   ├── models
-│   │   │   ├── __init__.py
-│   │   │   ├── cat_frames
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── lite_tracknet.py
-│   │   │   │   ├── swin_448.py
-│   │   │   │   ├── tracknet.py
-│   │   │   │   └── xception.py
-│   │   │   ├── single_frame
-│   │   │   │   └── mobilenet.py
-│   │   │   └── video
-│   │   │       ├── LSTM_UNet.py
-│   │   │       ├── TSformer_ball.py
-│   │   │       ├── UNet_3D.py
-│   │   │       ├── __init__.py
-│   │   │       ├── mobile_gru_unet.py
-│   │   │       ├── mobile_trans.py
-│   │   │       └── uniformer.py
-│   │   ├── predictor.py
-│   │   ├── trainer
-│   │   │   ├── __init__.py
-│   │   │   ├── cat_frames_trainer.py
-│   │   │   ├── freeze_param.py
-│   │   │   ├── regression_trainer.py
-│   │   │   └── video_trainer.py
-│   │   ├── utils
-│   │   │   ├── __inti__.py
-│   │   │   ├── generate_dataset_json.py
-│   │   │   ├── heatmap.py
-│   │   │   └── visualize.py
-│   │   └── video_predictor.py
-│   ├── court
+│   │   └── prepare_transform.py
+│   ├── dataset
 │   │   ├── __init__.py
-│   │   ├── arguments
+│   │   ├── create
+│   │   │   ├── generate_final_dataset.py
+│   │   │   ├── merge_coco_datasets.py
+│   │   │   ├── orig_to_coco.py
+│   │   │   ├── person_detector_conditional_detr.py
+│   │   │   └── specify_players.py
+│   │   ├── datamodule.py
+│   │   ├── keypoint_dataset.py
+│   │   ├── regression_dataset.py
+│   │   └── seq_key_dataset.py
+│   ├── demo
+│   │   ├── cpu_core.py
+│   │   ├── swin_layer.py
+│   │   └── uniformer.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   ├── cat_frames
 │   │   │   ├── __init__.py
-│   │   │   └── prerare_teansforms.py
-│   │   ├── dataset
-│   │   │   ├── __init__.py
-│   │   │   ├── court_dataset.py
-│   │   │   └── datamodule.py
-│   │   ├── models
-│   │   │   ├── __init__.py
-│   │   │   ├── fpn.py
 │   │   │   ├── lite_tracknet.py
-│   │   │   ├── swin_384_court.py
-│   │   │   ├── swin_court.py
-│   │   │   ├── swin_v2_256_court.py
-│   │   │   └── vit_court.py
-│   │   ├── predictor.py
-│   │   ├── trainer
-│   │   │   ├── __init__.py
-│   │   │   ├── cnn.py
-│   │   │   ├── train_vit_court.py
-│   │   │   └── vit_court.py
-│   │   └── utils
+│   │   │   ├── swin_448.py
+│   │   │   ├── tracknet.py
+│   │   │   └── xception.py
+│   │   ├── single_frame
+│   │   │   └── mobilenet.py
+│   │   └── video
+│   │       ├── LSTM_UNet.py
+│   │       ├── TSformer_ball.py
+│   │       ├── UNet_3D.py
 │   │       ├── __init__.py
-│   │       ├── dataset_convertor.py
-│   │       ├── utils.py
-│   │       └── visualize_dataset.py
-│   ├── event
-│   │   ├── argument
-│   │   ├── dataset
-│   │   ├── models
-│   │   │   └── feature_gru.py
-│   │   ├── predictor.py
-│   │   └── trainer
-│   ├── multi
-│   │   ├── arguments
-│   │   │   └── prerare_teansforms.py
-│   │   ├── dataset
-│   │   │   ├── clip_dataset.py
-│   │   │   └── datamodule.py
-│   │   ├── frames_predictor.py
-│   │   ├── models
-│   │   ├── multi_predictor.py
-│   │   ├── trainers
-│   │   └── utils
-│   ├── new_dataset
-│   ├── player
+│   │       ├── mobile_gru_unet.py
+│   │       ├── mobile_trans.py
+│   │       └── uniformer.py
+│   ├── predictor.py
+│   ├── trainer
 │   │   ├── __init__.py
-│   │   ├── arguments
-│   │   │   └── prepare_transform.py
-│   │   ├── configs
-│   │   │   ├── data
-│   │   │   ├── model
-│   │   │   ├── model_trainer
-│   │   │   ├── processor
-│   │   │   └── saves
-│   │   ├── dataset
-│   │   │   ├── __init__.py
-│   │   │   ├── coco_dataset.py
-│   │   │   └── datamodule.py
-│   │   ├── predictor.py
-│   │   ├── self_training
-│   │   │   ├── clip_visualizer.py
-│   │   │   ├── clipwise_player_tracking.py
-│   │   │   ├── specipy_player_by_FT_detr.py
-│   │   │   └── track_clip_globally.py
-│   │   ├── trainers
-│   │   │   ├── __init__.py
-│   │   │   └── detr.py
-│   │   └── utils
-│   │       ├── __init__.py
-│   │       └── visualize.py
-│   ├── pose
+│   │   ├── cat_frames_trainer.py
+│   │   ├── freeze_param.py
+│   │   ├── regression_trainer.py
+│   │   └── video_trainer.py
+│   ├── utils
+│   │   ├── __inti__.py
+│   │   ├── generate_dataset_json.py
+│   │   ├── heatmap.py
+│   │   └── visualize.py
+│   └── video_predictor.py
+├── court
+│   ├── __init__.py
+│   ├── arguments
 │   │   ├── __init__.py
-│   │   └── predictor.py
+│   │   └── prerare_teansforms.py
+│   ├── dataset
+│   │   ├── __init__.py
+│   │   ├── court_dataset.py
+│   │   └── datamodule.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   ├── fpn.py
+│   │   ├── lite_tracknet.py
+│   │   ├── swin_384_court.py
+│   │   ├── swin_court.py
+│   │   ├── swin_v2_256_court.py
+│   │   └── vit_court.py
+│   ├── predictor.py
+│   ├── trainer
+│   │   ├── __init__.py
+│   │   ├── cnn.py
+│   │   ├── train_vit_court.py
+│   │   └── vit_court.py
 │   └── utils
 │       ├── __init__.py
-│       ├── colormap.py
-│       ├── copy_to_flatten_src.py
-│       ├── load_model.py
-│       ├── model_factory.py
-│       ├── save_tree.py
-│       ├── transforms
-│       │   ├── coco_bbox.py
-│       │   └── xy_keypoint.py
-│       └── visualize_tb_logs.py
-├── train_ball.py
-├── train_court.py
-└── train_player.py
+│       ├── counter.py
+│       ├── dataset_convertor.py
+│       ├── utils.py
+│       └── visualize_dataset.py
+├── event
+│   ├── argument
+│   ├── dataset
+│   ├── models
+│   │   └── feature_gru.py
+│   ├── predictor.py
+│   └── trainer
+├── multi
+│   ├── arguments
+│   │   └── prerare_teansforms.py
+│   ├── dataset
+│   │   ├── clip_dataset.py
+│   │   └── datamodule.py
+│   ├── frames_predictor.py
+│   ├── models
+│   ├── multi_predictor.py
+│   ├── trainers
+│   └── utils
+├── new_dataset
+├── player
+│   ├── __init__.py
+│   ├── arguments
+│   │   └── prepare_transform.py
+│   ├── configs
+│   │   ├── data
+│   │   ├── model
+│   │   ├── model_trainer
+│   │   ├── processor
+│   │   └── saves
+│   ├── dataset
+│   │   ├── __init__.py
+│   │   ├── coco_dataset.py
+│   │   └── datamodule.py
+│   ├── predictor.py
+│   ├── self_training
+│   │   ├── clip_visualizer.py
+│   │   ├── clipwise_player_tracking.py
+│   │   ├── specipy_player_by_FT_detr.py
+│   │   └── track_clip_globally.py
+│   ├── trainers
+│   │   ├── __init__.py
+│   │   └── detr.py
+│   └── utils
+│       ├── __init__.py
+│       └── visualize.py
+├── pose
+│   ├── __init__.py
+│   └── predictor.py
+└── utils
+    ├── __init__.py
+    ├── colormap.py
+    ├── copy_to_flatten_src.py
+    ├── load_model.py
+    ├── model_factory.py
+    ├── save_tree.py
+    ├── transforms
+    │   ├── coco_bbox.py
+    │   └── xy_keypoint.py
+    └── visualize_tb_logs.py

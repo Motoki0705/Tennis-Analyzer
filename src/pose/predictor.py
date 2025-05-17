@@ -116,12 +116,8 @@ class PosePredictor:
         ).to(self.device)
 
         # ViTPose 推論
-        if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
-                pose_outputs = self.pose_model(**pose_inputs)
-        else:
-            with torch.no_grad():
-                pose_outputs = self.pose_model(**pose_inputs)
+        with torch.no_grad():
+            pose_outputs = self.pose_model(**pose_inputs)
                 
         # 後処理：キーポイント抽出
         pose_results = self.pose_processor.post_process_pose_estimation(

@@ -3,7 +3,7 @@ from hydra.utils import to_absolute_path
 import pytorch_lightning as pl
 from omegaconf import DictConfig
 
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 
 from src.court.models.lite_tracknet import LiteBallTracker
 from src.court.trainer.cnn import CourtLModule
@@ -46,6 +46,7 @@ def main(cfg: DictConfig):
         mode="min"
     )
     lr_monitor_cb = LearningRateMonitor(logging_interval="epoch")
+    ealry_stopping = EarlyStopping(monitor="val_loss")
 
     # ─── Trainer 作成 ──────────────────────────────
     trainer = pl.Trainer(
@@ -53,7 +54,7 @@ def main(cfg: DictConfig):
         precision=cfg.precision,
         log_every_n_steps=cfg.log_every_n_steps,
         default_root_dir=cfg.output_dir,
-        callbacks=[checkpoint_cb, lr_monitor_cb],
+        callbacks=[checkpoint_cb, lr_monitor_cb, ealry_stopping],
     )
 
     # トレーニング実行

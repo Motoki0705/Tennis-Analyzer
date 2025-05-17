@@ -46,7 +46,7 @@ def generate_tree(current_dir, exclude_dirs, include_files, allowed_extensions, 
 
 # 実行例
 save_directory_tree(
-    root_dir='.',       # 起点ディレクトリ
+    root_dir='src',       # 起点ディレクトリ
     output_file='project_structure.txt',             # 出力ファイル
     include_files=True,
     allowed_extensions=['.py', '.md', '.ckpt', 'pth'],

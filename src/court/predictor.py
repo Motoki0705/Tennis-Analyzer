@@ -122,6 +122,7 @@ class CourtPredictor:
         """
         単一チャネルのヒートマップから局所最大点を NMS で取り出す（従来方式）。
         """
+        heatmap = np.squeeze(heatmap)
         h_hm, w_hm = heatmap.shape
         H, W = orig_shape
 

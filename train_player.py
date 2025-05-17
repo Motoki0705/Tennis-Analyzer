@@ -1,7 +1,7 @@
 import hydra
 from omegaconf import DictConfig
 import torch
-from transformers import AutoModelForObjectDetection, RTDetrImageProcessor
+from transformers import AutoModelForObjectDetection, RTDetrImageProcessor, EarlyStopping
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -56,13 +56,15 @@ def main(cfg: DictConfig):
         save_last=cfg.checkpoint.save_last,
         dirpath="checkpoints/player",  # Hydraは作業ディレクトリを変えるので絶対パスが安全
     )
+    ealry_stopping = EarlyStopping(monitor="val_loss")
+
     trainer = pl.Trainer(
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         max_epochs=cfg.trainer.max_epochs,
         precision=cfg.trainer.precision,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
-        callbacks=[checkpoint_callback]
+        callbacks=[checkpoint_callback, ealry_stopping]
     )
 
     # ==== トレーニング ====

@@ -9,6 +9,7 @@ num_workers: 8
 skip_frames_range: [1, 5]   # train 時に 1〜5 フレーム間隔でサンプリング
 input_type: "cat"      # "cat" or "stack"
 output_type: "last"     # "all" or "last"
+dataset_type: "coord"  # "heatmap" or "coord"
 
 # 画像／ヒートマップのリサイズ先
 input_size:   [360, 640]

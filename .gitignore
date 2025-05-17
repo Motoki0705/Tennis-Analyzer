@@ -190,5 +190,8 @@ outputs/
 tb_logs/
 logs/
 
+# onnx files
+onnx/
+
 # all code
 all_code/

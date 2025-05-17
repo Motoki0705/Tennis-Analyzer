@@ -1,104 +1,90 @@
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import pytorch_lightning as pl
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
 from typing import Callable
 
-
-class KeypointRegressionModule(pl.LightningModule):
+class CoordRegressionLitModule(pl.LightningModule):
     """
-    座標回帰用 LightningModule:
-    入力 x: [B, 3, N, H, W]
-    出力 preds: [B, N, 2] (各フレームの x,y)
+    - 入力: Frames [B, C, H, W]
+    - 出力: NormCoords [B, 2]  (x, y) ∈ [0,1]
     """
     def __init__(
         self,
         model: Callable,
-        lr: float = 1e-4,
+        lr: float = 1e-3,
         weight_decay: float = 1e-4,
-        use_visibility_weighting: bool = False,
-        hidden_weight: float = 2.0,
+        warmup_epochs: int = 1,
+        max_epochs: int = 50,
     ):
         super().__init__()
         self.model = model
-        self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=["model"])
+        # L1Loss を reduction='none' にして可視フラグでマスクをかける
+        self.criterion = nn.L1Loss(reduction="none")
 
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.use_visibility_weighting = use_visibility_weighting
-        self.hidden_weight = hidden_weight
-
-        # フレームごとに (x,y) を回帰するので MSELoss を使う。reduction='none' で重み付け可能に。
-        self.loss_fn = nn.MSELoss(reduction='none')
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 3, N, H, W]
-        # モデルは [B, N, 2] を返す想定
+    def forward(self, x):
+        # モデルは (B, C, H, W) → (B, 2) を返すものとする
         return self.model(x)
 
-    def compute_loss(
-        self,
-        preds: torch.Tensor,
-        targets: torch.Tensor,
-        visibility: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        preds, targets: [B, N, 2]
-        visibility:     [B, N]  (0/1/2)
-        """
-        # フレームごとの誤差: [B, N, 2]
-        err = self.loss_fn(preds, targets)
-
-        if self.use_visibility_weighting:
-            # visibility==1 (隠れている) を強調
-            # 重みベクトル [B, N]
-            w = torch.where(visibility == 1,
-                            torch.full_like(visibility, self.hidden_weight),
-                            torch.ones_like(visibility))
-            # [B, N] → [B, N, 2]
-            w = w.unsqueeze(-1).expand(-1, -1, 2)
-        else:
-            w = torch.ones_like(err)
-
-        # 加重 MSE
-        loss = (err * w).mean()
-        return loss
-
-    def common_step(self, batch, batch_idx, stage="train"):
+    def _step(self, batch, stage: str):
         frames, coords, visibility = batch
-        # frames:    [B, 3, N, H, W]
-        # coords:    [B, N, 2]
-        # visibility: [B, N]
-        preds = self(frames)  # [B, N, 2]
-        loss = self.compute_loss(preds, coords, visibility)
+        # coords: [B, 2]  or if "all" then [B, T, 2]  ※今回は last フレームのみ想定
+        pred = self(frames)                           # [B, 2]
+        
+        # L1 損失を計算し、visibility でマスク
+        loss_per_dim = self.criterion(pred, coords)   # [B, 2]
+        loss = loss_per_dim.mean()                     # バッチ内全要素平均
 
+        # 平均L1距離を補助指標として計算
+        l1_dist = torch.norm(pred - coords, dim=1).mean()    # [B]
+
+        # ロギング
         self.log(f"{stage}_loss", loss,
-                 on_step=(stage == "train"),
-                 on_epoch=True,
-                 prog_bar=(stage == "train"),
-                 logger=True)
+                 on_step=False, on_epoch=True,
+                 prog_bar=(stage=="val"), logger=True, sync_dist=True)
+        self.log(f"{stage}_L1Dist", l1_dist,
+                 on_step=False, on_epoch=True,
+                 prog_bar=(stage=="val"), logger=True, sync_dist=True)
+
         return loss
 
     def training_step(self, batch, batch_idx):
-        return self.common_step(batch, batch_idx, stage="train")
+        return self._step(batch, "train")
 
     def validation_step(self, batch, batch_idx):
-        return self.common_step(batch, batch_idx, stage="val")
+        self._step(batch, "val")
 
     def test_step(self, batch, batch_idx):
-        return self.common_step(batch, batch_idx, stage="test")
+        self._step(batch, "test")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters()),
-            lr=self.lr,
-            weight_decay=self.weight_decay
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay,
         )
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=5, gamma=0.5
+        # warm-up → cosine annealing
+        warmup = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=lambda e: float(e + 1) / float(self.hparams.warmup_epochs)
+        )
+        cosine = CosineAnnealingLR(
+            optimizer,
+            T_max=self.hparams.max_epochs - self.hparams.warmup_epochs,
+            eta_min=self.hparams.lr * 1e-2
+        )
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup, cosine],
+            milestones=[self.hparams.warmup_epochs]
         )
         return {
             "optimizer": optimizer,
-            "lr_scheduler": scheduler,
-            "monitor": "val_loss"
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1
+            }
         }

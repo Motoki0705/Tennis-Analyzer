@@ -31,7 +31,7 @@ processors:
     pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
   pose:
     _target_: transformers.AutoImageProcessor.from_pretrained
-    pretrained_model_name_or_path: "facebook/vit-pose-base" # Example, match your pose model
+    pretrained_model_name_or_path: "usyd-community/vitpose-base-simple" # Example, match your pose model
 
 # --- Predictors Configurations (these now take instantiated models) ---
 predictors:
@@ -49,7 +49,7 @@ predictors:
     input_size: [360, 640]
     num_keypoints: 15 # This might be specific to the model's output head (e.g. FPN outputs 1 channel)
     threshold: 0.5
-    visualize_mode: "heatmap_channels"
+    visualize_mode: "overlay"
 
   player:
     _target_: src.player.predictor.PlayerPredictor
@@ -78,5 +78,6 @@ predictors:
     _target_: src.multi.frames_predictor.FrameAnnotator
     # ball_predictor, court_predictor, pose_predictor are instantiated and passed by main.py
     intervals: {"ball": 1, "court": 1, "pose": 1}
-    batch_size: {"ball": 16, "court": 16, "poose": 16}
+    batch_sizes: {"ball": 16, "court": 16, "pose": 16}
     frame_fmt: "frame_{:06d}.jpg"
+    output_dir: "outputs/${mode}/${now:%Y-%m-%d_%H-%M-%S}"
