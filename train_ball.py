@@ -5,7 +5,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, Ea
 
 from src.ball.dataset.datamodule import TennisBallDataModule
 from src.ball.trainer.regression_trainer import CoordRegressionLitModule
-from src.ball.models.cat_frames.lite_tracknet_xy import LiteBallTrackerXY
+from src.ball.models.cat_frames.resnet_regression import ResNet50CoordRegression
 from src.utils.load_model import load_model_weights
 
 @hydra.main(version_base="1.1", config_path="configs/train", config_name="ball")
@@ -27,7 +27,7 @@ def main(cfg):
     dm.setup()
 
     # ─── モデル（MobileNet-U-HeatmapNet） の準備 ───
-    lite_tracknet_xy = LiteBallTrackerXY()
+    lite_tracknet_xy = ResNet50CoordRegression()
 
     # ─── LightningModule の準備 ───
     lit_model = CoordRegressionLitModule(
@@ -40,7 +40,7 @@ def main(cfg):
         monitor="val_loss",
         save_top_k=3,
         mode="min",
-        filename=f"{lite_tracknet_xy}" + "-{epoch:02d}-{val_loss:.4f}"
+        filename="lite_tracknet_xy-{epoch:02d}-{val_loss:.4f}"
     )
     lr_cb = LearningRateMonitor(logging_interval="epoch")
     ealry_stopping = EarlyStopping(monitor="val_loss")
