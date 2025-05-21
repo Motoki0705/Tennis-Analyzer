@@ -3,7 +3,7 @@ import torch
 
 
 def generate_gaussian_heatmap(
-    raw_label, input_size, output_size, base_sigma=1.0, base_size=320
+    raw_label, input_size, output_size, base_sigma=1.0, base_size=256
 ):
     """
     キーポイント情報からガウスヒートマップを生成（動的なσスケーリングあり）
@@ -30,6 +30,7 @@ def generate_gaussian_heatmap(
         return torch.from_numpy(heatmap).unsqueeze(0)
 
     x, y, visibility = raw_label["keypoints"]
+    print(x, y, visibility)
     in_H, in_W = input_size
 
     if visibility == 0 or x is None or y is None:
