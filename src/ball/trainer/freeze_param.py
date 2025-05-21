@@ -1,10 +1,12 @@
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import BaseFinetuning
 from types import SimpleNamespace
+
+import pytorch_lightning as pl
 import torch
+from pytorch_lightning.callbacks import BaseFinetuning
 
 from src.models.cat_frames.swin_448 import SwinCourtUNet
 from src.trainer.cat_frames_trainer import CatFramesLModule
+
 
 class ResumeSafeFreezeBackbone(BaseFinetuning):
     def __init__(self, strategy: dict):
@@ -47,35 +49,37 @@ class ResumeSafeFreezeBackbone(BaseFinetuning):
         return module
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     strategy = {
-        "freeze": {
-            "before_training": "model.backbone"
-        },
+        "freeze": {"before_training": "model.backbone"},
         "unfreeze": {
             1: "model.backbone.patch_embed",
             2: "model.backbone.layers_3",
-            3: "model.backbone"
-        }
+            3: "model.backbone",
+        },
     }
     freeze_callback = FreezeBackbone(strategy)
     model = SwinCourtUNet(num_keypoints=1)
     pl_module = CatFramesLModule(model=model)
     freeze_callback.freeze_before_training(pl_module)
     for name, p in pl_module.model.backbone.named_parameters():
-        if not p.requires_grad:          # True なら凍結済
+        if not p.requires_grad:  # True なら凍結済
             print("frozen :", name)
         else:
             print("train  :", name)
-    
+
     for unfreeze_epoch, unfreeze_layer in strategy["unfreeze"].items():
-        dummy_trainer = SimpleNamespace(current_epoch=unfreeze_epoch, optimizers=[torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=1e-4
-    )])
+        dummy_trainer = SimpleNamespace(
+            current_epoch=unfreeze_epoch,
+            optimizers=[
+                torch.optim.Adam(
+                    filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4
+                )
+            ],
+        )
         freeze_callback.on_train_epoch_start(dummy_trainer, pl_module)
         for name, p in pl_module.model.backbone.named_parameters():
-            if not p.requires_grad:          # True なら凍結済
+            if not p.requires_grad:  # True なら凍結済
                 print("frozen :", name)
             else:
                 print("train  :", name)

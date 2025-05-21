@@ -8,9 +8,9 @@ Hydra-driven Auto Court Annotator (per-image COCO-style)
 
 import json
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple
+
 import cv2
-import torch
 import hydra
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -23,15 +23,16 @@ from src.court.predictor import CourtPredictor
 # court annotations 追加（image_idごとに1つ）
 # ──────────────────────────────────────────────
 def flush_batch(
-    imgs: List, metas: List[Tuple[int, Tuple[int, int]]],
+    imgs: List,
+    metas: List[Tuple[int, Tuple[int, int]]],
     predictor: CourtPredictor,
     annotations: List[dict],
-    starting_id: int
+    starting_id: int,
 ) -> int:
     kps_batches = predictor.predict(imgs)
     next_id = starting_id
 
-    for (image_id, _), kps in zip(metas, kps_batches):
+    for (image_id, _), kps in zip(metas, kps_batches, strict=False):
         if not kps or len(kps) < 15:
             continue
 
@@ -43,15 +44,17 @@ def flush_batch(
             keypoints.extend([x, y, 2])  # visibility=2
             scores.append(score)
 
-        annotations.append({
-            "id": next_id,
-            "image_id": image_id,
-            "category_id": 3,  # court
-            "iscrowd": 0,
-            "keypoints": keypoints,
-            "keypoints_scores": scores,
-            "num_keypoints": 15
-        })
+        annotations.append(
+            {
+                "id": next_id,
+                "image_id": image_id,
+                "category_id": 3,  # court
+                "iscrowd": 0,
+                "keypoints": keypoints,
+                "keypoints_scores": scores,
+                "num_keypoints": 15,
+            }
+        )
         next_id += 1
 
     return next_id
@@ -60,7 +63,11 @@ def flush_batch(
 # ──────────────────────────────────────────────
 # メインエントリポイント
 # ──────────────────────────────────────────────
-@hydra.main(config_path="../../configs/annotations", config_name="auto_court", version_base="1.2")
+@hydra.main(
+    config_path="../../configs/annotations",
+    config_name="auto_court",
+    version_base="1.2",
+)
 def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg, resolve=True))
 
@@ -72,20 +79,24 @@ def main(cfg: DictConfig) -> None:
     coco = json.loads(coco_path.read_text(encoding="utf-8"))
     images = coco["images"]
     annotations = coco.get("annotations", [])
-    existing_ids = {ann["image_id"] for ann in annotations if ann.get("category_id") == 3}
+    existing_ids = {
+        ann["image_id"] for ann in annotations if ann.get("category_id") == 3
+    }
 
     todo = [img for img in images if img["id"] not in existing_ids]
     print(f"未処理 {len(todo)} / 総 {len(images)} フレームを推論します。")
 
     # --- Court カテゴリが無ければ追加 ---
     if not any(cat["name"] == "court" for cat in coco["categories"]):
-        coco["categories"].append({
-            "id": 3,
-            "name": "court",
-            "supercategory": "field",
-            "keypoints": [f"pt{i}" for i in range(15)],
-            "skeleton": []
-        })
+        coco["categories"].append(
+            {
+                "id": 3,
+                "name": "court",
+                "supercategory": "field",
+                "keypoints": [f"pt{i}" for i in range(15)],
+                "skeleton": [],
+            }
+        )
 
     # --- 推論器セットアップ ---
     predictor = CourtPredictor(
@@ -114,15 +125,21 @@ def main(cfg: DictConfig) -> None:
         batch_meta.append((image_id, img.shape[:2]))
 
         if len(batch_imgs) == cfg.batch_size:
-            next_ann_id = flush_batch(batch_imgs, batch_meta, predictor, annotations, next_ann_id)
+            next_ann_id = flush_batch(
+                batch_imgs, batch_meta, predictor, annotations, next_ann_id
+            )
             batch_imgs, batch_meta = [], []
 
     if batch_imgs:
-        next_ann_id = flush_batch(batch_imgs, batch_meta, predictor, annotations, next_ann_id)
+        next_ann_id = flush_batch(
+            batch_imgs, batch_meta, predictor, annotations, next_ann_id
+        )
 
     # --- 保存 ---
     coco["annotations"] = annotations
-    output_path.write_text(json.dumps(coco, indent=2, ensure_ascii=False), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(coco, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"[完了] 出力ファイル: {output_path.resolve()}")
 
 

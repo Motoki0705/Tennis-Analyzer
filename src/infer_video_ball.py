@@ -1,13 +1,14 @@
 import hydra
 from hydra.utils import to_absolute_path
-from omegaconf import OmegaConf
+
 from src.ball.video_predictor import BallPredictor
+
 
 @hydra.main(config_path="configs/infers", config_name="video_ball")
 def main(cfg):
     # 設定ファイル中の相対パスを絶対パスに変換
-    ckpt_path    = to_absolute_path(cfg.model.ckpt_path)
-    input_video  = to_absolute_path(cfg.input_video)
+    ckpt_path = to_absolute_path(cfg.model.ckpt_path)
+    input_video = to_absolute_path(cfg.input_video)
     output_video = to_absolute_path(cfg.output_video)
 
     predictor = BallPredictor(
@@ -19,11 +20,8 @@ def main(cfg):
         threshold=cfg.threshold,
         device=cfg.device,
     )
-    predictor.run(
-        input_path= input_video,
-        output_path= output_video,
-        mode="heatmap"
-    )
+    predictor.run(input_path=input_video, output_path=output_video, mode="heatmap")
+
 
 if __name__ == "__main__":
     main()

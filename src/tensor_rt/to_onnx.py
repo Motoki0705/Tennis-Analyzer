@@ -1,4 +1,5 @@
 import torch
+
 from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
 from src.utils.load_model import load_model_weights
 
@@ -19,6 +20,6 @@ torch.onnx.export(
     input_names=["input"],
     output_names=["output"],
     opset_version=13,
-    dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}}
+    dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
 )
 print("✅ Exported ONNX: lite_balltrack.onnx")

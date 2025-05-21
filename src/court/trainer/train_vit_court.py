@@ -1,13 +1,11 @@
+import os
 from types import SimpleNamespace
-from torchvision import transforms
+
 import torch
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-import torch.nn as nn
 from TennisCourtDetector.src.dataset.court_dataset import CustomCourtDataset
 from TennisCourtDetector.src.models.vit_court import ViTCourt
-import os
 from TennisCourtDetector.src.trainer.court_trainer import Trainer
+from torchvision import transforms
 
 # 引数管理
 args = SimpleNamespace(
@@ -21,17 +19,19 @@ args = SimpleNamespace(
     image_root="./data/images",
     save_dir="checkpoints",
     freeze_epochs=3,  # ViTを最初にfreezeするエポック数
-    device="cuda" if torch.cuda.is_available() else "cpu"
+    device="cuda" if torch.cuda.is_available() else "cpu",
 )
 
 os.makedirs(args.save_dir, exist_ok=True)
 
 # 前処理 (ViT標準の正規化に合わせている)
-train_transforms = transforms.Compose([
-    transforms.Resize(args.input_size),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-])
+train_transforms = transforms.Compose(
+    [
+        transforms.Resize(args.input_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    ]
+)
 
 # データセットと DataLoader
 train_dataset = CustomCourtDataset(
@@ -39,14 +39,14 @@ train_dataset = CustomCourtDataset(
     image_root=args.image_root,
     input_size=args.input_size,
     output_size=args.output_size,
-    transforms=train_transforms
+    transforms=train_transforms,
 )
 val_dataset = CustomCourtDataset(
     json_path=args.val_path,
     image_root=args.image_root,
     input_size=args.input_size,
     output_size=args.output_size,
-    transforms=train_transforms
+    transforms=train_transforms,
 )
 # モデルと学習設定
 model = ViTCourt(num_keypoints=15).to(args.device)

@@ -23,7 +23,7 @@ def load_model_weights(model: torch.nn.Module, ckpt_path: str) -> torch.nn.Modul
     new_state_dict = {}
     for k, v in state_dict.items():
         if k.startswith("model."):
-            new_key = k[len("model."):]  # "model."を取り除く
+            new_key = k[len("model.") :]  # "model."を取り除く
         else:
             new_key = k  # そのまま
         new_state_dict[new_key] = v

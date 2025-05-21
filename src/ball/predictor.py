@@ -1,15 +1,13 @@
-import cv2
-import torch
-import numpy as np
 import logging
 from pathlib import Path
-from typing import Tuple, List, Union, Callable
-from tqdm import tqdm
-import albumentations as A
-from scipy.spatial import distance
+from typing import Callable, List, Tuple, Union
 
-from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
-from src.utils.load_model import load_model_weights
+import albumentations as A
+import cv2
+import numpy as np
+import torch
+from scipy.spatial import distance
+from tqdm import tqdm
 
 
 class BallPredictor:
@@ -23,7 +21,7 @@ class BallPredictor:
         device: str = "cuda",
         visualize_mode: str = "overlay",
         feature_layer: int = -1,
-        use_half: bool = False  # ★ 追加: 半精度推論を使うか
+        use_half: bool = False,  # ★ 追加: 半精度推論を使うか
     ):
         # ────────── logger 初期化 ──────────
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -47,11 +45,13 @@ class BallPredictor:
         self.model = model.eval()
 
         # ────────── 前処理定義 ──────────
-        self.transform = A.Compose([
-            A.Resize(height=input_size[0], width=input_size[1]),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            A.pytorch.ToTensorV2()
-        ])
+        self.transform = A.Compose(
+            [
+                A.Resize(height=input_size[0], width=input_size[1]),
+                A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                A.pytorch.ToTensorV2(),
+            ]
+        )
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
         tens_list = []
@@ -69,31 +69,37 @@ class BallPredictor:
         """
         batch_t = torch.cat([self._preprocess_clip(c) for c in clips], dim=0)
         # 推論（half precision オプション対応）
-        with torch.no_grad(), \
-             (torch.amp.autocast(device_type=self.device, dtype=torch.float16) if self.use_half else torch.no_grad()):
+        with (
+            torch.no_grad(),
+            (
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16)
+                if self.use_half
+                else torch.no_grad()
+            ),
+        ):
             preds = self.model(batch_t)
 
         results = []
         # --- Heatmap モード ---
         if preds.ndim == 4:
             heatmaps = torch.sigmoid(preds).cpu().numpy()  # [B,1,Hh,Wh]
-            for heat, clip in zip(heatmaps, clips):
+            for heat, clip in zip(heatmaps, clips, strict=False):
                 # 1チャンネルに squeeze
                 h = heat.squeeze(0)
                 # argmax
                 idx = int(np.argmax(h))
                 yh, xh = divmod(idx, h.shape[1])
                 # heatmap→原画スケール
-                xb, yb = self._to_original_scale((xh, yh),
-                                                  self.heatmap_size,
-                                                  clip[-1].shape[:2])
+                xb, yb = self._to_original_scale(
+                    (xh, yh), self.heatmap_size, clip[-1].shape[:2]
+                )
                 conf = float(h.max())
                 results.append({"x": xb, "y": yb, "confidence": conf})
 
         # --- 座標回帰モード ---
         elif preds.ndim == 2 and preds.shape[1] == 2:
             coords = preds.cpu().numpy()  # [B,2], normalized in [0,1]
-            for (x_norm, y_norm), clip in zip(coords, clips):
+            for (x_norm, y_norm), clip in zip(coords, clips, strict=False):
                 h_org, w_org = clip[-1].shape[:2]
                 xb = int(x_norm * w_org)
                 yb = int(y_norm * h_org)
@@ -110,17 +116,23 @@ class BallPredictor:
             results = self.interpolate_track(results)
 
         return results
-    def _extract_feature_sequence(self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]) -> List[np.ndarray]:
+
+    def _extract_feature_sequence(
+        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
+    ) -> List[np.ndarray]:
         tensors = [self._preprocess_clip(clip) for clip in clips]
         batch = torch.cat(tensors, dim=0)
-        
+
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
+            ):
                 feats_nhwc = self.model.backbone(batch)
         else:
             with torch.no_grad():
                 feats_nhwc = self.model.backbone(batch)
-        
+
         feats = [f.permute(0, 3, 1, 2).contiguous() for f in feats_nhwc]
         lowfeat = feats[self.feature_layer]
         avg = lowfeat.mean(dim=1)
@@ -135,12 +147,17 @@ class BallPredictor:
             seq.append(img)
         return seq
 
-    def _extract_heatmap_sequence(self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]) -> List[np.ndarray]:
+    def _extract_heatmap_sequence(
+        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
+    ) -> List[np.ndarray]:
         tensors = [self._preprocess_clip(clip) for clip in clips]
         batch = torch.cat(tensors, dim=0)
-        
+
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
+            ):
                 preds = self.model(batch)
                 heatmaps = torch.sigmoid(preds)
         else:
@@ -160,7 +177,14 @@ class BallPredictor:
 
     def overlay(self, frame: np.ndarray, result: dict) -> np.ndarray:
         if result["x"] is not None and result["confidence"] > 0.5:
-            cv2.circle(frame, (result["x"], result["y"]), 6, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+            cv2.circle(
+                frame,
+                (result["x"], result["y"]),
+                6,
+                (0, 255, 255),
+                -1,
+                lineType=cv2.LINE_AA,
+            )
         return frame
 
     def _process_and_write(self, clip_buffer, last_frames, writer, w_org, h_org, pbar):
@@ -178,7 +202,7 @@ class BallPredictor:
                 pbar.update(1)
         else:
             results = self.predict(clip_buffer)
-            for result, last_frame in zip(results, last_frames):
+            for result, last_frame in zip(results, last_frames, strict=False):
                 out_frame = last_frame.copy()
                 if result["confidence"] >= self.threshold:
                     out_frame = self.overlay(out_frame, result)
@@ -186,7 +210,12 @@ class BallPredictor:
                     writer.write(out_frame)
                 pbar.update(1)
 
-    def run(self, input_path: Union[str, Path], output_path: Union[str, Path] = None, batch_size: int = 4) -> None:
+    def run(
+        self,
+        input_path: Union[str, Path],
+        output_path: Union[str, Path] = None,
+        batch_size: int = 4,
+    ) -> None:
         cap = cv2.VideoCapture(str(input_path))
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open video: {input_path}")
@@ -214,15 +243,19 @@ class BallPredictor:
                     break
                 buffer_frames.append(frame)
                 if len(buffer_frames) >= self.num_frames:
-                    clip_buffer.append(buffer_frames[-self.num_frames:])
+                    clip_buffer.append(buffer_frames[-self.num_frames :])
                     last_frames.append(frame)
                 if len(clip_buffer) >= batch_size:
-                    self._process_and_write(clip_buffer, last_frames, writer, w_org, h_org, pbar)
+                    self._process_and_write(
+                        clip_buffer, last_frames, writer, w_org, h_org, pbar
+                    )
                     clip_buffer.clear()
                     last_frames.clear()
 
             if clip_buffer:
-                self._process_and_write(clip_buffer, last_frames, writer, w_org, h_org, pbar)
+                self._process_and_write(
+                    clip_buffer, last_frames, writer, w_org, h_org, pbar
+                )
 
         cap.release()
         if writer:
@@ -237,21 +270,21 @@ class BallPredictor:
 
     def _to_original_scale(
         self,
-        coord: Tuple[int,int],
-        from_size: Tuple[int,int],
-        to_size: Tuple[int,int]
-    ) -> Tuple[int,int]:
-        w_from,h_from = from_size
+        coord: Tuple[int, int],
+        from_size: Tuple[int, int],
+        to_size: Tuple[int, int],
+    ) -> Tuple[int, int]:
+        w_from, h_from = from_size
         h_to, w_to = to_size
-        x,y = coord
+        x, y = coord
         return int(x * w_to / w_from), int(y * h_to / h_from)
 
     @staticmethod
     def remove_jumps(track, max_dist=80):
         cleaned = [track[0]]
-        for prev, curr in zip(track, track[1:]):
+        for prev, curr in zip(track, track[1:], strict=False):
             if prev["x"] is not None and curr["x"] is not None:
-                d = distance.euclidean((prev["x"],prev["y"]), (curr["x"],curr["y"]))
+                d = distance.euclidean((prev["x"], prev["y"]), (curr["x"], curr["y"]))
                 if d > max_dist:
                     curr = {"x": None, "y": None, "confidence": 0.0}
             cleaned.append(curr)
@@ -267,17 +300,20 @@ class BallPredictor:
             nans = np.isnan(arr)
             if nans.all():
                 return arr
-            arr[nans] = np.interp(np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans])
+            arr[nans] = np.interp(
+                np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans]
+            )
             return arr
 
         xs = interp_nan(xs)
         ys = interp_nan(ys)
 
         result = []
-        for x, y, c in zip(xs, ys, confs):
+        for x, y, c in zip(xs, ys, confs, strict=False):
             if np.isnan(x) or np.isnan(y):
                 result.append({"x": None, "y": None, "confidence": 0.0})
             else:
-                result.append({"x": int(round(x)), "y": int(round(y)), "confidence": float(c)})
+                result.append(
+                    {"x": int(round(x)), "y": int(round(y)), "confidence": float(c)}
+                )
         return result
-    

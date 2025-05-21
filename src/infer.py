@@ -82,7 +82,9 @@ def instantiate_model(cfg: DictConfig, task: str):
 # ╭──────────────────────────────────────────────────╮
 # │  3. Predictor インスタンス化                     │
 # ╰──────────────────────────────────────────────────╯
-def get_predictor(cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] | None = None):
+def get_predictor(
+    cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] | None = None
+):
     """
     単一モード(ball / court / player / pose)用 Predictor を返す。
     既に生成済みモデルは `cache` から再利用。
@@ -95,16 +97,26 @@ def get_predictor(cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] 
 
     if mode == "ball":
         cache.setdefault("ball", instantiate_model(cfg, "ball").to(device))
-        return instantiate(cfg.predictors.ball, model=cache["ball"], device=device, use_half=use_half)
+        return instantiate(
+            cfg.predictors.ball, model=cache["ball"], device=device, use_half=use_half
+        )
 
     if mode == "court":
         cache.setdefault("court", instantiate_model(cfg, "court").to(device))
-        return instantiate(cfg.predictors.court, model=cache["court"], device=device, use_half=use_half)
+        return instantiate(
+            cfg.predictors.court, model=cache["court"], device=device, use_half=use_half
+        )
 
     if mode == "player":
         cache.setdefault("player", instantiate_model(cfg, "player").to(device))
         proc = instantiate(cfg.processors.player)
-        return instantiate(cfg.predictors.player, model=cache["player"], processor=proc, device=device, use_half=use_half)
+        return instantiate(
+            cfg.predictors.player,
+            model=cache["player"],
+            processor=proc,
+            device=device,
+            use_half=use_half,
+        )
 
     if mode == "pose":
         cache.setdefault("pose_det", instantiate_model(cfg, "player").to(device))
@@ -165,8 +177,18 @@ def main(cfg: DictConfig):
         player_proc = instantiate(cfg.processors.player)
         pose_proc = instantiate(cfg.processors.pose)
 
-        ball_pred = instantiate(cfg.predictors.ball, model=models["ball"], device=device, use_half=cfg.common.use_half)
-        court_pred = instantiate(cfg.predictors.court, model=models["court"], device=device, use_half=cfg.common.use_half)
+        ball_pred = instantiate(
+            cfg.predictors.ball,
+            model=models["ball"],
+            device=device,
+            use_half=cfg.common.use_half,
+        )
+        court_pred = instantiate(
+            cfg.predictors.court,
+            model=models["court"],
+            device=device,
+            use_half=cfg.common.use_half,
+        )
         pose_pred = instantiate(
             cfg.predictors.pose,
             det_model=models["pose_det"],
@@ -182,7 +204,7 @@ def main(cfg: DictConfig):
                 cfg.predictors.multi,
                 ball_predictor=ball_pred,
                 court_predictor=court_pred,
-                pose_predictor=pose_pred
+                pose_predictor=pose_pred,
             )
             if not out_path:
                 out_path = inp.with_name(f"{inp.stem}_multi.mp4")
@@ -200,7 +222,11 @@ def main(cfg: DictConfig):
                 out_path = inp.with_name(f"{inp.stem}_frames")
             out_path.mkdir(parents=True, exist_ok=True)
             jsonl_cfg = cfg.get("output_json_path")
-            jsonl_path = Path(to_absolute_path(jsonl_cfg)) if jsonl_cfg else out_path / "annotations.json"
+            jsonl_path = (
+                Path(to_absolute_path(jsonl_cfg))
+                if jsonl_cfg
+                else out_path / "annotations.json"
+            )
             logger.info(f"[frames] Dir: {out_path}, JSONL: {jsonl_path}")
             frames_ann.run(inp, out_path, jsonl_path)
 
