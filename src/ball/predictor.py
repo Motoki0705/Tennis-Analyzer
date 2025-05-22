@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import albumentations as A
 import cv2
@@ -24,12 +24,8 @@ class BallPredictor:
         use_half: bool = False,  # ★ 追加: 半精度推論を使うか
     ):
         # ────────── logger 初期化 ──────────
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        from utils.logging_utils import setup_logger
+        self.logger = setup_logger(self.__class__)
 
         # ────────── パラメータ ──────────
         self.input_size = input_size
@@ -213,7 +209,7 @@ class BallPredictor:
     def run(
         self,
         input_path: Union[str, Path],
-        output_path: Union[str, Path] = None,
+        output_path: Optional[Union[str, Path]] = None,
         batch_size: int = 4,
     ) -> None:
         cap = cv2.VideoCapture(str(input_path))
@@ -266,7 +262,7 @@ class BallPredictor:
     def _argmax_coord(self, heat: np.ndarray) -> Tuple[int, int]:
         idx = np.argmax(heat)
         y, x = divmod(idx, heat.shape[1])
-        return x, y
+        return (int(x), int(y))
 
     def _to_original_scale(
         self,
