@@ -1,12 +1,16 @@
 import hydra
-from hydra.utils import to_absolute_path
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
+from hydra.utils import to_absolute_path
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 
 from src.ball.dataset.datamodule import TennisBallDataModule
+from src.ball.models.cat_frames.resnet_regression import ResNet50CoordRegression
 from src.ball.trainer.regression_trainer import CoordRegressionLitModule
-from src.ball.models.cat_frames.lite_tracknet_xy import LiteBallTrackerXY
-from src.utils.load_model import load_model_weights
+
 
 @hydra.main(version_base="1.1", config_path="configs/train", config_name="ball")
 def main(cfg):
@@ -22,17 +26,15 @@ def main(cfg):
         skip_frames_range=cfg.skip_frames_range,
         input_type=cfg.input_type,
         output_type=cfg.output_type,
-        dataset_type=cfg.dataset_type
+        dataset_type=cfg.dataset_type,
     )
     dm.setup()
 
     # ─── モデル（MobileNet-U-HeatmapNet） の準備 ───
-    lite_tracknet_xy = LiteBallTrackerXY()
+    lite_tracknet_xy = ResNet50CoordRegression()
 
     # ─── LightningModule の準備 ───
-    lit_model = CoordRegressionLitModule(
-        model=lite_tracknet_xy
-    )
+    lit_model = CoordRegressionLitModule(model=lite_tracknet_xy)
 
     # ─── コールバック ───
     ckpt_cb = ModelCheckpoint(
@@ -40,7 +42,7 @@ def main(cfg):
         monitor="val_loss",
         save_top_k=3,
         mode="min",
-        filename=f"{lite_tracknet_xy}" + "-{epoch:02d}-{val_loss:.4f}"
+        filename="lite_tracknet_xy-{epoch:02d}-{val_loss:.4f}",
     )
     lr_cb = LearningRateMonitor(logging_interval="epoch")
     ealry_stopping = EarlyStopping(monitor="val_loss")
@@ -51,7 +53,7 @@ def main(cfg):
         precision=cfg.trainer.precision,
         default_root_dir=to_absolute_path(cfg.trainer.default_root_dir),
         callbacks=[ckpt_cb, lr_cb, ealry_stopping],
-        log_every_n_steps=cfg.trainer.log_every_n_steps
+        log_every_n_steps=cfg.trainer.log_every_n_steps,
     )
 
     # ─── 学習／検証実行 ───
@@ -59,4 +61,4 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-    main()  
+    main()

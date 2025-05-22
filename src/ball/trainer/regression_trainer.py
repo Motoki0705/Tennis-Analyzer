@@ -1,15 +1,17 @@
+from typing import Callable
+
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
-from typing import Callable
+
 
 class CoordRegressionLitModule(pl.LightningModule):
     """
     - 入力: Frames [B, C, H, W]
     - 出力: NormCoords [B, 2]  (x, y) ∈ [0,1]
     """
+
     def __init__(
         self,
         model: Callable,
@@ -31,22 +33,34 @@ class CoordRegressionLitModule(pl.LightningModule):
     def _step(self, batch, stage: str):
         frames, coords, visibility = batch
         # coords: [B, 2]  or if "all" then [B, T, 2]  ※今回は last フレームのみ想定
-        pred = self(frames)                           # [B, 2]
-        
+        pred = self(frames)  # [B, 2]
+
         # L1 損失を計算し、visibility でマスク
-        loss_per_dim = self.criterion(pred, coords)   # [B, 2]
-        loss = loss_per_dim.mean()                     # バッチ内全要素平均
+        loss_per_dim = self.criterion(pred, coords)  # [B, 2]
+        loss = loss_per_dim.mean()  # バッチ内全要素平均
 
         # 平均L1距離を補助指標として計算
-        l1_dist = torch.norm(pred - coords, dim=1).mean()    # [B]
+        l1_dist = torch.norm(pred - coords, dim=1).mean()  # [B]
 
         # ロギング
-        self.log(f"{stage}_loss", loss,
-                 on_step=False, on_epoch=True,
-                 prog_bar=(stage=="val"), logger=True, sync_dist=True)
-        self.log(f"{stage}_L1Dist", l1_dist,
-                 on_step=False, on_epoch=True,
-                 prog_bar=(stage=="val"), logger=True, sync_dist=True)
+        self.log(
+            f"{stage}_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=(stage == "val"),
+            logger=True,
+            sync_dist=True,
+        )
+        self.log(
+            f"{stage}_L1Dist",
+            l1_dist,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=(stage == "val"),
+            logger=True,
+            sync_dist=True,
+        )
 
         return loss
 
@@ -68,23 +82,23 @@ class CoordRegressionLitModule(pl.LightningModule):
         # warm-up → cosine annealing
         warmup = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
-            lr_lambda=lambda e: float(e + 1) / float(self.hparams.warmup_epochs)
+            lr_lambda=lambda e: float(e + 1) / float(self.hparams.warmup_epochs),
         )
         cosine = CosineAnnealingLR(
             optimizer,
             T_max=self.hparams.max_epochs - self.hparams.warmup_epochs,
-            eta_min=self.hparams.lr * 1e-2
+            eta_min=self.hparams.lr * 1e-2,
         )
         scheduler = SequentialLR(
             optimizer,
             schedulers=[warmup, cosine],
-            milestones=[self.hparams.warmup_epochs]
+            milestones=[self.hparams.warmup_epochs],
         )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
                 "interval": "epoch",
-                "frequency": 1
-            }
+                "frequency": 1,
+            },
         }

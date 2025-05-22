@@ -1,27 +1,27 @@
 import os
 import random
 from collections import defaultdict
-from typing import List, Tuple, Dict, Set, Any
+from typing import Any, Dict, List, Set
 
-import torch
+import numpy as np
 import torchvision
 from PIL import Image
-import albumentations as A
-import numpy as np
 
-from src.player.utils import visualize_dataset
 from src.player.arguments.prepare_transform import prepare_transform
+from src.player.utils import visualize_dataset
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self,
-                 img_folder,
-                 annotation_file,
-                 cat_id_map,
-                 use_original_path,
-                 split='train',
-                 transform=None,
-                 seed=42):
+    def __init__(
+        self,
+        img_folder,
+        annotation_file,
+        cat_id_map,
+        use_original_path,
+        split="train",
+        transform=None,
+        seed=42,
+    ):
         """
         - img_folder: 画像フォルダパス
         - annotation_file: COCOアノテーションファイル
@@ -49,36 +49,43 @@ class CocoDetection(torchvision.datasets.CocoDetection):
 
         # category_id=1（ボール）を除去、カテゴリマップ適用
         target = [
-            {**ann, "category_id": self.cat_id_map.get(ann["category_id"], ann["category_id"])}
+            {
+                **ann,
+                "category_id": self.cat_id_map.get(
+                    ann["category_id"], ann["category_id"]
+                ),
+            }
             for ann in target
             if ann["category_id"] != 1
         ]
 
         if len(target) == 0:
-            print(f"target has no item")
+            print("target has no item")
             return None
 
         if self.transform is not None:
             img, bboxes, labels = self.apply_transform(img, target)
             if len(bboxes) == 0:
-                print(f"boxes has no item")
+                print("boxes has no item")
                 return None
 
             new_annotations = []
-            for box, lab in zip(bboxes, labels):
+            for box, lab in zip(bboxes, labels, strict=False):
                 x, y, w, h = box
-                new_annotations.append({
-                    "image_id": target[0].get("image_id", -1),
-                    "bbox": [float(x), float(y), float(w), float(h)],
-                    "category_id": int(lab),
-                    "area": float(w * h),
-                    "iscrowd": 0
-                })
+                new_annotations.append(
+                    {
+                        "image_id": target[0].get("image_id", -1),
+                        "bbox": [float(x), float(y), float(w), float(h)],
+                        "category_id": int(lab),
+                        "area": float(w * h),
+                        "iscrowd": 0,
+                    }
+                )
             target = new_annotations
 
         target_for_proc = {
             "image_id": target[0].get("image_id", -1),
-            "annotations": target
+            "annotations": target,
         }
 
         return img, target_for_proc
@@ -87,9 +94,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         bboxes_for_transform = [ann["bbox"] for ann in target]
         labels_for_transform = [ann["category_id"] for ann in target]
         argumented = self.transform(
-            image=img,
-            bboxes=bboxes_for_transform,
-            category_id=labels_for_transform
+            image=img, bboxes=bboxes_for_transform, category_id=labels_for_transform
         )
         img = argumented["image"]
         bboxes = argumented["bboxes"]
@@ -116,8 +121,8 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         n_val = int(n * 0.2)
 
         train_ids = all_ids[:n_train]
-        val_ids = all_ids[n_train:n_train + n_val]
-        test_ids = all_ids[n_train + n_val:]
+        val_ids = all_ids[n_train : n_train + n_val]
+        test_ids = all_ids[n_train + n_val :]
 
         self.print_stats("train", train_ids, annotations)
         self.print_stats("val", val_ids, annotations)
@@ -142,16 +147,24 @@ class CocoDetection(torchvision.datasets.CocoDetection):
             if ann.get("category_id") == 2:
                 player_count_per_image[ann["image_id"]] += 1
 
-        valid_image_ids = {img_id for img_id, count in player_count_per_image.items() if count == 2}
+        valid_image_ids = {
+            img_id for img_id, count in player_count_per_image.items() if count == 2
+        }
 
         return valid_image_ids
 
     @staticmethod
     def print_stats(split_name: str, ids: List[int], annotations: List[Dict[str, Any]]):
-        split_anns = [ann for ann in annotations if ann.get("image_id") in ids and ann.get("category_id") == 2]
+        split_anns = [
+            ann
+            for ann in annotations
+            if ann.get("image_id") in ids and ann.get("category_id") == 2
+        ]
         num_images = len(set(ann["image_id"] for ann in split_anns))
         total_anns = len(split_anns)
-        print(f"[{split_name.upper()}] Images: {num_images}, Total Annotations: {total_anns}")
+        print(
+            f"[{split_name.upper()}] Images: {num_images}, Total Annotations: {total_anns}"
+        )
 
     def getitem_from_original_path(self, idx):
         coco = self.coco
@@ -161,7 +174,9 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         anns = coco.loadAnns(ann_ids)
 
         img_info = coco.loadImgs(img_id)[0]
-        original_path = img_info.get("original_path", img_info.get("file_name"))  # フォールバック
+        original_path = img_info.get(
+            "original_path", img_info.get("file_name")
+        )  # フォールバック
         path = os.path.join(self.img_folder, original_path)
 
         img = Image.open(path).convert("RGB")
@@ -176,8 +191,8 @@ if __name__ == "__main__":
         annotation_file=r"data\ball\coco_annotations_ball_ranged.json",
         cat_id_map={2: 0},
         use_original_path=True,
-        split='train',
-        transform=train_transform
+        split="train",
+        transform=train_transform,
     )
 
     result = dataset.__getitem__(0)

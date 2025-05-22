@@ -1,15 +1,13 @@
-import cv2
-import torch
-import numpy as np
 import logging
 from pathlib import Path
-from typing import Tuple, List, Union, Callable
-from tqdm import tqdm
-import albumentations as A
-from scipy.spatial import distance
+from typing import Callable, List, Optional, Tuple, Union
 
-from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
-from src.utils.load_model import load_model_weights
+import albumentations as A
+import cv2
+import numpy as np
+import torch
+from scipy.spatial import distance
+from tqdm import tqdm
 
 
 class BallPredictor:
@@ -23,15 +21,11 @@ class BallPredictor:
         device: str = "cuda",
         visualize_mode: str = "overlay",
         feature_layer: int = -1,
-        use_half: bool = False  # ★ 追加: 半精度推論を使うか
+        use_half: bool = False,  # ★ 追加: 半精度推論を使うか
     ):
         # ────────── logger 初期化 ──────────
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        from utils.logging_utils import setup_logger
+        self.logger = setup_logger(self.__class__)
 
         # ────────── パラメータ ──────────
         self.input_size = input_size
@@ -47,11 +41,13 @@ class BallPredictor:
         self.model = model.eval()
 
         # ────────── 前処理定義 ──────────
-        self.transform = A.Compose([
-            A.Resize(height=input_size[0], width=input_size[1]),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            A.pytorch.ToTensorV2()
-        ])
+        self.transform = A.Compose(
+            [
+                A.Resize(height=input_size[0], width=input_size[1]),
+                A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                A.pytorch.ToTensorV2(),
+            ]
+        )
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
         tens_list = []
@@ -63,49 +59,76 @@ class BallPredictor:
         return clip.unsqueeze(0).to(self.device)
 
     def predict(self, clips: List[List[np.ndarray]]) -> List[dict]:
-        tensors = []
-        for clip in clips:
-            assert len(clip) == self.num_frames, f"Each clip must have {self.num_frames} frames"
-            tensors.append(self._preprocess_clip(clip))
-        batch = torch.cat(tensors, dim=0)
+        """
+        clips: List of length B, each element is List of T frames (H×W×3 numpy)
+        returns: List of dict {x:int, y:int, confidence:float or None}
+        """
+        batch_t = torch.cat([self._preprocess_clip(c) for c in clips], dim=0)
+        # 推論（half precision オプション対応）
+        with (
+            torch.no_grad(),
+            (
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16)
+                if self.use_half
+                else torch.no_grad()
+            ),
+        ):
+            preds = self.model(batch_t)
 
-        if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
-                preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds)
-        else:
-            with torch.no_grad():
-                preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds)
-
-        heatmaps = heatmaps.cpu().numpy()
         results = []
-        for heat, clip in zip(heatmaps, clips):
-            xh, yh = self._argmax_coord(heat)
-            xb, yb = self._to_original_scale((xh, yh), self.heatmap_size, clip[-1].shape[:2])
-            conf = float(np.max(heat))
-            results.append({"x": xb, "y": yb, "confidence": conf})
+        # --- Heatmap モード ---
+        if preds.ndim == 4:
+            heatmaps = torch.sigmoid(preds).cpu().numpy()  # [B,1,Hh,Wh]
+            for heat, clip in zip(heatmaps, clips, strict=False):
+                # 1チャンネルに squeeze
+                h = heat.squeeze(0)
+                # argmax
+                idx = int(np.argmax(h))
+                yh, xh = divmod(idx, h.shape[1])
+                # heatmap→原画スケール
+                xb, yb = self._to_original_scale(
+                    (xh, yh), self.heatmap_size, clip[-1].shape[:2]
+                )
+                conf = float(h.max())
+                results.append({"x": xb, "y": yb, "confidence": conf})
 
-        # 外れ値の除去
+        # --- 座標回帰モード ---
+        elif preds.ndim == 2 and preds.shape[1] == 2:
+            coords = preds.cpu().numpy()  # [B,2], normalized in [0,1]
+            for (x_norm, y_norm), clip in zip(coords, clips, strict=False):
+                h_org, w_org = clip[-1].shape[:2]
+                xb = int(x_norm * w_org)
+                yb = int(y_norm * h_org)
+                # 回帰には confidence が無いので None に
+                results.append({"x": xb, "y": yb, "confidence": None})
+
+        else:
+            raise RuntimeError(f"Unsupported model output shape: {preds.shape}")
+
+        # 外れ値除去 & 欠損補完は heatmap/regression 共通
         if len(results) >= 2:
             results = self.remove_jumps(results)
-
-        # 欠損地の線形補完
         if len(results) >= 3:
             results = self.interpolate_track(results)
+
         return results
 
-    def _extract_feature_sequence(self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]) -> List[np.ndarray]:
+    def _extract_feature_sequence(
+        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
+    ) -> List[np.ndarray]:
         tensors = [self._preprocess_clip(clip) for clip in clips]
         batch = torch.cat(tensors, dim=0)
-        
+
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
+            ):
                 feats_nhwc = self.model.backbone(batch)
         else:
             with torch.no_grad():
                 feats_nhwc = self.model.backbone(batch)
-        
+
         feats = [f.permute(0, 3, 1, 2).contiguous() for f in feats_nhwc]
         lowfeat = feats[self.feature_layer]
         avg = lowfeat.mean(dim=1)
@@ -120,12 +143,17 @@ class BallPredictor:
             seq.append(img)
         return seq
 
-    def _extract_heatmap_sequence(self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]) -> List[np.ndarray]:
+    def _extract_heatmap_sequence(
+        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
+    ) -> List[np.ndarray]:
         tensors = [self._preprocess_clip(clip) for clip in clips]
         batch = torch.cat(tensors, dim=0)
-        
+
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
+            ):
                 preds = self.model(batch)
                 heatmaps = torch.sigmoid(preds)
         else:
@@ -145,7 +173,14 @@ class BallPredictor:
 
     def overlay(self, frame: np.ndarray, result: dict) -> np.ndarray:
         if result["x"] is not None and result["confidence"] > 0.5:
-            cv2.circle(frame, (result["x"], result["y"]), 6, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+            cv2.circle(
+                frame,
+                (result["x"], result["y"]),
+                6,
+                (0, 255, 255),
+                -1,
+                lineType=cv2.LINE_AA,
+            )
         return frame
 
     def _process_and_write(self, clip_buffer, last_frames, writer, w_org, h_org, pbar):
@@ -163,7 +198,7 @@ class BallPredictor:
                 pbar.update(1)
         else:
             results = self.predict(clip_buffer)
-            for result, last_frame in zip(results, last_frames):
+            for result, last_frame in zip(results, last_frames, strict=False):
                 out_frame = last_frame.copy()
                 if result["confidence"] >= self.threshold:
                     out_frame = self.overlay(out_frame, result)
@@ -171,7 +206,12 @@ class BallPredictor:
                     writer.write(out_frame)
                 pbar.update(1)
 
-    def run(self, input_path: Union[str, Path], output_path: Union[str, Path] = None, batch_size: int = 4) -> None:
+    def run(
+        self,
+        input_path: Union[str, Path],
+        output_path: Optional[Union[str, Path]] = None,
+        batch_size: int = 4,
+    ) -> None:
         cap = cv2.VideoCapture(str(input_path))
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open video: {input_path}")
@@ -199,15 +239,19 @@ class BallPredictor:
                     break
                 buffer_frames.append(frame)
                 if len(buffer_frames) >= self.num_frames:
-                    clip_buffer.append(buffer_frames[-self.num_frames:])
+                    clip_buffer.append(buffer_frames[-self.num_frames :])
                     last_frames.append(frame)
                 if len(clip_buffer) >= batch_size:
-                    self._process_and_write(clip_buffer, last_frames, writer, w_org, h_org, pbar)
+                    self._process_and_write(
+                        clip_buffer, last_frames, writer, w_org, h_org, pbar
+                    )
                     clip_buffer.clear()
                     last_frames.clear()
 
             if clip_buffer:
-                self._process_and_write(clip_buffer, last_frames, writer, w_org, h_org, pbar)
+                self._process_and_write(
+                    clip_buffer, last_frames, writer, w_org, h_org, pbar
+                )
 
         cap.release()
         if writer:
@@ -218,62 +262,54 @@ class BallPredictor:
     def _argmax_coord(self, heat: np.ndarray) -> Tuple[int, int]:
         idx = np.argmax(heat)
         y, x = divmod(idx, heat.shape[1])
-        return x, y
+        return (int(x), int(y))
 
-    def _to_original_scale(self, coord: Tuple[int, int], from_size: Tuple[int, int], to_size: Tuple[int, int]) -> Tuple[int, int]:
+    def _to_original_scale(
+        self,
+        coord: Tuple[int, int],
+        from_size: Tuple[int, int],
+        to_size: Tuple[int, int],
+    ) -> Tuple[int, int]:
         w_from, h_from = from_size
-        w_to, h_to = to_size
+        h_to, w_to = to_size
         x, y = coord
         return int(x * w_to / w_from), int(y * h_to / h_from)
-    
+
     @staticmethod
     def remove_jumps(track, max_dist=80):
-        """
-        大きく飛ぶ箇所を除外する
-        Args:
-            track: [{'x':..., 'y':..., 'confidence':...}, ...]
-            max_dist: 許容最大距離（ピクセル）
-        Returns:
-            track: 同形式で、ジャンプ地点は{'x':None, 'y':None, 'confidence':0.0}
-        """
         cleaned = [track[0]]
-        for prev, curr in zip(track, track[1:]):
+        for prev, curr in zip(track, track[1:], strict=False):
             if prev["x"] is not None and curr["x"] is not None:
-                dist = distance.euclidean((prev["x"], prev["y"]), (curr["x"], curr["y"]))
-                if dist > max_dist:
-                    curr = {'x': None, 'y': None, 'confidence': 0.0}
+                d = distance.euclidean((prev["x"], prev["y"]), (curr["x"], curr["y"]))
+                if d > max_dist:
+                    curr = {"x": None, "y": None, "confidence": 0.0}
             cleaned.append(curr)
         return cleaned
 
     @staticmethod
     def interpolate_track(track):
-        """
-        線形補完によってNoneを埋める
-        Args:
-            track: [{'x':..., 'y':..., 'confidence':...}, ...]
-        Returns:
-            track: 補完済みの同形式リスト
-        """
-        xs = np.array([p['x'] if p['x'] is not None else np.nan for p in track])
-        ys = np.array([p['y'] if p['y'] is not None else np.nan for p in track])
-        confs = np.array([p['confidence'] for p in track])
+        xs = np.array([p["x"] if p["x"] is not None else np.nan for p in track])
+        ys = np.array([p["y"] if p["y"] is not None else np.nan for p in track])
+        confs = np.array([p["confidence"] or 0.0 for p in track])
 
         def interp_nan(arr):
             nans = np.isnan(arr)
             if nans.all():
                 return arr
-            arr[nans] = np.interp(np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans])
+            arr[nans] = np.interp(
+                np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans]
+            )
             return arr
 
         xs = interp_nan(xs)
         ys = interp_nan(ys)
-        # confidenceは補完せず、元の値を維持
 
-        # nan全体の場合は全てNone
         result = []
-        for x, y, c in zip(xs, ys, confs):
+        for x, y, c in zip(xs, ys, confs, strict=False):
             if np.isnan(x) or np.isnan(y):
-                result.append({'x': None, 'y': None, 'confidence': 0.0})
+                result.append({"x": None, "y": None, "confidence": 0.0})
             else:
-                result.append({'x': int(round(x)), 'y': int(round(y)), 'confidence': c})
+                result.append(
+                    {"x": int(round(x)), "y": int(round(y)), "confidence": float(c)}
+                )
         return result

@@ -1,16 +1,19 @@
 import os
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from typing import Optional, Tuple, Union
 from pathlib import Path
+from typing import Optional, Tuple, Union
 
-from src.court.dataset.court_dataset import CourtDataset
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
+
 from src.court.arguments.prerare_teansforms import prepare_transform
+from src.court.dataset.court_dataset import CourtDataset
+
 
 class CourtDataModule(pl.LightningDataModule):
     """
     PyTorch Lightning DataModule for Court Keypoint Detection.
     """
+
     def __init__(
         self,
         annotation_root: Union[str, Path] = r"data/",
@@ -21,7 +24,7 @@ class CourtDataModule(pl.LightningDataModule):
         heatmap_size: Tuple[int, int] = (224, 224),
         default_keypoints: int = 15,
         is_each_keypoint: bool = True,
-        sigma: float = 2.0
+        sigma: float = 2.0,
     ):
         """
         Args:
@@ -63,13 +66,11 @@ class CourtDataModule(pl.LightningDataModule):
             if not os.path.exists(val_ann):
                 raise FileNotFoundError(f"File not found: {val_ann}")
             self.train_dataset = self._prepare_dataset(
-                annotation_path=train_ann,
-                transform=train_transform
+                annotation_path=train_ann, transform=train_transform
             )
             print("✅ Train dataset ready.")
             self.val_dataset = self._prepare_dataset(
-                annotation_path=val_ann,
-                transform=val_test_transform
+                annotation_path=val_ann, transform=val_test_transform
             )
             print("✅ Validation dataset ready.")
 
@@ -78,8 +79,7 @@ class CourtDataModule(pl.LightningDataModule):
             if not os.path.exists(test_ann):
                 raise FileNotFoundError(f"File not found: {test_ann}")
             self.test_dataset = self._prepare_dataset(
-                annotation_path=test_ann,
-                transform=val_test_transform
+                annotation_path=test_ann, transform=val_test_transform
             )
             print("✅ Test dataset ready.")
 
@@ -93,7 +93,7 @@ class CourtDataModule(pl.LightningDataModule):
             default_num_keypoints=self.default_keypoints,
             transform=transform,
             sigma=self.sigma,
-            is_each_keypoint_heatmap=self.is_each_keypoint
+            is_each_keypoint_heatmap=self.is_each_keypoint,
         )
 
     def train_dataloader(self):
@@ -109,17 +109,20 @@ class CourtDataModule(pl.LightningDataModule):
         return self._prepare_dataloader(self.test_dataset, shuffle=False)
 
     def _prepare_dataloader(self, dataset, shuffle: bool):
-        print(f"🚚 DataLoader prepared with batch_size={self.batch_size}, shuffle={shuffle}")
+        print(
+            f"🚚 DataLoader prepared with batch_size={self.batch_size}, shuffle={shuffle}"
+        )
         return DataLoader(
             dataset=dataset,
             batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=True,
         )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     dm = CourtDataModule(
         annotation_root="data/",
         image_root="data/images",
@@ -129,7 +132,7 @@ if __name__ == '__main__':
         num_annotated_keypoints=14,
         num_model_keypoints=15,
         is_each_keypoint=True,
-        sigma=2.0
+        sigma=2.0,
     )
     dm.setup(stage="fit")
     for batch in dm.val_dataloader():

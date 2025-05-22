@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 
 # SEブロックはそのまま利用
 class SE(nn.Module):
@@ -12,7 +12,7 @@ class SE(nn.Module):
             nn.Conv2d(channels, hidden, 1),
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden, channels, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -25,7 +25,9 @@ class DSConv(nn.Module):
         self.use_residual = (in_c == out_c) and (stride == 1)
         padding = kernel_size // 2
 
-        self.dw = nn.Conv2d(in_c, in_c, kernel_size, stride, padding, groups=in_c, bias=False)
+        self.dw = nn.Conv2d(
+            in_c, in_c, kernel_size, stride, padding, groups=in_c, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(in_c)
 
         self.pw = nn.Conv2d(in_c, out_c, 1, bias=False)
@@ -54,7 +56,7 @@ def make_dsconv_block(in_c, out_c, stride=1, se_ratio=0.25, repeat=3):
 class PixelShuffleBlock(nn.Module):
     def __init__(self, in_c: int, out_c: int, upscale_factor: int = 2):
         super().__init__()
-        self.conv = nn.Conv2d(in_c, out_c * (upscale_factor ** 2), 1, bias=False)
+        self.conv = nn.Conv2d(in_c, out_c * (upscale_factor**2), 1, bias=False)
         self.ps = nn.PixelShuffle(upscale_factor)
         self.bn = nn.BatchNorm2d(out_c)
         self.act = nn.Hardswish(inplace=True)
@@ -69,6 +71,7 @@ class LiteBallTrackerXY(nn.Module):
     入力: (B, 9, H, W)
     出力: (B, 2)
     """
+
     def __init__(self, in_channels: int = 9):
         super().__init__()
         # Encoder
@@ -83,11 +86,11 @@ class LiteBallTrackerXY(nn.Module):
         # Global pooling + 回帰ヘッド
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Sequential(
-            nn.Flatten(),               # (B, 256)
+            nn.Flatten(),  # (B, 256)
             nn.Linear(512, 128),
             nn.ReLU(inplace=True),
             nn.Linear(128, 2),
-            nn.Sigmoid()               # [0, 1] 正規化出力
+            nn.Sigmoid(),  # [0, 1] 正規化出力
         )
 
     def forward(self, x):
@@ -99,6 +102,7 @@ class LiteBallTrackerXY(nn.Module):
         x = self.bottleneck(x)
         x = self.pool(x)
         return self.head(x)  # → (B, 2)
+
 
 if __name__ == "__main__":
     model = LiteBallTrackerXY()

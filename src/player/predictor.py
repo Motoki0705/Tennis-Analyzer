@@ -1,9 +1,10 @@
-import cv2
-import torch
 import logging
-import numpy as np
-from typing import List, Dict, Tuple, Union
 from pathlib import Path
+from typing import Dict, List, Union
+
+import cv2
+import numpy as np
+import torch
 from tqdm import tqdm
 
 
@@ -15,7 +16,7 @@ class PlayerPredictor:
         label_map: Dict[int, str],
         device: Union[str, torch.device] = "cpu",
         threshold: float = 0.6,
-        use_half: bool = False
+        use_half: bool = False,
     ):
         # ─── logger 初期化 ───
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -66,31 +67,36 @@ class PlayerPredictor:
 
         # 推論
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
+            ):
                 outputs = self.model(pixel_values=inputs["pixel_values"])
         else:
             with torch.no_grad():
                 outputs = self.model(pixel_values=inputs["pixel_values"])
-                
+
         # 後処理
         target_sizes = [f.shape[:2] for f in frames]  # (height, width)
         results_batch = self.processor.post_process_object_detection(
-            outputs,
-            threshold=self.threshold,
-            target_sizes=target_sizes
+            outputs, threshold=self.threshold, target_sizes=target_sizes
         )
 
         # フォーマット変換
         all_detections: List[List[dict]] = []
         for results in results_batch:
             frame_dets: List[dict] = []
-            for score, label_id, box in zip(results["scores"], results["labels"], results["boxes"]):
+            for score, label_id, box in zip(
+                results["scores"], results["labels"], results["boxes"], strict=False
+            ):
                 x0, y0, x1, y1 = box.int().tolist()
-                frame_dets.append({
-                    "bbox": [x0, y0, x1, y1],
-                    "score": float(score),
-                    "label": self.label_map.get(int(label_id), str(label_id))
-                })
+                frame_dets.append(
+                    {
+                        "bbox": [x0, y0, x1, y1],
+                        "score": float(score),
+                        "label": self.label_map.get(int(label_id), str(label_id)),
+                    }
+                )
             all_detections.append(frame_dets)
 
         return all_detections
@@ -117,14 +123,20 @@ class PlayerPredictor:
             score = det["score"]
             label = det["label"]
             # バウンディングボックス
-            cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 0, 255), 2, lineType=cv2.LINE_AA)
+            cv2.rectangle(
+                annotated, (x0, y0), (x1, y1), (0, 0, 255), 2, lineType=cv2.LINE_AA
+            )
             # ラベルとスコア
             text = f"{label}: {score:.2f}"
             cv2.putText(
-                annotated, text,
+                annotated,
+                text,
                 (x0, max(y0 - 5, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                (255, 255, 255), 2, lineType=cv2.LINE_AA
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+                lineType=cv2.LINE_AA,
             )
         return annotated
 
@@ -132,7 +144,7 @@ class PlayerPredictor:
         self,
         input_path: Union[str, Path],
         output_path: Union[str, Path],
-        batch_size: int = 8
+        batch_size: int = 8,
     ) -> None:
         """
         動画を読み込み、batch_size フレームずつまとめて推論→オーバーレイし、
@@ -146,16 +158,16 @@ class PlayerPredictor:
             self.logger.error(f"動画ファイルを開けませんでした: {input_path}")
             return
 
-        fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         self.logger.info(
             f"読み込み完了 → フレーム数: {total}, FPS: {fps:.2f}, 解像度: {width}×{height}"
         )
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
         batch: List[np.ndarray] = []
@@ -168,7 +180,7 @@ class PlayerPredictor:
                 batch.append(frame)
                 if len(batch) == batch_size:
                     dets_batch = self.predict(batch)
-                    for frm, dets in zip(batch, dets_batch):
+                    for frm, dets in zip(batch, dets_batch, strict=False):
                         annotated = self.overlay(frm, dets)
                         writer.write(annotated)
                         pbar.update(1)
@@ -176,7 +188,7 @@ class PlayerPredictor:
 
             if batch:
                 dets_batch = self.predict(batch)
-                for frm, dets in zip(batch, dets_batch):
+                for frm, dets in zip(batch, dets_batch, strict=False):
                     annotated = self.overlay(frm, dets)
                     writer.write(annotated)
                     pbar.update(1)

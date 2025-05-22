@@ -1,17 +1,28 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
+
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, pad=1, stride=1, bias=True):
+    def __init__(
+        self, in_channels, out_channels, kernel_size=3, pad=1, stride=1, bias=True
+    ):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=pad, bias=bias),
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride=stride,
+                padding=pad,
+                bias=bias,
+            ),
             nn.ReLU(),
-            nn.BatchNorm2d(out_channels)
+            nn.BatchNorm2d(out_channels),
         )
 
     def forward(self, x):
         return self.block(x)
+
 
 class BallTrackerNet(nn.Module):
     def __init__(self, out_channels=1):
@@ -45,11 +56,11 @@ class BallTrackerNet(nn.Module):
 
         self.softmax = nn.Softmax(dim=1)
         self._init_weights()
-                  
-    def forward(self, x, testing=False): 
+
+    def forward(self, x, testing=False):
         batch_size = x.size(0)
         x = self.conv1(x)
-        x = self.conv2(x)    
+        x = self.conv2(x)
         x = self.pool1(x)
         x = self.conv3(x)
         x = self.conv4(x)
@@ -72,8 +83,8 @@ class BallTrackerNet(nn.Module):
         x = self.conv16(x)
         x = self.conv17(x)
         x = self.conv18(x)
-        return x.squeeze(1)                       
-    
+        return x.squeeze(1)
+
     def _init_weights(self):
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
@@ -83,14 +94,12 @@ class BallTrackerNet(nn.Module):
 
             elif isinstance(module, nn.BatchNorm2d):
                 nn.init.constant_(module.weight, 1)
-                nn.init.constant_(module.bias, 0)    
-    
-    
-if __name__ == '__main__':
-    device = 'cpu'
+                nn.init.constant_(module.bias, 0)
+
+
+if __name__ == "__main__":
+    device = "cpu"
     model = BallTrackerNet().to(device)
     inp = torch.rand(1, 9, 360, 640)
     out = model(inp)
-    print('out = {}'.format(out.shape))
-    
-    
+    print("out = {}".format(out.shape))

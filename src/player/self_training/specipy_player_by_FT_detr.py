@@ -1,16 +1,18 @@
-import os, json, copy
+import copy
+import json
 from pathlib import Path
-from typing import Union, List, Tuple
-from tqdm import tqdm
+from typing import List, Tuple, Union
 
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision.ops import box_iou
 from PIL import Image
+from torch.utils.data import DataLoader, Dataset
+from torchvision.ops import box_iou
+from tqdm import tqdm
 
 
 class _CocoImageDataset(Dataset):
     """DataLoader 用の軽量 Dataset — 画像 PIL と img_info を返す"""
+
     def __init__(self, image_infos: List[dict], images_root: Union[str, Path]):
         self.image_infos = image_infos
         self.images_root = Path(images_root)
@@ -32,6 +34,7 @@ class PlayerSpecifierByDetr:
     * IoU が閾値以上 & is_human_verified==False の bbox を player (=2) に変更
       + is_model_verified=True を付加
     """
+
     def __init__(
         self,
         input_json_path: Union[str, Path],
@@ -75,7 +78,7 @@ class PlayerSpecifierByDetr:
             image_infos=list(self.image_id_to_info.values()),
             images_root=self.images_root,
         )
-        
+
         loader = DataLoader(
             dataset,
             batch_size=self.batch_size,
@@ -88,8 +91,9 @@ class PlayerSpecifierByDetr:
         for imgs, infos in tqdm(loader, desc="Specifying players", total=len(loader)):
             # PIL → processor（size は各画像ごとに渡す）
             sizes = [(info["height"], info["width"]) for info in infos]
-            encoding = self.processor(images=list(imgs),
-                                      return_tensors="pt").to(self.device)
+            encoding = self.processor(images=list(imgs), return_tensors="pt").to(
+                self.device
+            )
 
             with torch.no_grad():
                 outputs = self.model(pixel_values=encoding["pixel_values"])
@@ -101,13 +105,13 @@ class PlayerSpecifierByDetr:
             )
 
             # 画像ごとに IoU マッチング
-            for res, info in zip(results_batch, infos):
+            for res, info in zip(results_batch, infos, strict=False):
                 self._update_annotations(info, res)
 
     @staticmethod
     def coco_collate_fn(batch):
-        return list(zip(*batch))
-    
+        return list(zip(*batch, strict=False))
+
     # ---------- IoU マッチングして category_id 更新 ----------
     def _update_annotations(self, img_info: dict, results: dict):
         image_id = img_info["id"]
@@ -128,8 +132,8 @@ class PlayerSpecifierByDetr:
             if best_iou >= self.iou_threshold:
                 ann = anns[best_ann_idx]
                 if not ann.get("is_human_verified", False):
-                    ann["category_id"] = 2             # player
-                    ann["is_model_verified"] = True    # 追加フラグ
+                    ann["category_id"] = 2  # player
+                    ann["is_model_verified"] = True  # 追加フラグ
 
     # ---------- ユーティリティ ----------
     @staticmethod
@@ -142,4 +146,3 @@ class PlayerSpecifierByDetr:
     def save(self):
         with open(self.output_json_path, "w") as f:
             json.dump(self.coco_data, f, indent=2)
-

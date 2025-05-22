@@ -1,9 +1,12 @@
 import hydra
-from omegaconf import DictConfig
-import torch
-from transformers import AutoModelForObjectDetection, RTDetrImageProcessor, EarlyStopping
 import pytorch_lightning as pl
+from omegaconf import DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
+from transformers import (
+    AutoModelForObjectDetection,
+    EarlyStopping,
+    RTDetrImageProcessor,
+)
 
 from src.player.arguments.prepare_transform import prepare_transform
 from src.player.dataset.datamodule import CocoDataModule
@@ -17,7 +20,7 @@ def main(cfg: DictConfig):
     model = AutoModelForObjectDetection.from_pretrained(
         cfg.model.model_name,
         num_labels=cfg.model.num_labels,
-        ignore_mismatched_sizes=True
+        ignore_mismatched_sizes=True,
     )
 
     # ==== Transform ====
@@ -33,7 +36,7 @@ def main(cfg: DictConfig):
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
         train_transform=train_transform,
-        val_test_transform=train_transform
+        val_test_transform=train_transform,
     )
 
     # ==== Lightning Module ====
@@ -64,12 +67,11 @@ def main(cfg: DictConfig):
         max_epochs=cfg.trainer.max_epochs,
         precision=cfg.trainer.precision,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
-        callbacks=[checkpoint_callback, ealry_stopping]
+        callbacks=[checkpoint_callback, ealry_stopping],
     )
 
     # ==== トレーニング ====
     trainer.fit(lightning_module, data_module, ckpt_path=cfg.trainer.ckpt_path)
-
 
 
 if __name__ == "__main__":

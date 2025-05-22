@@ -174,7 +174,6 @@ cython_debug/
 .pypirc
 
 # すべての data/ フォルダを無視
-**/data/
 **/datasets/
 
 # 例外: すべての data フォルダ内の .py ファイルは追跡する
@@ -195,3 +194,6 @@ onnx/
 
 # all code
 all_code/
+
+# hydra output
+hydra_outputs/

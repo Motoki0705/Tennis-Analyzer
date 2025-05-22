@@ -2,11 +2,12 @@ import os
 import shutil
 from typing import List
 
+
 def collect_files_by_extension(
     src_dirs: List[str],
     dst_dir: str,
     extensions: List[str],
-    exclude_filenames: List[str] = None
+    exclude_filenames: List[str] = None,
 ):
     """
     特定の拡張子を持ち、特定のファイル名を除外しつつ、複数ディレクトリからファイルを収集して1つのフォルダに保存する。
@@ -41,9 +42,10 @@ def collect_files_by_extension(
 
                     shutil.copy(src_path, dst_path)
 
+
 collect_files_by_extension(
-    src_dirs=['TrackNet'],     # 収集対象のフォルダ
-    dst_dir='ballgit',                         # 保存先
-    extensions=['.py', '.yaml'],                   # 対象拡張子
-    exclude_filenames=['__init__.py']
+    src_dirs=["TrackNet"],  # 収集対象のフォルダ
+    dst_dir="ballgit",  # 保存先
+    extensions=[".py", ".yaml"],  # 対象拡張子
+    exclude_filenames=["__init__.py"],
 )

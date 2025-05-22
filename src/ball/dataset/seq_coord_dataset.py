@@ -1,12 +1,14 @@
-import os, random, json
+import json
+import random
 from collections import defaultdict
 from pathlib import Path
 from typing import List, Tuple
+
+import albumentations as A
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 from PIL import Image
-import albumentations as A
+from torch.utils.data import Dataset
 
 
 class SequenceCoordDataset(Dataset):
@@ -18,6 +20,7 @@ class SequenceCoordDataset(Dataset):
     をターゲットとして返すデータセット。
     それ以外の引数・機能は元クラスと同じ。
     """
+
     def __init__(
         self,
         annotation_file: str,
@@ -30,15 +33,15 @@ class SequenceCoordDataset(Dataset):
         train_ratio: float = 0.8,
         val_ratio: float = 0.1,
         seed: int = 42,
-        input_type: str = "stack",   # "cat" or "stack"
-        output_type: str = "all",    # "all" or "last"
+        input_type: str = "stack",  # "cat" or "stack"
+        output_type: str = "all",  # "all" or "last"
         skip_frames_range: Tuple[int, int] = (1, 5),
     ):
         assert input_type in {"cat", "stack"}
         assert output_type in {"all", "last"}
 
         self.T = T
-        self.input_size = tuple(input_size)      # ★ ここが正規化の基準
+        self.input_size = tuple(input_size)  # ★ ここが正規化の基準
         self.image_root = Path(image_root)
         self.transform = transform
         self.split = split
@@ -64,10 +67,10 @@ class SequenceCoordDataset(Dataset):
 
         # クリップ単位 Split
         clip_keys = list(clip_groups.keys())
-        train_keys, val_keys, test_keys = self.group_split_clip(
-            clip_keys, train_ratio, val_ratio, seed
-        ) if use_group_split else self.group_split_clip(
-            clip_keys, train_ratio, val_ratio, seed
+        train_keys, val_keys, test_keys = (
+            self.group_split_clip(clip_keys, train_ratio, val_ratio, seed)
+            if use_group_split
+            else self.group_split_clip(clip_keys, train_ratio, val_ratio, seed)
         )
         target_keys = {"train": train_keys, "val": val_keys, "test": test_keys}[split]
 
@@ -81,7 +84,9 @@ class SequenceCoordDataset(Dataset):
                 self.windows.append((key, start))
 
         self.clip_groups = clip_groups
-        print(f"[{split.upper()}] clips: {len(target_keys)}, windows: {len(self.windows)}")
+        print(
+            f"[{split.upper()}] clips: {len(target_keys)}, windows: {len(self.windows)}"
+        )
 
     # ------------------------------------------------------------------ #
     def __len__(self):
@@ -93,7 +98,11 @@ class SequenceCoordDataset(Dataset):
         L = len(ids_sorted)
 
         # --- フレーム間 skip（訓練時のみ） ---
-        if self.T > 1 and self.split == "train" and (self.skip_min, self.skip_max) != (1, 1):
+        if (
+            self.T > 1
+            and self.split == "train"
+            and (self.skip_min, self.skip_max) != (1, 1)
+        ):
             max_allowed = (L - 1 - start) // (self.T - 1)
             skip_upper = min(self.skip_max, max_allowed) if max_allowed > 0 else 1
             skip = random.randint(self.skip_min, skip_upper)
@@ -102,7 +111,7 @@ class SequenceCoordDataset(Dataset):
             frame_ids = ids_sorted[start : start + self.T]
 
         frames, coords, visibilities, replay = [], [], [], None
-        H_in, W_in = self.input_size                         # ★ 正規化基準
+        H_in, W_in = self.input_size  # ★ 正規化基準
 
         for i, img_id in enumerate(frame_ids):
             info = self.images[img_id]
@@ -129,8 +138,8 @@ class SequenceCoordDataset(Dataset):
             else:
                 out = A.ReplayCompose.replay(replay, image=img_np, keypoints=keypoints)
 
-            img_aug = out["image"]          # tensor(C,H,W)
-            kp_aug  = out["keypoints"]
+            img_aug = out["image"]  # tensor(C,H,W)
+            kp_aug = out["keypoints"]
 
             # ★ ヒートマップ生成 → 座標正規化に変更
             if kp_aug:
@@ -145,19 +154,22 @@ class SequenceCoordDataset(Dataset):
 
         # --- 入力フォーマット ---
         if self.input_type == "cat":
-            input_tensor = torch.cat(frames, dim=0)      # [C*T, H, W]
+            input_tensor = torch.cat(frames, dim=0)  # [C*T, H, W]
         else:
-            input_tensor = torch.stack(frames, dim=1)    # [T, C, H, W]
+            input_tensor = torch.stack(frames, dim=1)  # [T, C, H, W]
 
         # --- 出力フォーマット ---
         if self.output_type == "all":
-            coord_tensor = torch.stack(coords, dim=0)                # [T, 2]
+            coord_tensor = torch.stack(coords, dim=0)  # [T, 2]
             visibility_tensor = torch.tensor(visibilities, dtype=torch.float32)  # [T]
         else:  # "last"
-            coord_tensor = coords[-1]                                # [2]
-            visibility_tensor = torch.tensor(visibilities[-1:], dtype=torch.float32)  # [1]
+            coord_tensor = coords[-1]  # [2]
+            visibility_tensor = torch.tensor(
+                visibilities[-1:], dtype=torch.float32
+            )  # [1]
 
         return input_tensor, coord_tensor, visibility_tensor
+
     # ------------------------------------------------------------------ #
     @staticmethod
     def _clip_keypoints(kp_xy: Tuple[float, float], img_hw: Tuple[int, int]):
@@ -172,14 +184,19 @@ class SequenceCoordDataset(Dataset):
         n = len(clip_keys)
         n_train = int(n * train_ratio)
         n_val = int(n * val_ratio)
-        return (clip_keys[:n_train],
-                clip_keys[n_train:n_train + n_val],
-                clip_keys[n_train + n_val:])
+        return (
+            clip_keys[:n_train],
+            clip_keys[n_train : n_train + n_val],
+            clip_keys[n_train + n_val :],
+        )
+
 
 import matplotlib.pyplot as plt
-def visualize_coords_on_frames(frames: torch.Tensor,
-                               coords: torch.Tensor,
-                               input_type: str = "cat"):
+
+
+def visualize_coords_on_frames(
+    frames: torch.Tensor, coords: torch.Tensor, input_type: str = "cat"
+):
     """
     frames: Tensor of shape
         - [B, C*T, H, W] if input_type="cat"
@@ -220,11 +237,12 @@ def visualize_coords_on_frames(frames: torch.Tensor,
         plt.imshow(img)
         plt.scatter(x, y)
         plt.title(f"Sample {i} - Predicted Coord")
-        plt.axis('off')
+        plt.axis("off")
         plt.show()
 
+
 # ---------------------------------------------------------------------- #
-if __name__ == '__main__':
+if __name__ == "__main__":
     input_size = [360, 640]
 
     transform = A.ReplayCompose(
@@ -243,16 +261,17 @@ if __name__ == '__main__':
         input_size=input_size,
         transform=transform,
         split="train",
-        input_type="cat",   # cat / stack
-        output_type="last", # all / last
+        input_type="cat",  # cat / stack
+        output_type="last",  # all / last
         skip_frames_range=(1, 5),
     )
 
     from torch.utils.data import DataLoader
+
     dl = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0)
 
     frames, coords, vis = next(iter(dl))
-    print("frames:", frames.shape)          # cat: [B, C*T, H, W]
-    print("coords:", coords.shape)          # last: [B, 2]
-    print("vis   :", vis.shape)             # [B, 1]
+    print("frames:", frames.shape)  # cat: [B, C*T, H, W]
+    print("coords:", coords.shape)  # last: [B, 2]
+    print("vis   :", vis.shape)  # [B, 1]
     visualize_coords_on_frames(frames, coords, input_type="cat")
