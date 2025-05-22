@@ -1,8 +1,8 @@
+from typing import Callable
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Callable
 
 
 class CourtLModule(pl.LightningModule):
@@ -34,7 +34,7 @@ class CourtLModule(pl.LightningModule):
             on_step=(stage == "train"),
             on_epoch=True,
             prog_bar=(stage != "train"),
-            logger=True
+            logger=True,
         )
         return loss
 
@@ -51,13 +51,11 @@ class CourtLModule(pl.LightningModule):
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay
+            weight_decay=self.hparams.weight_decay,
         )
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.hparams.optim_t_max,
-            eta_min=self.hparams.min_lr
+            optimizer, T_max=self.hparams.optim_t_max, eta_min=self.hparams.min_lr
         )
 
         return {
@@ -65,6 +63,6 @@ class CourtLModule(pl.LightningModule):
             "lr_scheduler": {
                 "scheduler": scheduler,
                 "interval": "epoch",
-                "monitor": "val_loss"
-            }
+                "monitor": "val_loss",
+            },
         }

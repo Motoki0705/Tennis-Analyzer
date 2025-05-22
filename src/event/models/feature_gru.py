@@ -1,38 +1,26 @@
 import torch
 import torch.nn as nn
 
+
 class FrameFeatureEncoder(nn.Module):
-    def __init__(self, 
-                 court_dim=45,
-                 ball_dim=3,
-                 pose_dim=204,
-                 bbox_dim=20,
-                 embed_dim=64,  # 各要素の中間特徴次元
-                 out_dim=128):  # 最終的なフレーム特徴次元
+    def __init__(
+        self,
+        court_dim=45,
+        ball_dim=3,
+        pose_dim=204,
+        bbox_dim=20,
+        embed_dim=64,  # 各要素の中間特徴次元
+        out_dim=128,
+    ):  # 最終的なフレーム特徴次元
         super().__init__()
-        
-        self.court_fc = nn.Sequential(
-            nn.Linear(court_dim, embed_dim),
-            nn.ReLU()
-        )
-        self.ball_fc = nn.Sequential(
-            nn.Linear(ball_dim, embed_dim),
-            nn.ReLU()
-        )
-        self.pose_fc = nn.Sequential(
-            nn.Linear(pose_dim, embed_dim),
-            nn.ReLU()
-        )
-        self.bbox_fc = nn.Sequential(
-            nn.Linear(bbox_dim, embed_dim),
-            nn.ReLU()
-        )
+
+        self.court_fc = nn.Sequential(nn.Linear(court_dim, embed_dim), nn.ReLU())
+        self.ball_fc = nn.Sequential(nn.Linear(ball_dim, embed_dim), nn.ReLU())
+        self.pose_fc = nn.Sequential(nn.Linear(pose_dim, embed_dim), nn.ReLU())
+        self.bbox_fc = nn.Sequential(nn.Linear(bbox_dim, embed_dim), nn.ReLU())
 
         # 4つの埋め込みを結合して最終特徴に
-        self.fuse_fc = nn.Sequential(
-            nn.Linear(embed_dim * 4, out_dim),
-            nn.ReLU()
-        )
+        self.fuse_fc = nn.Sequential(nn.Linear(embed_dim * 4, out_dim), nn.ReLU())
 
     def forward(self, court_feat, ball_feat, pose_feat, bbox_feat):
         """
@@ -58,13 +46,14 @@ class FrameFeatureEncoder(nn.Module):
 
 
 class EventPredictor(nn.Module):
-    def __init__(self, 
-                 input_dim: int,          # FrameFeatureEncoder の出力次元
-                 hidden_dim: int = 128, 
-                 num_layers: int = 1,
-                 bidirectional: bool = False,
-                 num_event_classes: int = 4  # イベント数（背景含む）
-                 ):
+    def __init__(
+        self,
+        input_dim: int,  # FrameFeatureEncoder の出力次元
+        hidden_dim: int = 128,
+        num_layers: int = 1,
+        bidirectional: bool = False,
+        num_event_classes: int = 4,  # イベント数（背景含む）
+    ):
         super().__init__()
 
         self.gru = nn.GRU(
@@ -72,7 +61,7 @@ class EventPredictor(nn.Module):
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
-            bidirectional=bidirectional
+            bidirectional=bidirectional,
         )
 
         self.out_dim = hidden_dim * (2 if bidirectional else 1)
@@ -92,14 +81,15 @@ class EventPredictor(nn.Module):
 
 
 class EventStatusModel(nn.Module):
-    def __init__(self,
-                 embed_dim=64,
-                 frame_out_dim=128,
-                 gru_hidden_dim=128,
-                 gru_layers=1,
-                 bidirectional=False,
-                 num_event_classes=5  # 背景 + Nイベント
-                 ):
+    def __init__(
+        self,
+        embed_dim=64,
+        frame_out_dim=128,
+        gru_hidden_dim=128,
+        gru_layers=1,
+        bidirectional=False,
+        num_event_classes=5,  # 背景 + Nイベント
+    ):
         super().__init__()
 
         self.encoder = FrameFeatureEncoder(
@@ -108,7 +98,7 @@ class EventStatusModel(nn.Module):
             pose_dim=204,
             bbox_dim=20,
             embed_dim=embed_dim,
-            out_dim=frame_out_dim
+            out_dim=frame_out_dim,
         )
 
         self.predictor = EventPredictor(
@@ -116,7 +106,7 @@ class EventStatusModel(nn.Module):
             hidden_dim=gru_hidden_dim,
             num_layers=gru_layers,
             bidirectional=bidirectional,
-            num_event_classes=num_event_classes
+            num_event_classes=num_event_classes,
         )
 
     def forward(self, court, ball, pose, bbox):
@@ -129,6 +119,6 @@ class EventStatusModel(nn.Module):
         Returns:
             logits: [B, T, num_event_classes]
         """
-        frame_feat = self.encoder(court, ball, pose, bbox)      # → [B, T, D]
-        logits = self.predictor(frame_feat)                     # → [B, T, C]
+        frame_feat = self.encoder(court, ball, pose, bbox)  # → [B, T, D]
+        logits = self.predictor(frame_feat)  # → [B, T, C]
         return logits

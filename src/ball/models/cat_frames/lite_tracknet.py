@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 
 class SE(nn.Module):
     """
     Squeeze-and-Excitation block
     """
+
     def __init__(self, channels: int, se_ratio: float = 0.25):
         super().__init__()
         hidden = max(1, int(channels * se_ratio))
@@ -14,7 +15,7 @@ class SE(nn.Module):
             nn.Conv2d(channels, hidden, 1, bias=True),
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden, channels, 1, bias=True),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -22,19 +23,28 @@ class SE(nn.Module):
         scale = self.fc(scale)
         return x * scale
 
+
 class DSConv(nn.Module):
     """
     Depthwise Separable Convolution + SE + Hardswish + Residual
     """
-    def __init__(self, in_c: int, out_c: int, kernel_size: int = 3,
-                 stride: int = 1, se_ratio: float = 0.25):
+
+    def __init__(
+        self,
+        in_c: int,
+        out_c: int,
+        kernel_size: int = 3,
+        stride: int = 1,
+        se_ratio: float = 0.25,
+    ):
         super().__init__()
         self.use_residual = (in_c == out_c) and (stride == 1)
         padding = kernel_size // 2
 
         # Depthwise
-        self.dw = nn.Conv2d(in_c, in_c, kernel_size, stride, padding,
-                            groups=in_c, bias=False)
+        self.dw = nn.Conv2d(
+            in_c, in_c, kernel_size, stride, padding, groups=in_c, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(in_c)
 
         # Pointwise
@@ -77,9 +87,10 @@ class PixelShuffleBlock(nn.Module):
     - PixelShuffle(r) で空間解像度を r 倍
     - BN + Hardswish
     """
+
     def __init__(self, in_c: int, out_c: int, upscale_factor: int = 2):
         super().__init__()
-        self.conv = nn.Conv2d(in_c, out_c * (upscale_factor ** 2), 1, bias=False)
+        self.conv = nn.Conv2d(in_c, out_c * (upscale_factor**2), 1, bias=False)
         self.ps = nn.PixelShuffle(upscale_factor)
         self.bn = nn.BatchNorm2d(out_c)
         self.act = nn.Hardswish(inplace=True)
@@ -91,12 +102,14 @@ class PixelShuffleBlock(nn.Module):
         x = self.act(x)
         return x
 
+
 class LiteBallTracker(nn.Module):
     """
     改良版 BallTracker:
       - 入力: （B, 9, H, W）
       - 出力: （B, 1, H, W） ヒートマップ
     """
+
     def __init__(self, in_channels: int = 9, heatmap_channels: int = 1):
         super().__init__()
 
@@ -119,24 +132,23 @@ class LiteBallTracker(nn.Module):
         self.dec1_up = PixelShuffleBlock(64 + 32, 32, upscale_factor=2)
         self.dec1_conv = make_dsconv_block(32, 32, stride=1)
 
-
         # Head: ヒートマップ生成
         self.head = nn.Sequential(
             nn.Conv2d(32 + 16, 16, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(16),
             nn.Hardswish(inplace=True),
-            nn.Conv2d(16, heatmap_channels, kernel_size=1)
+            nn.Conv2d(16, heatmap_channels, kernel_size=1),
         )
 
     def forward(self, x):
         # --- Encoder ---
-        s1 = self.enc1(x)         # → (B, 16, H, W)
-        s2 = self.enc2(s1)        # → (B, 24, H/2, W/2)
-        s3 = self.enc3(s2)        # → (B, 40, H/4, W/4)
-        s4 = self.enc4(s3)        # → (B, 80, H/8, W/8)
+        s1 = self.enc1(x)  # → (B, 16, H, W)
+        s2 = self.enc2(s1)  # → (B, 24, H/2, W/2)
+        s3 = self.enc3(s2)  # → (B, 40, H/4, W/4)
+        s4 = self.enc4(s3)  # → (B, 80, H/8, W/8)
 
         # --- Bottleneck ---
-        b = self.bottleneck(s4)   # → (B,112,H/8,W/8)
+        b = self.bottleneck(s4)  # → (B,112,H/8,W/8)
 
         # --- Decoder w/ Skip ---
         # Decoder w/ Skip
@@ -154,6 +166,7 @@ class LiteBallTracker(nn.Module):
         # Sigmoid をかけてヒートマップにする場合は以下を有効化:
         # out = torch.sigmoid(out)
         return out.squeeze(1)
+
 
 if __name__ == "__main__":
     # テスト実行例

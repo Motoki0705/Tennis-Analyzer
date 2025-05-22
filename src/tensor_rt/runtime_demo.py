@@ -1,10 +1,10 @@
-import onnxruntime as ort
 import numpy as np
+import onnxruntime as ort
 
 # 推論セッション作成（GPU 上で動くように CUDAExecutionProvider を指定）
 session = ort.InferenceSession(
-    "onnx_fp16/ball/lite_tracknet/lite_balltracker_fp16.onnx",       # or "lite_balltracker_int8.onnx"
-    providers=["CUDAExecutionProvider"]
+    "onnx_fp16/ball/lite_tracknet/lite_balltracker_fp16.onnx",  # or "lite_balltracker_int8.onnx"
+    providers=["CUDAExecutionProvider"],
 )
 
 # ダミー入力

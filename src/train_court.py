@@ -1,13 +1,17 @@
 import hydra
-from hydra.utils import to_absolute_path
 import pytorch_lightning as pl
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
-
+from src.court.dataset.datamodule import CourtDataModule
 from src.court.models.lite_tracknet import LiteBallTracker
 from src.court.trainer.cnn import CourtLModule
-from src.court.dataset.datamodule import CourtDataModule
+
 
 @hydra.main(version_base="1.1", config_path="configs/train", config_name="court")
 def main(cfg: DictConfig):
@@ -43,7 +47,7 @@ def main(cfg: DictConfig):
         dirpath=cfg.output_dir,
         filename="court-{epoch:02d}-{val_loss:.4f}",
         save_top_k=3,
-        mode="min"
+        mode="min",
     )
     lr_monitor_cb = LearningRateMonitor(logging_interval="epoch")
     ealry_stopping = EarlyStopping(monitor="val_loss")

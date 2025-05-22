@@ -1,19 +1,18 @@
-import os
+import json
 import random
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Union
-import json
+from typing import List, Tuple
 
+import albumentations as A
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 from PIL import Image
-import albumentations as A
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from src.ball.utils.heatmap import generate_gaussian_heatmap
 from src.ball.utils.visualize import overlay_heatmaps_on_frames
+
 
 class SequenceKeypointDataset(Dataset):
     """
@@ -33,16 +32,17 @@ class SequenceKeypointDataset(Dataset):
         train_ratio (float): トレーニングセット比率。
         val_ratio (float): 検証セット比率。
         seed (int): 乱数シード。
-        input_type (str): 
+        input_type (str):
             入力のフォーマット:
             - "cat": [C×T, H, W]
             - "stack": [N, C, H, W]
-        output_type (str): 
+        output_type (str):
             出力ヒートマップのフォーマット:
             - "all": [N, H, W]
             - "last": [H, W]
         skip_frames_range (Tuple[int, int]): スキップするフレーム範囲（訓練時のみ）。
     """
+
     def __init__(
         self,
         annotation_file: str,
@@ -58,7 +58,7 @@ class SequenceKeypointDataset(Dataset):
         seed: int = 42,
         input_type: str = "stack",
         output_type: str = "all",
-        skip_frames_range: Tuple[int, int] = (1, 5)
+        skip_frames_range: Tuple[int, int] = (1, 5),
     ):
         assert input_type in {"cat", "stack"}, "input_type must be 'cat' or 'stack'"
         assert output_type in {"all", "last"}, "output_type must be 'all' or 'last'"
@@ -117,7 +117,9 @@ class SequenceKeypointDataset(Dataset):
                 self.windows.append((key, start))
 
         self.clip_groups = clip_groups
-        print(f"[{split.upper()}] clips: {len(target_clip_keys)}, windows: {len(self.windows)}")
+        print(
+            f"[{split.upper()}] clips: {len(target_clip_keys)}, windows: {len(self.windows)}"
+        )
 
     def __len__(self):
         return len(self.windows)
@@ -128,13 +130,17 @@ class SequenceKeypointDataset(Dataset):
         L = len(ids_sorted)
 
         # スキップ適用（訓練時のみ）
-        if self.T > 1 and self.split == "train" and (self.skip_min, self.skip_max) != (1, 1):
+        if (
+            self.T > 1
+            and self.split == "train"
+            and (self.skip_min, self.skip_max) != (1, 1)
+        ):
             max_allowed = (L - 1 - start) // (self.T - 1)
             skip_upper = min(self.skip_max, max_allowed) if max_allowed > 0 else 1
             skip = random.randint(self.skip_min, skip_upper)
             frame_ids = [ids_sorted[start + i * skip] for i in range(self.T)]
         else:
-            frame_ids = ids_sorted[start:start + self.T]
+            frame_ids = ids_sorted[start : start + self.T]
 
         frames, heatmaps, visibilities, replay = [], [], [], None
         for i, img_id in enumerate(frame_ids):
@@ -154,7 +160,6 @@ class SequenceKeypointDataset(Dataset):
                 keypoints = []
                 visibilities.append(0)  # アノテーションがない場合は不可視扱い
 
-
             if i == 0:
                 out = self.transform(image=img_np, keypoints=keypoints)
                 replay = out["replay"]
@@ -162,14 +167,16 @@ class SequenceKeypointDataset(Dataset):
                 out = A.ReplayCompose.replay(replay, image=img_np, keypoints=keypoints)
 
             img_aug = out["image"]
-            kp_aug  = out["keypoints"]
+            kp_aug = out["keypoints"]
 
             if kp_aug:
                 hm = generate_gaussian_heatmap(
                     raw_label={"keypoints": [*kp_aug[0], 2]},
                     input_size=self.input_size,
                     output_size=self.heatmap_size,
-                ).squeeze(0)  # [H, W]
+                ).squeeze(
+                    0
+                )  # [H, W]
             else:
                 hm = torch.zeros(self.heatmap_size, dtype=torch.float32)
 
@@ -188,13 +195,16 @@ class SequenceKeypointDataset(Dataset):
             visibility_tensor = torch.tensor(visibilities, dtype=torch.float32)  # [N]
         else:
             heatmap_tensor = heatmaps[-1]  # [H, W]
-            visibility_tensor = torch.tensor(visibilities[-1:], dtype=torch.float32)  # [1]
-
+            visibility_tensor = torch.tensor(
+                visibilities[-1:], dtype=torch.float32
+            )  # [1]
 
         return input_tensor, heatmap_tensor, visibility_tensor
 
     @staticmethod
-    def _clip_keypoints(kp_xy: Tuple[float, float], img_hw: Tuple[int, int]) -> Tuple[float, float]:
+    def _clip_keypoints(
+        kp_xy: Tuple[float, float], img_hw: Tuple[int, int]
+    ) -> Tuple[float, float]:
         h, w = img_hw
         x, y = kp_xy
         x = min(max(x, 0.0), w - 1e-3)
@@ -219,15 +229,18 @@ class SequenceKeypointDataset(Dataset):
         return train_keys, val_keys, test_keys
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     input_size = [360, 640]
     heatmap_size = [360, 640]
 
-    transform = A.ReplayCompose([
-        A.Resize(height=input_size[0], width=input_size[1]),
-        A.Normalize(),
-        A.pytorch.ToTensorV2()
-    ], keypoint_params=A.KeypointParams(format='xy', remove_invisible=True))
+    transform = A.ReplayCompose(
+        [
+            A.Resize(height=input_size[0], width=input_size[1]),
+            A.Normalize(),
+            A.pytorch.ToTensorV2(),
+        ],
+        keypoint_params=A.KeypointParams(format="xy", remove_invisible=True),
+    )
 
     dataset = SequenceKeypointDataset(
         annotation_file=r"data\ball\coco_annotations_globally_tracked.json",
@@ -238,9 +251,9 @@ if __name__ == '__main__':
         transform=transform,
         split="train",
         use_group_split=True,
-        input_type="cat",    # cat or stack
-        output_type="last",   # all or last
-        skip_frames_range=(1, 5)
+        input_type="cat",  # cat or stack
+        output_type="last",  # all or last
+        skip_frames_range=(1, 5),
     )
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0)

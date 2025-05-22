@@ -1,12 +1,11 @@
-import os
-from pathlib import Path
 import csv
 import logging
+from pathlib import Path
 
 import hydra
+import matplotlib.pyplot as plt
 from omegaconf import DictConfig
 from tensorboard.backend.event_processing import event_accumulator
-import matplotlib.pyplot as plt
 
 
 def collect_scalar_events(tb_log_dir: Path):
@@ -14,9 +13,11 @@ def collect_scalar_events(tb_log_dir: Path):
     TensorBoard event ファイルを再帰的に検索し、
     タグごとの [(step, value), ...] をまとめて返す。
     """
-    tag_history = dict()     # tag -> list[(step, value)]
+    tag_history = dict()  # tag -> list[(step, value)]
     for ev_file in tb_log_dir.rglob("events.*"):
-        ea = event_accumulator.EventAccumulator(str(ev_file), size_guidance={"scalars": 0})
+        ea = event_accumulator.EventAccumulator(
+            str(ev_file), size_guidance={"scalars": 0}
+        )
         try:
             ea.Reload()
         except Exception as e:
@@ -35,7 +36,7 @@ def collect_scalar_events(tb_log_dir: Path):
 
 def save_plot(tag: str, history, out_dir: Path, figsize, dpi):
     """1 つのメトリクスを PNG として保存"""
-    steps, values = zip(*history)
+    steps, values = zip(*history, strict=False)
     plt.figure(figsize=figsize, dpi=dpi)
     plt.plot(steps, values)
     plt.title(tag)

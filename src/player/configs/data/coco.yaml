@@ -1,0 +1,8 @@
+img_folder: 'C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\images'
+annotation_file: 'C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\annotation_jsons\coco_annotations_final.json'
+cat_id_map: {2: 0, 3: 1}
+use_original_path: True
+use_group_split: True
+use_stratified_split: False
+batch_size: 32
+num_workers: 8

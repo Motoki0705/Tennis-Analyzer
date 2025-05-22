@@ -1,14 +1,13 @@
+from typing import Dict, Optional, Union
+
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib.patches as patches
-from typing import Optional, Dict, Union
 import torch
 
+
 def visualize_dataset(img_pil, target):
-    label_map = {
-        0: "player",
-        1: "non_player_person"
-    }
+    label_map = {0: "player", 1: "non_player_person"}
 
     fig, ax = plt.subplots(1, figsize=(8, 6))
     ax.imshow(img_pil)
@@ -17,17 +16,23 @@ def visualize_dataset(img_pil, target):
     boxes = [ann["bbox"] for ann in target["annotations"]]
     labels = [ann["category_id"] for ann in target["annotations"]]
 
-    for (x_min, y_min, rect_w, rect_h), lbl in zip(boxes, labels):
+    for (x_min, y_min, rect_w, rect_h), lbl in zip(boxes, labels, strict=False):
         rect = plt.Rectangle(
-            (x_min, y_min), rect_w, rect_h,
-            linewidth=2, edgecolor="red", facecolor="none"
+            (x_min, y_min),
+            rect_w,
+            rect_h,
+            linewidth=2,
+            edgecolor="red",
+            facecolor="none",
         )
         ax.add_patch(rect)
         ax.text(
-            x_min, y_min,
+            x_min,
+            y_min,
             label_map[int(lbl)],
-            fontsize=12, color="white",
-            bbox=dict(facecolor="red", alpha=0.5, pad=2)
+            fontsize=12,
+            color="white",
+            bbox=dict(facecolor="red", alpha=0.5, pad=2),
         )
 
     plt.show()
@@ -37,7 +42,7 @@ def visualize_datamodule(
     img_tensor: Union[torch.Tensor, np.ndarray],
     boxes: np.ndarray,
     labels: np.ndarray,
-    class_names: Optional[Dict[int, str]] = None
+    class_names: Optional[Dict[int, str]] = None,
 ) -> None:
     """
     画像とバウンディングボックス、ラベルを可視化する。
@@ -66,10 +71,10 @@ def visualize_datamodule(
     # 描画準備
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
-    ax.axis('off')
+    ax.axis("off")
 
     # 各ボックスを描画
-    for (cx, cy, bw, bh), lbl in zip(boxes, labels):
+    for (cx, cy, bw, bh), lbl in zip(boxes, labels, strict=False):
         # 正規化 → ピクセル座標（左上起点）
         x0 = (cx - bw / 2) * W
         y0 = (cy - bh / 2) * H
@@ -78,30 +83,28 @@ def visualize_datamodule(
 
         # 枠
         rect = patches.Rectangle(
-            (x0, y0), w_px, h_px,
-            linewidth=2, edgecolor='red', facecolor='none'
+            (x0, y0), w_px, h_px, linewidth=2, edgecolor="red", facecolor="none"
         )
         ax.add_patch(rect)
 
         # ラベル
         text = class_names[lbl] if class_names and lbl in class_names else str(lbl)
         ax.text(
-            x0, y0,
+            x0,
+            y0,
             text,
             fontsize=12,
-            color='white',
-            verticalalignment='top',
-            bbox=dict(facecolor='red', alpha=0.5, pad=2)
+            color="white",
+            verticalalignment="top",
+            bbox=dict(facecolor="red", alpha=0.5, pad=2),
         )
 
     plt.show()
 
+
 def visualize_results(pixel_values, results):
     # ラベル ID → 名前 の対応辞書を用意
-    label_map = {
-        0: "player",
-        1: "non_player_person"
-    }
+    label_map = {0: "player", 1: "non_player_person"}
 
     # Tensor → NumPy 画像に変換（H, W, C）
     img = pixel_values.permute(1, 2, 0).numpy()
@@ -113,7 +116,7 @@ def visualize_results(pixel_values, results):
     ax.imshow(img)
     ax.axis("off")
 
-    for score, lbl, box in zip(results["scores"], results["labels"], results["boxes"]):
+    for score, lbl, box in zip(results["scores"], results["labels"], results["boxes"], strict=False):
         # normalized center→絶対座標に復元
         x_min = box[0]
         y_min = box[1]
@@ -122,16 +125,22 @@ def visualize_results(pixel_values, results):
 
         # バウンディングボックスの描画
         rect = plt.Rectangle(
-            (x_min, y_min), rect_w, rect_h,
-            linewidth=2, edgecolor="red", facecolor="none"
+            (x_min, y_min),
+            rect_w,
+            rect_h,
+            linewidth=2,
+            edgecolor="red",
+            facecolor="none",
         )
         ax.add_patch(rect)
         # ラベル名を表示
         ax.text(
-            x_min, y_min,
+            x_min,
+            y_min,
             f"{label_map[int(lbl)]}: score = {score:.2f}",
-            fontsize=12, color="white",
-            bbox=dict(facecolor="red", alpha=0.5, pad=2)
+            fontsize=12,
+            color="white",
+            bbox=dict(facecolor="red", alpha=0.5, pad=2),
         )
 
     plt.show()

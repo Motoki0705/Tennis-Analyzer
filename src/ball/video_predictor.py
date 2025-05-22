@@ -1,13 +1,18 @@
-import cv2
-import torch
-import numpy as np
 import logging
 from pathlib import Path
-from typing import Tuple, List, Union
-from tqdm import tqdm
-import albumentations as A
+from typing import List, Tuple, Union
 
-from src.ball.models.video.mobile_gru_unet import TemporalHeatmapModel, MobileNetUHeatmapNet, MobileNetUHeatmapWrapper
+import albumentations as A
+import cv2
+import numpy as np
+import torch
+from tqdm import tqdm
+
+from src.ball.models.video.mobile_gru_unet import (
+    MobileNetUHeatmapNet,
+    MobileNetUHeatmapWrapper,
+    TemporalHeatmapModel,
+)
 from src.utils.load_model import load_model_weights
 
 
@@ -27,8 +32,8 @@ class BallPredictor:
         threshold: float = 0.5,
         device: str = "cuda",
         visualize_mode: str = "overlay",  # ★ 追加
-        feature_layer: int = -1,          # ★ 追加
-        use_half: bool = False            # ★ 追加
+        feature_layer: int = -1,  # ★ 追加
+        use_half: bool = False,  # ★ 追加
     ):
         # ロガー設定
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -39,12 +44,12 @@ class BallPredictor:
         self.logger.setLevel(logging.INFO)
 
         # パラメータ
-        self.H_in, self.W_in   = input_size
+        self.H_in, self.W_in = input_size
         self.H_out, self.W_out = heatmap_size
         self.base_ch = base_ch
-        self.T       = num_frames
-        self.thresh  = threshold
-        self.device  = torch.device(device)
+        self.T = num_frames
+        self.thresh = threshold
+        self.device = torch.device(device)
         self.visualize_mode = visualize_mode
         self.feature_layer = feature_layer
         self.use_half = use_half
@@ -54,11 +59,13 @@ class BallPredictor:
         self.model.eval().to(self.device)
 
         # 前処理
-        self.transform = A.Compose([
-            A.Resize(self.H_in, self.W_in),
-            A.Normalize(mean=(0.485,0.456,0.406), std=(0.229,0.224,0.225)),
-            A.pytorch.ToTensorV2()
-        ])
+        self.transform = A.Compose(
+            [
+                A.Resize(self.H_in, self.W_in),
+                A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                A.pytorch.ToTensorV2(),
+            ]
+        )
 
     def _load_model(self, ckpt_path):
         self.logger.info(f"Loading model from {ckpt_path}")
@@ -66,7 +73,7 @@ class BallPredictor:
         wrapper = MobileNetUHeatmapWrapper(backbone)
         model = TemporalHeatmapModel(wrapper, hidden_dim=self.base_ch * 8)
         model = load_model_weights(model, ckpt_path)
-        self.logger.info(f"  → Model loaded")
+        self.logger.info("  → Model loaded")
         return model
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
@@ -82,10 +89,15 @@ class BallPredictor:
         clips: list of length B, each is list of T BGR frames
         return: heatmaps Tensor shape (B, T, H_out, W_out)
         """
-        batch = torch.cat([self._preprocess_clip(c) for c in clips], dim=0)  # [B, T, 3, H, W]
+        batch = torch.cat(
+            [self._preprocess_clip(c) for c in clips], dim=0
+        )  # [B, T, 3, H, W]
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                preds = self.model(batch)        # [B,1,T,h,w]
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type="cuda", dtype=torch.float16),
+            ):
+                preds = self.model(batch)  # [B,1,T,h,w]
         else:
             with torch.no_grad():
                 preds = self.model(batch)
@@ -93,14 +105,21 @@ class BallPredictor:
         heatmaps = torch.sigmoid(preds[:, 0])  # [B, T, h, w]
         return heatmaps
 
-    def _extract_feature_sequence(self, batch: torch.Tensor, original_size: Tuple[int, int]) -> List[np.ndarray]:
+    def _extract_feature_sequence(
+        self, batch: torch.Tensor, original_size: Tuple[int, int]
+    ) -> List[np.ndarray]:
         """
         batch: [B, T, 3, H, W]
         return: list of (B*T) カラーマップ画像
         """
         if self.use_half:
-            with torch.no_grad(), torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                feats = self.model.backbone.encode(batch.view(-1, *batch.shape[2:]))[1]  # skip features
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(device_type="cuda", dtype=torch.float16),
+            ):
+                feats = self.model.backbone.encode(batch.view(-1, *batch.shape[2:]))[
+                    1
+                ]  # skip features
         else:
             with torch.no_grad():
                 feats = self.model.backbone.encode(batch.view(-1, *batch.shape[2:]))[1]
@@ -120,13 +139,13 @@ class BallPredictor:
 
     def run(
         self,
-        input_path:  Union[str, Path],
+        input_path: Union[str, Path],
         output_path: Union[str, Path] = None,
-        colormap:    int = cv2.COLORMAP_JET,
-        batch_size:  int = 4  # ★ 追加: バッチサイズ指定
+        colormap: int = cv2.COLORMAP_JET,
+        batch_size: int = 4,  # ★ 追加: バッチサイズ指定
     ) -> None:
         cap = cv2.VideoCapture(str(input_path))
-        fps   = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         w_org = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h_org = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -134,17 +153,22 @@ class BallPredictor:
         writer = None
         if output_path:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            size = (w_org, h_org) if self.visualize_mode == "overlay" else (self.W_out, self.H_out)
+            size = (
+                (w_org, h_org)
+                if self.visualize_mode == "overlay"
+                else (self.W_out, self.H_out)
+            )
             writer = cv2.VideoWriter(str(output_path), fourcc, fps, size)
 
         clip_buffer = []  # 複数のクリップをためる
-        frame_buffer = [] # 対応するオリジナルフレームをためる
+        frame_buffer = []  # 対応するオリジナルフレームをためる
 
         buffer = []
         with tqdm(total=total, desc="Ball 推論処理") as pbar:
             while True:
                 ret, frame = cap.read()
-                if not ret: break
+                if not ret:
+                    break
                 buffer.append(frame)
                 if len(buffer) == self.T:
                     clip_buffer.append(buffer.copy())
@@ -152,7 +176,9 @@ class BallPredictor:
                     buffer.clear()
 
                 if len(clip_buffer) >= batch_size:
-                    self._process_and_write(clip_buffer, frame_buffer, writer, (w_org, h_org), colormap)
+                    self._process_and_write(
+                        clip_buffer, frame_buffer, writer, (w_org, h_org), colormap
+                    )
                     pbar.update(batch_size * self.T)
                     clip_buffer.clear()
                     frame_buffer.clear()
@@ -165,11 +191,14 @@ class BallPredictor:
                 frame_buffer.append(buffer.copy())
 
             if clip_buffer:
-                self._process_and_write(clip_buffer, frame_buffer, writer, (w_org, h_org), colormap)
+                self._process_and_write(
+                    clip_buffer, frame_buffer, writer, (w_org, h_org), colormap
+                )
                 pbar.update(len(clip_buffer) * self.T)
 
         cap.release()
-        if writer: writer.release()
+        if writer:
+            writer.release()
 
     def _process_and_write(self, frames_T, writer, original_size, colormap):
         """
@@ -185,11 +214,13 @@ class BallPredictor:
 
         else:
             heatmaps = self.predict([frames_T])[0]  # [T, h, w]
-            for idx, (frame, heat) in enumerate(zip(frames_T, heatmaps.cpu().numpy())):
+            for idx, (frame, heat) in enumerate(zip(frames_T, heatmaps.cpu().numpy(), strict=False)):
                 if self.visualize_mode == "overlay":
                     flat_ix = heat.argmax()
                     y, x = divmod(flat_ix, heat.shape[1])
-                    x0, y0 = self._to_orig((x, y), (self.W_out, self.H_out), frame.shape[:2][::-1])
+                    x0, y0 = self._to_orig(
+                        (x, y), (self.W_out, self.H_out), frame.shape[:2][::-1]
+                    )
                     if heat.max() >= self.thresh:
                         cv2.circle(frame, (x0, y0), 6, (0, 255, 255), -1, cv2.LINE_AA)
                     out = frame
@@ -205,5 +236,6 @@ class BallPredictor:
     @staticmethod
     def _to_orig(coord, from_size, to_size):
         x, y = coord
-        w_f, h_f = from_size; w_t, h_t = to_size
+        w_f, h_f = from_size
+        w_t, h_t = to_size
         return int(x * w_t / w_f), int(y * h_t / h_f)

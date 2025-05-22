@@ -1,9 +1,13 @@
-import torch
 import torch.nn as nn
 from transformers import TimesformerModel
 
+
 class TimeSformerBall(nn.Module):
-    def __init__(self, num_keypoints=1, pretrained_model="facebook/timesformer-base-finetuned-k400"):
+    def __init__(
+        self,
+        num_keypoints=1,
+        pretrained_model="facebook/timesformer-base-finetuned-k400",
+    ):
         super().__init__()
 
         # 事前学習済み TimeSformer をロード（動画分類モデル）
@@ -15,8 +19,8 @@ class TimeSformerBall(nn.Module):
         # Decoder: simple upsampling + conv to heatmap
         self.decoder = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True),
-            nn.Conv2d(hidden_dim, num_keypoints, kernel_size=3, padding=1)
+            nn.Upsample(scale_factor=4, mode="bilinear", align_corners=True),
+            nn.Conv2d(hidden_dim, num_keypoints, kernel_size=3, padding=1),
         )
 
     def forward(self, x):
@@ -29,9 +33,7 @@ class TimeSformerBall(nn.Module):
         B, T, C, H, W = x.shape
 
         # TimeSformerの入力形式に整形
-        inputs = {
-            "pixel_values": x  # transformersはこのkey名で受け取る
-        }
+        inputs = {"pixel_values": x}  # transformersはこのkey名で受け取る
 
         outputs = self.encoder(**inputs)
 
@@ -43,7 +45,7 @@ class TimeSformerBall(nn.Module):
         B, N, C = hidden.shape
         T = self.encoder.config.num_frames
         N_p = N // T  # パッチ数 per フレーム
-        H_feat = W_feat = int(N_p ** 0.5)
+        H_feat = W_feat = int(N_p**0.5)
 
         # 2. reshape to (B, T, H_feat, W_feat, C)
         hidden = hidden.view(B, T, H_feat, W_feat, C)
@@ -57,10 +59,12 @@ class TimeSformerBall(nn.Module):
         heatmaps = self.decoder(feat_map)  # (B, num_keypoints, H_out, W_out)
         return heatmaps
 
+
 def check_param_groups(model):
     # グループの準備
-    backbone_params = list(model.encoder.embeddings.parameters()) + \
-                      list(model.encoder.encoder.layer.parameters())
+    backbone_params = list(model.encoder.embeddings.parameters()) + list(
+        model.encoder.encoder.layer.parameters()
+    )
     decoder_params = list(model.decoder.parameters())
 
     # IDで高速比較のためにsetに変換
@@ -84,6 +88,7 @@ def check_param_groups(model):
     print("Total model    params:", len(list(model.parameters())))
     print("Sum of groups  params:", len(backbone_ids.union(decoder_ids)))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     model = TimeSformerBall()
     check_param_groups(model)

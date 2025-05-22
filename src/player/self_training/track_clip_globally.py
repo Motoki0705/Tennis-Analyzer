@@ -1,10 +1,10 @@
-import json
 import copy
-import numpy as np
+import json
 from collections import defaultdict
-from typing import List, Dict, Tuple
 from pathlib import Path
+from typing import Dict, List, Tuple
 
+import numpy as np
 from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 
@@ -86,7 +86,7 @@ class ClipwiseGlobalPlayerTracker:
 
         # 初期クラスタ辞書
         raw_clusters: Dict[int, List[Dict]] = defaultdict(list)
-        for lbl, ann in zip(labels, refs):
+        for lbl, ann in zip(labels, refs, strict=False):
             if lbl == -1:
                 continue
             ann["_frame_idx"] = frame_idx_map[ann["image_id"]]
@@ -114,7 +114,9 @@ class ClipwiseGlobalPlayerTracker:
 
         # 3つ以上ならスコアで上位 top_k
         if len(candidate) > self.top_k:
-            scores = {cid: evaluate_track_strength(cluster_to_anns[cid]) for cid in candidate}
+            scores = {
+                cid: evaluate_track_strength(cluster_to_anns[cid]) for cid in candidate
+            }
             selected = sorted(scores, key=lambda k: -scores[k])[: self.top_k]
         else:
             selected = candidate
@@ -152,23 +154,27 @@ class ClipwiseGlobalPlayerTracker:
 
         while refine_cnt < self.max_refine and eps >= self.min_eps:
             feats = np.array(
-                [
-                    bbox_center(a["bbox"]).tolist() + [a["_frame_idx"]]
-                    for a in pool
-                ],
+                [bbox_center(a["bbox"]).tolist() + [a["_frame_idx"]] for a in pool],
                 dtype=np.float32,
             )
             labels = self._dbscan(feats, eps)
             tmp = defaultdict(list)
-            for lbl, ann in zip(labels, pool):
+            for lbl, ann in zip(labels, pool, strict=False):
                 tmp[lbl].append(ann)
 
             # valid / invalid 判定
             invalid_tmp = {
-                lbl: t for lbl, t in tmp.items()
+                lbl: t
+                for lbl, t in tmp.items()
                 if lbl != -1 and self._has_frame_collision(t)
             }
-            clusters.update({lbl: t for lbl, t in tmp.items() if lbl == -1 or lbl not in invalid_tmp})
+            clusters.update(
+                {
+                    lbl: t
+                    for lbl, t in tmp.items()
+                    if lbl == -1 or lbl not in invalid_tmp
+                }
+            )
 
             pool = [ann for sub in invalid_tmp.values() for ann in sub]
             if not pool:
@@ -225,24 +231,23 @@ def run_tracking(
         max_refine=max_refine,
     )
 
-    for (gid, cid), clip_imgs in tqdm(
-        clips.items(), desc="Tracking Clips"
-    ):
+    for (gid, cid), clip_imgs in tqdm(clips.items(), desc="Tracking Clips"):
         tracker.track_clip(clip_imgs)
 
     with output_json.open("w", encoding="utf-8") as f:
         json.dump(new_coco, f, indent=2)
     print(f"Saved: {output_json}")
 
-if __name__ == '__main__':
-    input_json = r'C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\annotation_jsons\coco_annotations_final.json'
-    output_json = r'C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\annotation_jsons\coco_annotations_globally_tracked.json'
+
+if __name__ == "__main__":
+    input_json = r"C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\annotation_jsons\coco_annotations_final.json"
+    output_json = r"C:\Users\kamim\code\Tennis-Analyzer\BallDetection\data\annotation_jsons\coco_annotations_globally_tracked.json"
 
     run_tracking(
         input_json=input_json,
         output_json=output_json,
-        eps=50,                 # DBSCANのクラスタリング半径（調整可能）
-        min_samples=3,          # クラスタリングに必要な最小bbox数（調整可能）
-        player_threshold=1,     # プレーヤーとするために必要な最低player判定数（調整可能）
-        top_k=2
+        eps=50,  # DBSCANのクラスタリング半径（調整可能）
+        min_samples=3,  # クラスタリングに必要な最小bbox数（調整可能）
+        player_threshold=1,  # プレーヤーとするために必要な最低player判定数（調整可能）
+        top_k=2,
     )

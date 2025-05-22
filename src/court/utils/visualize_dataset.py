@@ -1,14 +1,15 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 
 def visualize_overlay(
-    image, 
-    heatmap, 
-    alpha: float = 0.5, 
-    cmap: str = 'jet', 
-    channel_idx: int = None, 
+    image,
+    heatmap,
+    alpha: float = 0.5,
+    cmap: str = "jet",
+    channel_idx: int = None,
     figsize: tuple = (10, 10),
-    save_path: str = None
+    save_path: str = None,
 ):
     """
     画像とヒートマップを重ね合わせて表示または保存します。
@@ -22,11 +23,12 @@ def visualize_overlay(
     - figsize: tuple = 図のサイズ(幅, 高さ)インチ
     - save_path: str or None = ファイルパスを指定すると画像を保存し、表示はしません
     """
+
     # -------------------------
     # Tensor 判定用ヘルパー
     # -------------------------
     def is_tensor_like(x):
-        return hasattr(x, 'permute') and hasattr(x, 'cpu') and hasattr(x, 'numpy')
+        return hasattr(x, "permute") and hasattr(x, "cpu") and hasattr(x, "numpy")
 
     # -------------------------
     # 画像を numpy に
@@ -43,7 +45,7 @@ def visualize_overlay(
     # デノーマライズ (albumentations Normalize の逆)
     # -------------------------
     mean = np.array([0.485, 0.456, 0.406], dtype=img.dtype)
-    std  = np.array([0.229, 0.224, 0.225], dtype=img.dtype)
+    std = np.array([0.229, 0.224, 0.225], dtype=img.dtype)
     img = img * std + mean
     img = np.clip(img, 0.0, 1.0)
 
@@ -71,15 +73,16 @@ def visualize_overlay(
     plt.figure(figsize=figsize)
     plt.imshow(img)
     plt.imshow(hm, alpha=alpha, cmap=cmap)
-    plt.axis('off')
+    plt.axis("off")
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+        plt.savefig(save_path, bbox_inches="tight", pad_inches=0)
         print(f"Overlay image saved to: {save_path}")
     else:
         plt.show()
     plt.close()
+
 
 # ユーザ呼び出し例
 # visualize_overlay(image, heatmap, alpha=0.6, cmap='jet', save_path='overlay.png')

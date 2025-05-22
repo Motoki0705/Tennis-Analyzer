@@ -1,41 +1,77 @@
-import cv2
 import json
 import os
-from pathlib import Path
-from tqdm import tqdm
-from typing import List, Union, Dict, Any, Tuple
-import numpy as np
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Union
+
+import cv2
+import numpy as np
+from tqdm import tqdm
 
 # Assuming PLAYER_CATEGORY, COURT_CATEGORY, BALL_CATEGORY are defined
 try:
     from src.annotation.const import PLAYER_CATEGORY
 except ImportError:
     PLAYER_CATEGORY = {
-        "id": 2, "name": "player", "supercategory": "person",
+        "id": 2,
+        "name": "player",
+        "supercategory": "person",
         "keypoints": [
-            "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-            "left_wrist", "right_wrist", "left_hip", "right_hip",
-            "left_knee", "right_knee", "left_ankle", "right_ankle"
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_shoulder",
+            "right_shoulder",
+            "left_elbow",
+            "right_elbow",
+            "left_wrist",
+            "right_wrist",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
         ],
         "skeleton": [
-            [15, 13], [13, 11], [16, 14], [14, 12], [11, 12],
-            [5, 11], [6, 12], [5, 6], [5, 7], [7, 9],
-            [6, 8], [8, 10], [1, 2], [0, 1], [0, 2],
-            [1, 3], [2, 4], [3, 5], [4, 6]
-        ]
+            [15, 13],
+            [13, 11],
+            [16, 14],
+            [14, 12],
+            [11, 12],
+            [5, 11],
+            [6, 12],
+            [5, 6],
+            [5, 7],
+            [7, 9],
+            [6, 8],
+            [8, 10],
+            [1, 2],
+            [0, 1],
+            [0, 2],
+            [1, 3],
+            [2, 4],
+            [3, 5],
+            [4, 6],
+        ],
     }
 
 COURT_CATEGORY = {
-    "id": 3, "name": "court", "supercategory": "field",
+    "id": 3,
+    "name": "court",
+    "supercategory": "field",
     "keypoints": [f"pt{i}" for i in range(15)],
-    "skeleton": []
+    "skeleton": [],
 }
 
 BALL_CATEGORY = {
-    "id": 1, "name": "ball", "supercategory": "sports",
-    "keypoints": ["center"], "skeleton": []
+    "id": 1,
+    "name": "ball",
+    "supercategory": "sports",
+    "keypoints": ["center"],
+    "skeleton": [],
 }
 
 
@@ -44,6 +80,7 @@ class FrameAnnotator:
     動画をフレームごとに JPG 保存しつつ、Ball/Court/Pose の推論結果を
     単一の COCO 形式 JSON ファイルに書き出す。各タスクでバッチ推論をサポート。
     """
+
     def __init__(
         self,
         ball_predictor,
@@ -76,12 +113,12 @@ class FrameAnnotator:
                 "version": "1.1",
                 "year": datetime.now().year,
                 "contributor": "FrameAnnotator",
-                "date_created": datetime.now().isoformat()
+                "date_created": datetime.now().isoformat(),
             },
             "licenses": [{"id": 1, "name": "Placeholder License", "url": ""}],
             "categories": [BALL_CATEGORY, PLAYER_CATEGORY, COURT_CATEGORY],
             "images": [],
-            "annotations": []
+            "annotations": [],
         }
 
         self.annotation_id_counter = 1
@@ -93,7 +130,7 @@ class FrameAnnotator:
         file_name: str,
         height: int,
         width: int,
-        video_path_str: str = ""
+        video_path_str: str = "",
     ) -> int:
         entry = {
             "id": self.image_id_counter,
@@ -103,7 +140,7 @@ class FrameAnnotator:
             "width": width,
             "license": 1,
             "frame_idx_in_video": frame_idx,
-            "source_video": video_path_str
+            "source_video": video_path_str,
         }
         self.coco_output["images"].append(entry)
         img_id = self.image_id_counter
@@ -113,7 +150,11 @@ class FrameAnnotator:
     def _add_ball_annotation(self, image_id: int, ball_res: Dict):
         if not ball_res:
             return
-        x, y, conf = ball_res.get("x"), ball_res.get("y"), ball_res.get("confidence", 0.0)
+        x, y, conf = (
+            ball_res.get("x"),
+            ball_res.get("y"),
+            ball_res.get("confidence", 0.0),
+        )
         if x is None or y is None:
             return
         visibility = 2 if conf >= self.ball_vis_thresh else 1
@@ -124,7 +165,7 @@ class FrameAnnotator:
             "keypoints": [float(x), float(y), visibility],
             "num_keypoints": 1 if visibility > 0 else 0,
             "iscrowd": 0,
-            "score": float(conf)
+            "score": float(conf),
         }
         self.coco_output["annotations"].append(ann)
         self.annotation_id_counter += 1
@@ -139,7 +180,11 @@ class FrameAnnotator:
         for i in range(num_expected):
             if i < len(court_kps):
                 kp = court_kps[i]
-                x, y, conf = kp.get("x", 0.0), kp.get("y", 0.0), kp.get("confidence", 0.0)
+                x, y, conf = (
+                    kp.get("x", 0.0),
+                    kp.get("y", 0.0),
+                    kp.get("confidence", 0.0),
+                )
             else:
                 x, y, conf = 0.0, 0.0, 0.0
 
@@ -162,7 +207,7 @@ class FrameAnnotator:
             "keypoints": keypoints_flat,
             "num_keypoints": num_visible,
             "keypoints_scores": keypoints_scores,
-            "iscrowd": 0
+            "iscrowd": 0,
         }
         self.coco_output["annotations"].append(ann)
         self.annotation_id_counter += 1
@@ -178,7 +223,7 @@ class FrameAnnotator:
             if not bbox or not kps or not scores:
                 continue
             flat, num_vis = [], 0
-            for (x, y), s in zip(kps, scores):
+            for (x, y), s in zip(kps, scores, strict=False):
                 if s >= self.pose_vis_thresh:
                     v = 2
                     num_vis += 1
@@ -198,7 +243,7 @@ class FrameAnnotator:
                 "keypoints_scores": [float(s) for s in scores],  # ← 新しく追加
                 "num_keypoints": num_vis,
                 "iscrowd": 0,
-                "score": float(det_score)
+                "score": float(det_score),
             }
             self.coco_output["annotations"].append(ann)
             self.annotation_id_counter += 1
@@ -208,7 +253,7 @@ class FrameAnnotator:
         predictor,
         frames_buffer: List,
         meta_buffer: List[Tuple[int, int]],
-        cache: Dict[int, Any]
+        cache: Dict[int, Any],
     ):
         if not frames_buffer:
             return
@@ -221,7 +266,7 @@ class FrameAnnotator:
             preds = out[0] if predictor == self.court_predictor else out
 
         # キャッシュ登録とアノテーション追加
-        for (img_id, _), pred in zip(meta_buffer, preds):
+        for (img_id, _), pred in zip(meta_buffer, preds, strict=False):
             cache[img_id] = pred
             if predictor == self.ball_predictor:
                 self._add_ball_annotation(img_id, pred)
@@ -237,9 +282,11 @@ class FrameAnnotator:
         self,
         input_path: Union[str, Path],
         output_dir: Union[str, Path],
-        output_json: Union[str, Path]
+        output_json: Union[str, Path],
     ):
-        input_path, output_dir, output_json = map(Path, (input_path, output_dir, output_json))
+        input_path, output_dir, output_json = map(
+            Path, (input_path, output_dir, output_json)
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         # 初期化
@@ -277,8 +324,10 @@ class FrameAnnotator:
                 self.ball_sliding_window.append(frame.copy())
                 if len(self.ball_sliding_window) > self.ball_predictor.num_frames:
                     self.ball_sliding_window.pop(0)
-                if frame_idx % self.intervals["ball"] == 0 \
-                   and len(self.ball_sliding_window) >= self.ball_predictor.num_frames:
+                if (
+                    frame_idx % self.intervals["ball"] == 0
+                    and len(self.ball_sliding_window) >= self.ball_predictor.num_frames
+                ):
                     ball_buf.append(list(self.ball_sliding_window))
                     ball_meta.append((img_id, frame_idx))
 
@@ -294,22 +343,34 @@ class FrameAnnotator:
 
                 # バッチ処理
                 if len(ball_buf) >= self.batch_sizes["ball"]:
-                    self._process_batch(self.ball_predictor, ball_buf, ball_meta, ball_cache)
+                    self._process_batch(
+                        self.ball_predictor, ball_buf, ball_meta, ball_cache
+                    )
                 if len(court_buf) >= self.batch_sizes["court"]:
-                    self._process_batch(self.court_predictor, court_buf, court_meta, court_cache)
+                    self._process_batch(
+                        self.court_predictor, court_buf, court_meta, court_cache
+                    )
                 if len(pose_buf) >= self.batch_sizes["pose"]:
-                    self._process_batch(self.pose_predictor, pose_buf, pose_meta, pose_cache)
+                    self._process_batch(
+                        self.pose_predictor, pose_buf, pose_meta, pose_cache
+                    )
 
                 frame_idx += 1
                 pbar.update(1)
 
             # 残りバッチの処理
             if ball_buf:
-                self._process_batch(self.ball_predictor, ball_buf, ball_meta, ball_cache)
+                self._process_batch(
+                    self.ball_predictor, ball_buf, ball_meta, ball_cache
+                )
             if court_buf:
-                self._process_batch(self.court_predictor, court_buf, court_meta, court_cache)
+                self._process_batch(
+                    self.court_predictor, court_buf, court_meta, court_cache
+                )
             if pose_buf:
-                self._process_batch(self.pose_predictor, pose_buf, pose_meta, pose_cache)
+                self._process_batch(
+                    self.pose_predictor, pose_buf, pose_meta, pose_cache
+                )
 
         cap.release()
 
@@ -317,6 +378,8 @@ class FrameAnnotator:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(self.coco_output, f, ensure_ascii=False, indent=2)
 
-        print(f"✅ Done! Frames saved in `{output_dir}`, COCO annotations in `{output_json}`")
+        print(
+            f"✅ Done! Frames saved in `{output_dir}`, COCO annotations in `{output_json}`"
+        )
         print(f"Total images: {len(self.coco_output['images'])}")
         print(f"Total annotations: {len(self.coco_output['annotations'])}")
