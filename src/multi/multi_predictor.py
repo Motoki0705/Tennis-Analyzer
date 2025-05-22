@@ -20,12 +20,8 @@ class MultiPredictor:
         court_batch_size: int = 1,
         pose_batch_size: int = 1,
     ):
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            h = logging.StreamHandler()
-            h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(h)
-        self.logger.setLevel(logging.INFO)
+        from utils.logging_utils import setup_logger
+        self.logger = setup_logger(self.__class__)
 
         self.ball_predictor = ball_predictor
         self.court_predictor = court_predictor
@@ -68,53 +64,26 @@ class MultiPredictor:
         self.current_pose_result_idx = 0
 
     def _process_ball_batch(self):
-        if (
-            self.ball_frame_buffer
-            and len(self.ball_frame_buffer[-1]) >= self.ball_predictor.num_frames
-        ):  # ensure last clip is full
-            # Ball predictor expects a list of clips (a clip is a list of frames)
-            # We form a batch of clips. Each clip is taken from the end of ball_frame_buffer
-            clips_for_ball_batch = []
-            num_clips_in_batch = len(
-                self.ball_frame_buffer
-            )  # Number of frames that became the *end* of a T-frame sequence
-
-            for i in range(num_clips_in_batch):
-                # ball_frame_buffer stores individual frames as they arrive.
-                # To form a clip for frame `j` which is the T-th frame of its sequence:
-                # The clip is [frame_{j-T+1}, ..., frame_j]
-                # If ball_frame_buffer = [f0, f1, f2, f3, f4] and T=3
-                # 1. Last frame f2: clip [f0,f1,f2]
-                # 2. Last frame f3: clip [f1,f2,f3]
-                # 3. Last frame f4: clip [f2,f3,f4]
-                # This seems overly complicated. The original ball predictor's `buffer_frames` logic was simpler.
-                # Let's stick to the simpler idea: if `ball_frame_buffer` has enough for `ball_batch_size` *clips*, predict.
-                # The `ball_frame_buffer` for MultiPredictor should store *clips* not individual frames.
-                # Or, `ball_predictor.predict` should handle batch of frames and internally make clips.
-                # Given `BallPredictor.predict` takes `List[List[np.ndarray]]` (list of clips),
-                # we need to construct `self.ball_batch_size` number of clips.
-
-                # Re-thinking ball batching:
-                # `self.ball_frame_buffer` accumulates raw frames.
-                # When it's time to predict for ball:
-                # We take `self.ball_batch_size` *sequences* of T frames.
-
-                # Simpler: The ball predictor is T-frame input. It processes one T-frame sequence at a time,
-                # but its `predict` method can take a BATCH of such T-frame sequences.
-                # `self.ball_frame_buffer` will store individual frames.
-                # `self.ball_batch_clips_buffer` will store T-frame sequences to be batched.
-                pass  # Ball processing will be slightly different due to its T-frame input nature.
-                # For now, assume ball predictor is called per T-frame sequence, not batched here yet.
-                # The request was for MultiPredictor to have per-task BATCH_SIZE.
-                # BallPredictor.predict itself handles a batch of clips.
-
-            # For now, let's assume self.ball_predictor.predict is called with a single clip,
-            # and its internal batching handles multiple such calls if needed.
-            # The `ball_batch_size` here would mean how many *latest frames* trigger a prediction cycle for ball.
-            # This part needs more clarity based on BallPredictor's batching capability.
-            # Assuming BallPredictor.predict([one_clip]) is the way for now.
-            # The per-task batching is more straightforward for court and pose.
-            self.last_ball_results = []  # Reset for new results
+        """
+        ボール検出バッチを処理します。
+        ball_frame_buffer に十分なフレームが蓄積されたら、ball_predictor を使用して予測を実行します。
+        """
+        if not self.ball_frame_buffer:
+            return
+            
+        num_frames = self.ball_predictor.num_frames
+        
+        if len(self.ball_frame_buffer) >= num_frames:
+            clips = []
+            
+            for i in range(0, len(self.ball_frame_buffer) - num_frames + 1, self.ball_batch_size):
+                if i + num_frames <= len(self.ball_frame_buffer):
+                    clips.append(self.ball_frame_buffer[i:i+num_frames])
+            
+            if clips:
+                self.last_ball_results = self.ball_predictor.predict(clips)
+                self.ball_frame_buffer.clear()
+                self.current_ball_result_idx = 0
 
     def _process_court_batch(self):
         if self.court_batch_buffer:

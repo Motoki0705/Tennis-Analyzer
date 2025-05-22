@@ -31,12 +31,8 @@ class CourtPredictor:
         visualize_mode: str = "overlay",  # "overlay" | "heatmap" | "heatmap_channels"
     ):
         # ロガー設定
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        from utils.logging_utils import setup_logger
+        self.logger = setup_logger(self.__class__)
 
         self.device = device
         self.num_keypoints = num_keypoints

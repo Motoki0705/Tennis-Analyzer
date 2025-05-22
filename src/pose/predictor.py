@@ -42,12 +42,8 @@ class PosePredictor:
         pose_score_thresh: float = 0.6,
         use_half: bool = False,
     ):
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            h = logging.StreamHandler()
-            h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(h)
-        self.logger.setLevel(logging.INFO)
+        from utils.logging_utils import setup_logger
+        self.logger = setup_logger(self.__class__)
 
         self.device = device
         self.det_model = det_model.to(self.device).eval()
