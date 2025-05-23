@@ -1,6 +1,19 @@
+#!/usr/bin/env python
+"""
+ボール検出モデルのトレーニング用スクリプト
+
+使用例:
+    python scripts/train/ball/train_ball.py
+"""
+
 import logging
 import os
-from typing import List, Optional
+import sys
+from pathlib import Path
+
+# プロジェクトルートをPYTHONPATHに追加
+project_root = Path(__file__).resolve().parents[3]
+sys.path.append(str(project_root))
 
 import hydra
 import pytorch_lightning as pl
@@ -11,7 +24,7 @@ import torch
 
 def train(cfg: DictConfig) -> None:
     """
-    プレイヤー検出モデルのトレーニングを実行する関数
+    ボール検出モデルのトレーニングを実行する関数
     
     Args:
         cfg: Hydra設定
@@ -55,7 +68,7 @@ def train(cfg: DictConfig) -> None:
         trainer.test(lit_module, datamodule=datamodule)
 
 
-@hydra.main(config_path="../../configs/train/player", config_name="config", version_base="1.3")
+@hydra.main(config_path="../../configs/train/ball", config_name="config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     """
     メイン関数
