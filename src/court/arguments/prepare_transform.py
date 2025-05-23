@@ -31,13 +31,7 @@ def prepare_transform(
                 A.GaussianBlur(blur_limit=(3, 5), p=0.4),
                 A.MotionBlur(blur_limit=(3, 5), p=0.4),
             ], p=0.5),
-            A.RandomResizedCrop(
-                height=input_size[0],
-                width=input_size[1],
-                scale=(0.8, 1.0),
-                ratio=(0.9, 1.1),
-                p=0.7,
-            ),
+            A.Resize(height=input_size[0], width=input_size[1], p=1.0),
             A.ShiftScaleRotate(
                 shift_limit=0.05,
                 scale_limit=0.1,
