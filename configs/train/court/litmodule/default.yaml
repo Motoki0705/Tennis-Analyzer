@@ -1,0 +1,19 @@
+# @package _group_
+_target_: src.court.lit_module.lit_module.CourtLitModule
+
+# Configuration for the optimizer
+optimizer_cfg:
+  lr: 1e-4
+  weight_decay: 0.0001
+  # Add other optimizer-specific parameters if needed (e.g., betas for Adam)
+
+# Configuration for the loss function(s)
+loss_cfg:
+  # Example: For a segmentation task, you might use CrossEntropy or Dice loss
+  # This will depend on the actual model and task (e.g. keypoint detection vs segmentation)
+  name: "CrossEntropyLoss" # Placeholder, adjust based on actual court model's task
+  params: {}
+  # Example for keypoint detection with heatmaps (if applicable):
+  # name: "MSELoss"
+  # params:
+  #   reduction: "mean"

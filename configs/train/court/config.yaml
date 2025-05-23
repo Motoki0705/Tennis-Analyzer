@@ -1,0 +1,15 @@
+defaults:
+  - litmodule: default
+  - model: default # Or a specific model like fpn_court if that's the primary one
+  - litdatamodule: default
+  - callbacks: default
+  - trainer: default
+  # - hydra: default # Optional, if specific hydra settings are needed
+  # Example of overriding a group:
+  # - override hydra/job_logging: colorlog
+  # - override hydra/hydra_logging: colorlog
+
+seed: 42 # Default seed for reproducibility
+name: "court_training_run" # Name for the experiment run
+
+# ckpt_path: null # Path to a checkpoint to resume training, if any

@@ -1,0 +1,24 @@
+# @package _group_
+model_checkpoint:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  dirpath: "checkpoints/" # Relative to Hydra's output directory
+  filename: "court-{epoch:02d}-{val_loss:.4f}" # Example filename
+  monitor: "val_loss" # Metric to monitor
+  mode: "min"         # Mode for the monitored metric (min or max)
+  save_top_k: 1       # Save the top K models
+  save_last: true       # Optionally save the last checkpoint
+
+early_stopping: # Optional
+  _target_: pytorch_lightning.callbacks.EarlyStopping
+  monitor: "val_loss"
+  patience: 10
+  mode: "min"
+  verbose: true
+
+learning_rate_monitor: # Optional
+  _target_: pytorch_lightning.callbacks.LearningRateMonitor
+  logging_interval: "epoch" # or "step"
+
+# Add other callbacks here if needed, for example:
+# rich_progress_bar:
+#   _target_: pytorch_lightning.callbacks.RichProgressBar

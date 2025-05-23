@@ -1,0 +1,16 @@
+# @package _group_
+# This is a placeholder for a default court model.
+# Replace with a specific model config like fpn_court.yaml if preferred as default.
+
+_target_: src.court.models.fpn.FPNBasedCourt # Example, adjust to actual model class
+
+# Model-specific hyperparameters
+num_keypoints: 15 # Number of court keypoints (example, adjust as per model)
+backbone: "resnet50" # Example backbone
+pretrained_backbone: true # Whether to use a pretrained backbone
+output_downsample: 4 # Example downsampling factor for heatmaps/segmentation
+
+# To use a different model as default, you can either change this file
+# or create, e.g., fpn_court.yaml and change the default in config.yaml to:
+# defaults:
+#  - model: fpn_court
