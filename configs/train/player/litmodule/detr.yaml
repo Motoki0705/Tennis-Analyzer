@@ -1,0 +1,14 @@
+# DETR LightningModule設定
+name: detr
+_target_: src.player.lit_module.detr_lit_module.DetrLitModule
+
+# モデルは外部で定義されたものを参照
+model: ${model}
+
+# 学習パラメータ
+lr: 1e-4
+lr_backbone: 1e-5
+weight_decay: 1e-4
+optim_t_max: 50
+min_lr: 1e-6
+num_freeze_epoch: 3 
