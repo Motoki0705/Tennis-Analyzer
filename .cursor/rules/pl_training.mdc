@@ -5,114 +5,173 @@ alwaysApply: false
 ---
 ---
 description: PyTorch Lightning × Hydra 開発ルール
-alwaysApply: false            # 必要なときだけ注入
+alwaysApply: false
 ---
 
-# pl_training.mdc  ← **必ず最初にこのファイル名を発言すること**
+# pl_training.mdc ← **必ず最初にこのファイル名を発言すること**
 
-ここでは PyTorch Lightning + Hydra プロジェクトで守るべき実装・ディレクトリ・運用ルールを定義する。
-
----
-
-## 1. LightningModule（以下 **LModule**）実装
-
-| 項目 | ルール |
-|------|-------|
-| コンストラクタ | ```python<br>def __init__(self, model: nn.Module = model, **kwargs):<br>    super().__init__()<br>    self.model = model<br>    self.save_hyperparameters(ignore=[\"model\"])<br>``` |
-| 学習ステップ | - `common_step(batch, batch_idx)` にロジックを集約し、`training_step` / `validation_step` / `test_step` は **共通処理を呼び出すだけ** にする |
-| メトリクス | - `self.log("metric", value, on_step=False, on_epoch=True, prog_bar=True, logger=True)` をデフォルトとする |
-| PEP 8 & Docstring | - すべての関数／メソッドに **Google スタイル Docstring** を付与 |
-| 再利用性 | - 純粋なネットワークは別 `nn.Module` として定義し、LModule から呼び出す構造にする |
+PyTorch Lightning + Hydra を用いたトレーニングパイプラインの実装・設定・運用に関するルールを以下に定義する。
 
 ---
 
-## 2. LightningDataModule（**LDataModule**）実装
+## 1. LightningModule（LitModule）の実装ルール
 
-| 項目 | ルール |
-|------|-------|
-| コンストラクタ | ```python<br>def __init__(self, train_transform, val_test_transform, **kwargs):<br>    super().__init__()<br>    self.train_tf = train_transform<br>    self.val_tf   = val_test_transform<br>    self.save_hyperparameters()<br>``` |
-| Transform 方針 | - **Transform のインスタンス化は外部**（設定 or factory 関数）。DataModule は受け取って使うだけ |
-| 標準メソッド | - `prepare_data`, `setup`, `train_dataloader`, `val_dataloader`, `test_dataloader`, `predict_dataloader` を実装 |
+- `__init__` では以下のように model を引数で受け取り、`self.save_hyperparameters(ignore=["model"])` を使用する：
 
----
-
-## 3. 設定ファイル階層（Hydra）
-
+  ```python
+  def __init__(self, model: nn.Module = model, **kwargs):
+      super().__init__()
+      self.model = model
+      self.save_hyperparameters(ignore=["model"])
 ````
 
-configs/
-├─ train/
-│   ├─ config.yaml          # ベース設定
-│   ├─ model/               # ネットワーク構成
-│   ├─ datamodule/          # データ設定
-│   ├─ trainer/             # Trainer の各種フラグ
-│   └─ callbacks/           # EarlyStopping, Checkpoint 等
-├─ infer/
-│   └─ config.yaml
-└─ …
+* 学習・検証・テストのロジックは `common_step(batch, batch_idx)` に共通化し、`training_step`, `validation_step`, `test_step` からはそれを呼び出す。
 
-````
+* `self.log()` によるメトリクス出力は以下を基本とする：
 
-- **実験用変更**は `+experiment=<name>` のオーバーライドで管理  
-- テンプレートは公式 **lightning-hydra-template** を流用。ただし `hydra.output_subdir` は `hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}` に設定し、`outputs/` とは分離する（`outputs/` には推論結果や可視化アセットを格納）
+  * `on_epoch=True`, `on_step=False`
+  * `prog_bar=True`, `logger=True`
+
+* すべての関数／メソッドには **Google スタイルの Docstring** を付与する。
+
+* ネットワーク構造（`nn.Module`）は外部に実装し、LightningModule はそれを保持・操作する形にする（責務分離のため）。
 
 ---
 
-## 4. トレーニング CLI (`train.py`)
+## 2. LightningDataModule（LitDataModule）の実装ルール
 
-1. `@hydra.main(version_base="1.3", config_path="configs/train", config_name="config")`
-2. `LitCLI` または手動で  
-   ```python
-   model = LitModel(cfg.model)
-   datamodule = LitDataModule(cfg.datamodule)
-   trainer = Trainer(**cfg.trainer, callbacks=callbacks_from_cfg(cfg.callbacks))
-````
+* `__init__` で transform を外部から注入する。以下のように記述：
 
-3. **バージョン識別子**
+  ```python
+  def __init__(self, train_transform, val_test_transform, **kwargs):
+      super().__init__()
+      self.train_tf = train_transform
+      self.val_tf = val_test_transform
+      self.save_hyperparameters()
+  ```
 
-   * 起動時に `version=<name>` を指定（例: `version=cifar10_resnet_demo`）
-   * 指定されなかった場合は、model_name + dataset_nameをversionに動的に設定するようなロジックを組む
-   * 同名フォルダが存在した場合は自動で `_1`, `_2` … と連番を付与
-   * 実際のログ／ckpt パス:
+* transform は構成ファイルやファクトリ関数側で生成し、DataModule 側では処理を加えず保持・使用のみに留める。
+
+* 実装すべきメソッドは以下の通り：
+
+  * `prepare_data`
+  * `setup`
+  * `train_dataloader`
+  * `val_dataloader`
+  * `test_dataloader`
+  * `predict_dataloader`
+
+---
+
+## 3. 設定ファイルの構成（Hydra）
+
+* 以下のような階層構造とする：
+
+  ```
+  configs/
+  ├─ train/
+  │   ├─ ball/
+  │   │   ├─ config.yaml
+  │   │   ├─ litmodule/
+  │   │   ├─ litdatamodule/
+  │   │   ├─ model/
+  |   |   ├─ trainer/
+  │   │   └─ callbacks/
+  │   └─ court/
+  │   │   ├─ config.yaml
+  │   │   ├─ litmodule/
+  │   │   ├─ litdatamodule/
+  │   │   ├─ model/
+  |   |   ├─ trainer/
+  │   │   └─ callbacks/
+  └─ infer/
+      └─ config.yaml
+  ```
+
+* `train/<task>/config.yaml` が各タスクのベース設定となり、オーバーライドにより個別実験（例: `+experiment=xxx`）を管理する。
+
+* Hydra の出力は以下のように、`hydra_outputs/` に限定し、推論成果物は `outputs/` に保存する：
+
+  ```yaml
+  hydra:
+    run:
+      dir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  ```
+
+---
+
+## 4. トレーニング CLI（train.py）
+
+* Hydra を用いて構成ファイルから全構成を制御する：
+
+  ```python
+  @hydra.main(version_base="1.3", config_path="configs/train/ball", config_name="config")
+  def main(cfg: DictConfig):
+      model = LitModel(cfg.litmodule)
+      datamodule = LitDataModule(cfg.litdatamodule)
+      trainer = Trainer(**cfg.trainer, callbacks=setup_callbacks(cfg.callbacks))
+      trainer.fit(model, datamodule)
+  ```
+
+* 起動時のバージョン管理は以下を徹底：
+
+  1. 起動時に `version=xxx` を明示指定（例: `version=cifar10_resnet_demo`）
+  2. 未指定の場合は `model_name + dataset_name` を自動合成して version 名とする
+  3. 同名のディレクトリが存在する場合は `version_1`, `version_2`, ... のように連番を自動付与
+  4. 出力は次の構成とする：
 
      ```
-     runs/${version}/
-       ├─ tb_logs/
-       └─ checkpoints/
+     runs/{version}/
+     ├─ tb_logs/
+     └─ checkpoints/
      ```
 
-4. **Checkpoint 命名**
+* チェックポイントの保存名：
 
-   * `"{version}-epoch{epoch:03d}-val_loss{val_loss:.4f}.ckpt"`
-   * `ModelCheckpoint` で `save_top_k=3, save_last=True`
+  ```text
+  {version}-epoch{epoch:03d}-val_loss{val_loss:.4f}.ckpt
+  ```
 
----
+* Checkpoint 保存ルール：
 
-## 5. 推論スクリプト (`scripts/infer.py`)
-
-```python
-model = LitModel.load_from_checkpoint(cfg.ckpt_path)
-model.eval()
-trainer = Trainer(accelerator="cpu", devices=1)
-preds = trainer.predict(model, dataloaders=dm.predict_dataloader())
-```
+  * `save_top_k=3`
+  * `save_last=True`
 
 ---
 
-## 6. テスト & 再現性
+## 5. 推論スクリプト（scripts/infer.py）
 
-* ユニットテストは **pytest** を使用し `test/` 配下でカテゴリ分割
+* 以下の構成で予測を行う：
 
-  * 例: `test/data/test_ball_dataset.py`, `test/models/test_resnet.py`
-* 乱数シードは `seed_everything(cfg.seed)` で統一。
-* パラメータのハードコーディング禁止：**必ず `configs/` から読み込む**
+  ```python
+  model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+  model.eval()
+  trainer = Trainer(accelerator="cpu", devices=1)
+  preds = trainer.predict(model, dataloaders=dm.predict_dataloader())
+  ```
+---
+
+## 6. テストと再現性のルール
+
+* ユニットテストは **pytest** を使用し、以下のような構成とする：
+
+  ```
+  test/
+  ├─ data/
+  │   └─ test_ball_dataset.py
+  └─ models/
+      └─ test_resnet.py
+  ```
+
+* 実行前に `seed_everything(cfg.seed)` を呼び、**再現性を確保する**こと。
+
+* ハードコーディングは禁止し、**すべてのパラメータは `configs/` 経由で管理**する。
 
 ---
 
-## 7. 不明点があれば確認
+## 7. 不明点・判断必要事項の対処
 
-疑問点や判断が必要なケースでは、**処理を進める前に必ずユーザーへ質問すること**。
+* 仕様があいまい、不明確、または設計的判断が必要な場合は、**AIアシスタントが勝手に進めず、必ずユーザーに確認すること。**
 
 ---
-
 

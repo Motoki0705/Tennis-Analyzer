@@ -1,0 +1,7 @@
+# MobileNetモデル設定
+name: mobilenet
+_target_: src.ball.models.single_frame.mobilenet.MobileNetV3Ball
+
+# モデル構成パラメータ
+num_classes: 1
+pretrained: true 

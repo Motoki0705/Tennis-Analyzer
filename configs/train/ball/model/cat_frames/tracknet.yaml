@@ -1,0 +1,7 @@
+# オリジナルTrackNetモデル設定
+name: tracknet
+_target_: src.ball.models.cat_frames.tracknet.TrackNet
+
+# モデル構成パラメータ
+in_channels: ${litdatamodule.T}
+num_classes: 1 

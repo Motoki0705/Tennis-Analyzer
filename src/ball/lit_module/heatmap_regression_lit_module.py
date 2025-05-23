@@ -10,7 +10,7 @@ from torchmetrics.classification import BinaryJaccardIndex
 # ────────────────────────────────────────────────────────
 # 2. LightningModule
 # ────────────────────────────────────────────────────────
-class CatFramesLitModule(pl.LightningModule):
+class HeatmapRegressionLitModule(pl.LightningModule):
     """
     - 入力: Frames [B, C, H, W]
     - 出力: Heatmaps [B, 1, H_out, W_out]
