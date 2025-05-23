@@ -156,7 +156,7 @@ class SequenceCoordDataset(Dataset):
         if self.input_type == "cat":
             input_tensor = torch.cat(frames, dim=0)  # [C*T, H, W]
         else:
-            input_tensor = torch.stack(frames, dim=1)  # [T, C, H, W]
+            input_tensor = torch.stack(frames, dim=0)  # [T, C, H, W]
 
         # --- 出力フォーマット ---
         if self.output_type == "all":

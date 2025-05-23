@@ -1,0 +1,9 @@
+# LSTM-UNetモデル設定
+name: lstm_unet
+_target_: src.ball.models.sequence.LSTM_UNet.LSTM_UNet
+
+# モデル構成パラメータ
+in_channels: ${litdatamodule.T}
+num_classes: 1
+hidden_dim: 64
+bilinear: true 
