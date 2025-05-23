@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - override hydra/job_logging: disabled
+  - _self_
+
+# テスト用設定
+litdatamodule:
+  _target_: src.court.lit_datamodule.court_datamodule.CourtDataModule
+  annotation_root: 'datasets/court/annotations'
+  image_root: 'datasets/court/images'
+  batch_size: 2  # テストなので小さく
+  num_workers: 0  # テストなので0
+  input_size: [224, 224]
+  heatmap_size: [224, 224]
+  default_keypoints: 15
+  is_each_keypoint: true
+  sigma: 2.0
+  train_transform:
+    _target_: src.court.arguments.prepare_transform.prepare_transform
+    input_size: ${litdatamodule.input_size}
+    is_train: true
+  val_test_transform:
+    _target_: src.court.arguments.prepare_transform.prepare_transform
+    input_size: ${litdatamodule.input_size}
+    is_train: false 

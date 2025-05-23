@@ -1,0 +1,7 @@
+# トレーナー設定
+accelerator: 'auto'
+devices: 'auto'
+max_epochs: 50
+precision: 16-mixed
+log_every_n_steps: 10
+val_check_interval: 1.0 
