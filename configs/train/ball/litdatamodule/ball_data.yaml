@@ -1,0 +1,30 @@
+# ボール検出用データモジュール設定
+_target_: src.ball.lit_datamodule.ball_data_module.TennisBallDataModule
+
+# データパス
+annotation_file: 'datasets/ball/annotations/ball_annotations.json'
+image_root: 'datasets/ball/images'
+
+# 入力設定
+T: 3
+batch_size: 32
+num_workers: 8
+skip_frames_range: [1, 5]
+input_type: "cat"      # "cat" or "stack"
+output_type: "last"    # "all" or "last"
+dataset_type: "coord"  # "heatmap" or "coord"
+
+# 画像サイズ設定
+input_size: [360, 640]
+heatmap_size: [360, 640]
+
+# 変換設定
+train_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: true
+
+val_test_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: false 

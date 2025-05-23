@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - override hydra/job_logging: disabled
+  - _self_
+
+# テスト用設定
+litdatamodule:
+  _target_: src.ball.lit_datamodule.ball_data_module.TennisBallDataModule
+  annotation_file: 'datasets/ball/coco_annotations_ball_pose_court.json'  # 本番のアノテーションファイル
+  image_root: 'datasets/ball/images'
+  batch_size: 2  # テストなので小さく
+  num_workers: 0  # テストなので0
+  input_size: [360, 640]
+  heatmap_size: [360, 640]
+  input_type: 'cat'  # デフォルト値
+  output_type: 'last'  # デフォルト値
+  dataset_type: 'heatmap'  # デフォルト値
+  T: 3  # デフォルト値
+  train_transform:
+    _target_: src.ball.arguments.prepare_transform.prepare_transform
+    input_size: ${litdatamodule.input_size}
+    is_train: true
+  val_test_transform:
+    _target_: src.ball.arguments.prepare_transform.prepare_transform
+    input_size: ${litdatamodule.input_size}
+    is_train: false

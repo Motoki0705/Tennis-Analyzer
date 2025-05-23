@@ -5,7 +5,7 @@ import albumentations as A
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
-from src.ball.arguments.prepare_transform import prepare_transform
+# from src.ball.arguments.prepare_transform import prepare_transform # 削除
 from src.ball.dataset.seq_coord_dataset import (
     SequenceCoordDataset,  # コーディネート回帰版
 )
@@ -21,6 +21,8 @@ class TennisBallDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
+        train_transform: A.ReplayCompose, # 追加
+        val_test_transform: A.ReplayCompose, # 追加
         annotation_file: Union[
             str, Path
         ] = r"data/annotation_jsons/coco_annotations_globally_tracked.json",
@@ -28,7 +30,7 @@ class TennisBallDataModule(pl.LightningDataModule):
         T: int = 3,
         batch_size: int = 32,
         num_workers: int = 8,
-        input_size: List[int] = [512, 512],
+        input_size: List[int] = [512, 512], # 一旦残す (Transformと設定ファイルで管理する方が望ましい)
         heatmap_size: List[int] = [512, 512],
         skip_frames_range: Tuple[int, int] = (1, 5),
         input_type: str = "cat",
@@ -40,6 +42,10 @@ class TennisBallDataModule(pl.LightningDataModule):
             "heatmap",
             "coord",
         }, "`dataset_type` must be 'heatmap' or 'coord'"
+        
+        self.train_transform = train_transform # 追加
+        self.val_test_transform = val_test_transform # 追加
+        
         self.annotation_file = annotation_file
         self.image_root = image_root
         self.T = T
@@ -51,19 +57,24 @@ class TennisBallDataModule(pl.LightningDataModule):
         self.input_type = input_type
         self.output_type = output_type
         self.dataset_type = dataset_type
+        
+        # save_hyperparameters() は __init__ の最後に呼び出すのが一般的
+        # ignore には、シリアライズしたくない大きなオブジェクトや、復元時に問題になる可能性のあるものを指定
+        self.save_hyperparameters(ignore=['train_transform', 'val_test_transform'])
+
 
     def setup(self, stage: Optional[str] = None):
-        # transformの準備
-        train_transform, val_test_transform = prepare_transform(self.input_size)
+        # transformの準備は __init__ で受け取るようになったので、ここでの呼び出しは不要
+        # train_transform, val_test_transform = prepare_transform(self.input_size) # 削除
 
         # fitフェーズ
         if stage in (None, "fit"):
-            self.train_dataset = self._prepare_dataset("train", train_transform)
-            self.val_dataset = self._prepare_dataset("val", val_test_transform)
+            self.train_dataset = self._prepare_dataset("train", self.train_transform) # 修正
+            self.val_dataset = self._prepare_dataset("val", self.val_test_transform) # 修正
 
         # testフェーズ
         if stage in (None, "test"):
-            self.test_dataset = self._prepare_dataset("test", val_test_transform)
+            self.test_dataset = self._prepare_dataset("test", self.val_test_transform) # 修正
 
     def _prepare_dataset(self, split: str, transform: A.ReplayCompose):
         if self.dataset_type == "heatmap":
@@ -72,7 +83,7 @@ class TennisBallDataModule(pl.LightningDataModule):
                 annotation_file=self.annotation_file,
                 image_root=self.image_root,
                 T=self.T,
-                input_size=self.input_size,
+                input_size=self.input_size, # Dataset側でもinput_size を使っているか確認が必要
                 heatmap_size=self.heatmap_size,
                 transform=transform,
                 split=split,
@@ -86,7 +97,7 @@ class TennisBallDataModule(pl.LightningDataModule):
                 annotation_file=self.annotation_file,
                 image_root=self.image_root,
                 T=self.T,
-                input_size=self.input_size,
+                input_size=self.input_size, # Dataset側でもinput_size を使っているか確認が必要
                 transform=transform,
                 split=split,
                 skip_frames_range=self.skip_frames_range,
@@ -110,4 +121,4 @@ class TennisBallDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             num_workers=self.num_workers,
             pin_memory=True,
-        )
+        ) 

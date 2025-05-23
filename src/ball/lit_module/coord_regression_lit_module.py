@@ -35,7 +35,7 @@ class CoordRegressionLitModule(pl.LightningModule):
         # coords: [B, 2]  or if "all" then [B, T, 2]  ※今回は last フレームのみ想定
         pred = self(frames)  # [B, 2]
 
-        # L1 損失を計算し、visibility でマスク
+        # L1 損失を計算
         loss_per_dim = self.criterion(pred, coords)  # [B, 2]
         loss = loss_per_dim.mean()  # バッチ内全要素平均
 
@@ -101,4 +101,4 @@ class CoordRegressionLitModule(pl.LightningModule):
                 "interval": "epoch",
                 "frequency": 1,
             },
-        }
+        } 
