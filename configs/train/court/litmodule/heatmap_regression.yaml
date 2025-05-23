@@ -1,0 +1,12 @@
+# ヒートマップ回帰用 LightningModule設定
+name: heatmap_regression
+_target_: src.court.lit_module.heatmap_regression_lit_module.HeatmapRegressionLitModule
+
+# モデルは外部で定義されたものを参照
+model: ${model}
+
+# 学習パラメータ
+lr: 1e-4
+weight_decay: 1e-4
+warmup_epochs: 1
+max_epochs: ${trainer.max_epochs} 
