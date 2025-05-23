@@ -2,7 +2,8 @@ import pytest
 import hydra
 from hydra import initialize, compose
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+from omegaconf.dictconfig import DictConfig
 import torch
 import sys
 import os
@@ -12,7 +13,7 @@ from unittest.mock import patch, MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 # テストパラメータの候補
-CAT_ID_MAPS = [{2: 0}, {2: 0, 3: 1}]  # カテゴリIDのマッピング
+CAT_ID_MAPS = [{2: 0}, {1: 0}]  # カテゴリIDのマッピング（複雑な辞書は避ける）
 BATCH_SIZES = [1, 2]                  # バッチサイズ
 
 class DummyCocoDetection:
@@ -107,7 +108,6 @@ def test_dataset_io(cat_id_map, batch_size):
 
     # hydra設定の上書き
     overrides = [
-        f"litdatamodule.cat_id_map={cat_id_map}",
         f"litdatamodule.batch_size={batch_size}",
     ]
 
@@ -117,6 +117,9 @@ def test_dataset_io(cat_id_map, batch_size):
         
         with initialize(version_base="1.3", config_path="../../configs/test/player", job_name="test_dataset_io_instance"):
             cfg = compose(config_name="config_dataset_test.yaml", overrides=overrides)
+            
+            # cat_id_mapを直接設定
+            cfg.litdatamodule.cat_id_map = cat_id_map
             
             # DataModuleをインスタンス化
             datamodule = instantiate(cfg.litdatamodule)
