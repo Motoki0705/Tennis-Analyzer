@@ -1,0 +1,8 @@
+# PyTorch Lightningトレーナー設定
+accelerator: auto
+devices: auto
+max_epochs: 50
+precision: 16
+log_every_n_steps: 50
+default_root_dir: "runs/${version}"
+deterministic: true 

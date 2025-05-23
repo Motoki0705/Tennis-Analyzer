@@ -1,0 +1,29 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  # モデルアーキテクチャの選択（cat_frames, single_frame, sequence）
+  # コマンドライン例: model=_cat_frames model@model.cat_frames=lite_tracknet_xy
+  - model: _cat_frames
+  
+  # LightningModuleの選択（coord, heatmap）
+  # コマンドライン例: litmodule=_heatmap
+  - litmodule: _heatmap
+  
+  - litdatamodule: ball_data
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# 実験名（ディレクトリ名）の設定
+# モデル名とデータセットタイプから自動生成
+version: ${model.name}_${litdatamodule.dataset_type}
+
+# 再現性のための乱数シード
+seed: 42 

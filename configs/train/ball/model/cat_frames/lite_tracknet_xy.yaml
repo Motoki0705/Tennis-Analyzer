@@ -1,0 +1,7 @@
+# LiteTrackNet XY（座標回帰版）モデル設定
+name: lite_tracknet_xy
+_target_: src.ball.models.cat_frames.lite_tracknet_xy.LiteTrackNetXY
+
+# モデル構成パラメータ
+in_channels: ${litdatamodule.T}
+num_classes: 2  # x, y 座標 
