@@ -87,4 +87,4 @@ class KeypointModule(pl.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": scheduler,
             "monitor": "val_loss",
-        }
+        } 

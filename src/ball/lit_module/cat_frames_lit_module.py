@@ -130,4 +130,4 @@ class CatFramesLitModule(pl.LightningModule):
                 "interval": "epoch",
                 "frequency": 1,
             },
-        }
+        } 
