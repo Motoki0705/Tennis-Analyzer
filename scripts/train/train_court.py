@@ -1,6 +1,19 @@
+#!/usr/bin/env python
+"""
+コート検出モデルのトレーニング用スクリプト
+
+使用例:
+    python scripts/train/court/train_court.py
+"""
+
 import logging
 import os
-from typing import List, Optional
+import sys
+from pathlib import Path
+
+# プロジェクトルートをPYTHONPATHに追加
+project_root = Path(__file__).resolve().parents[3]
+sys.path.append(str(project_root))
 
 import hydra
 import pytorch_lightning as pl
