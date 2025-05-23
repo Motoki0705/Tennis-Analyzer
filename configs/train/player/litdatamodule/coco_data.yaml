@@ -1,0 +1,23 @@
+# COCO形式データモジュール設定
+_target_: src.player.lit_datamodule.coco_datamodule.CocoDataModule
+
+# データパス
+img_folder: "datasets/player/images"
+annotation_file: "datasets/player/annotations/player_annotations.json"
+cat_id_map: {2: 0}  # プレーヤーカテゴリIDをマッピング
+use_original_path: true
+
+# データローダー設定
+batch_size: 4
+num_workers: 4
+
+# 画像プロセッサ
+processor:
+  _target_: transformers.RTDetrImageProcessor.from_pretrained
+  pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+
+# 変換設定
+train_transform:
+  _target_: src.player.arguments.prepare_transform.prepare_transform
+
+val_test_transform: null 
