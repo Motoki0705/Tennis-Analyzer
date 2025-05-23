@@ -4,7 +4,8 @@ globs:
 alwaysApply: true
 ---
 ---
-description: Core rule for the entire repository (always enforced)
+description: 
+globs: 
 alwaysApply: true
 ---
 
@@ -64,5 +65,6 @@ alwaysApply: true
 - [気づいた点や改善提案があれば記述]
 
 ## 4. 不明点の確認
+
 
 判断に迷う事項や追加情報が必要な場合は 必ずユーザーに確認 してから進める
