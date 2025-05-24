@@ -7,8 +7,7 @@ alwaysApply: false
 description: PyTorch Lightning × Hydra 開発ルール
 alwaysApply: false
 ---
-
-# pl_training.mdc ← **必ず最初にこのファイル名を発言すること**
+# pl_training.mdc
 
 PyTorch Lightning + Hydra を用いたトレーニングパイプラインの実装・設定・運用に関するルールを以下に定義する。
 
@@ -19,17 +18,33 @@ PyTorch Lightning + Hydra を用いたトレーニングパイプラインの実
 - `__init__` では以下のように model を引数で受け取り、`self.save_hyperparameters(ignore=["model"])` を使用する：
 
   ```python
-  def __init__(self, model: nn.Module = model, **kwargs):
+  def __init__(self, model: nn.Module, **kwargs):
       super().__init__()
       self.model = model
       self.save_hyperparameters(ignore=["model"])
-````
+  ```
 
 * 学習・検証・テストのロジックは `common_step(batch, batch_idx)` に共通化し、`training_step`, `validation_step`, `test_step` からはそれを呼び出す。
 
+  ```python
+  def common_step(self, batch, batch_idx, stage="train"):
+      frames, targets = batch
+      preds = self(frames)
+      loss = self.criterion(preds, targets)
+      
+      self.log(f"{stage}_loss", loss, on_step=(stage == "train"), on_epoch=True, prog_bar=True)
+      return loss
+      
+  def training_step(self, batch, batch_idx):
+      return self.common_step(batch, batch_idx, stage="train")
+      
+  def validation_step(self, batch, batch_idx):
+      return self.common_step(batch, batch_idx, stage="val")
+  ```
+
 * `self.log()` によるメトリクス出力は以下を基本とする：
 
-  * `on_epoch=True`, `on_step=False`
+  * `on_epoch=True`, `on_step=False`（ただし、トレーニング中のみ `on_step=True` も可）
   * `prog_bar=True`, `logger=True`
 
 * すべての関数／メソッドには **Google スタイルの Docstring** を付与する。
@@ -65,113 +80,375 @@ PyTorch Lightning + Hydra を用いたトレーニングパイプラインの実
 
 ## 3. 設定ファイルの構成（Hydra）
 
-* 以下のような階層構造とする：
+### 3.1 ディレクトリ構造
 
-  ```
-  configs/
-  ├─ train/
-  │   ├─ ball/
-  │   │   ├─ config.yaml
-  │   │   ├─ litmodule/
-  │   │   ├─ litdatamodule/
-  │   │   ├─ model/
-  |   |   ├─ trainer/
-  │   │   └─ callbacks/
-  │   └─ court/
-  │   │   ├─ config.yaml
-  │   │   ├─ litmodule/
-  │   │   ├─ litdatamodule/
-  │   │   ├─ model/
-  |   |   ├─ trainer/
-  │   │   └─ callbacks/
-  └─ infer/
-      └─ config.yaml
-  ```
+```
+configs/
+├─ train/
+│   ├─ ball/                    # タスク別のディレクトリ
+│   │   ├─ config.yaml          # メイン設定ファイル
+│   │   ├─ model/               # モデルアーキテクチャ定義
+│   │   │   ├─ cat_frames/      # モデルタイプ別サブディレクトリ
+│   │   │   │   ├─ lite_tracknet.yaml
+│   │   │   │   └─ tracknet.yaml
+│   │   │   ├─ single_frame/
+│   │   │   │   └─ mobilenet.yaml
+│   │   │   ├─ sequence/
+│   │   │   │   └─ lstm_unet.yaml
+│   │   │   ├─ _cat_frames.yaml # モデルタイプ選択用インデックス
+│   │   │   ├─ _single_frame.yaml
+│   │   │   └─ _sequence.yaml
+│   │   ├─ litmodule/           # LightningModule定義
+│   │   │   ├─ coord_regression.yaml
+│   │   │   ├─ heatmap_regression.yaml
+│   │   │   ├─ _coord.yaml      # LitModule選択用インデックス
+│   │   │   └─ _heatmap.yaml
+│   │   ├─ litdatamodule/       # LightningDataModule定義
+│   │   │   └─ ball_data.yaml
+│   │   ├─ trainer/             # トレーナー設定
+│   │   │   └─ default.yaml
+│   │   └─ callbacks/           # コールバック設定
+│   │       └─ default.yaml
+│   └─ court/                   # 別のタスク
+│       └─ ...
+└─ infer/
+    └─ config.yaml
+```
 
-* `train/<task>/config.yaml` が各タスクのベース設定となり、オーバーライドにより個別実験（例: `+experiment=xxx`）を管理する。
+### 3.2 設定ファイルの例
 
-* Hydra の出力は以下のように、`hydra_outputs/` に限定し、推論成果物は `outputs/` に保存する：
+#### config.yaml（メイン設定ファイル）
 
-  ```yaml
-  hydra:
-    run:
-      dir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
-  ```
+```yaml
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  # モデルアーキテクチャの選択（cat_frames, single_frame, sequence）
+  # コマンドライン例: model=_cat_frames model@model.cat_frames=lite_tracknet_xy
+  - model: _cat_frames
+  
+  # LightningModuleの選択（coord, heatmap）
+  # コマンドライン例: litmodule=_heatmap
+  - litmodule: _heatmap
+  
+  - litdatamodule: ball_data
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# 実験名（ディレクトリ名）の設定
+# モデル名とデータセットタイプから自動生成
+version: ${model.name}_${litdatamodule.dataset_type}
+
+# 再現性のための乱数シード
+seed: 42
+```
+
+#### モデル選択インデックス（_cat_frames.yaml）
+
+```yaml
+# @package _global_
+defaults:
+  - /train/ball/model/cat_frames/lite_tracknet
+```
+
+#### モデル定義（cat_frames/lite_tracknet.yaml）
+
+```yaml
+# LiteTrackNetモデル設定
+name: lite_tracknet
+_target_: src.ball.models.cat_frames.lite_tracknet.LiteTrackNet
+
+# モデル構成パラメータ
+in_channels: ${litdatamodule.T}
+num_classes: 1
+```
+
+#### LitModule定義（heatmap_regression.yaml）
+
+```yaml
+# ヒートマップ回帰用 LightningModule設定
+name: heatmap_regression
+_target_: src.ball.lit_module.cat_frames_lit_module.CatFramesLitModule
+
+# モデルは外部で定義されたものを参照
+model: ${model}
+
+# 学習パラメータ
+lr: 1e-3
+weight_decay: 1e-4
+warmup_epochs: 1
+max_epochs: ${trainer.max_epochs}
+bce_weight: 0.7
+```
+
+#### LitDataModule定義（ball_data.yaml）
+
+```yaml
+# ボール検出用データモジュール設定
+_target_: src.ball.lit_datamodule.ball_data_module.TennisBallDataModule
+
+# データパス
+annotation_file: 'datasets/ball/annotations/ball_annotations.json'
+image_root: 'datasets/ball/images'
+
+# 入力設定
+T: 3
+batch_size: 32
+num_workers: 8
+skip_frames_range: [1, 5]
+input_type: "cat"
+output_type: "last"
+dataset_type: "coord"
+
+# 画像サイズ設定
+input_size: [360, 640]
+heatmap_size: [360, 640]
+
+# 変換設定
+train_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: true
+
+val_test_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: false
+```
 
 ---
 
-## 4. トレーニング CLI（train.py）
+## 4. トレーニングスクリプトの実装
 
-* Hydra を用いて構成ファイルから全構成を制御する：
+### 4.1 基本構造
 
-  ```python
-  @hydra.main(version_base="1.3", config_path="configs/train/ball", config_name="config")
-  def main(cfg: DictConfig):
-      model = LitModel(cfg.litmodule)
-      datamodule = LitDataModule(cfg.litdatamodule)
-      trainer = Trainer(**cfg.trainer, callbacks=setup_callbacks(cfg.callbacks))
-      trainer.fit(model, datamodule)
-  ```
+```python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-* 起動時のバージョン管理は以下を徹底：
+import logging
+import os
+from typing import List
 
-  1. 起動時に `version=xxx` を明示指定（例: `version=cifar10_resnet_demo`）
-  2. 未指定の場合は `model_name + dataset_name` を自動合成して version 名とする
-  3. 同名のディレクトリが存在する場合は `version_1`, `version_2`, ... のように連番を自動付与
-  4. 出力は次の構成とする：
+import hydra
+import pytorch_lightning as pl
+from hydra.utils import instantiate
+from omegaconf import DictConfig
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.loggers import TensorBoardLogger
 
-     ```
-     runs/{version}/
-     ├─ tb_logs/
-     └─ checkpoints/
-     ```
+log = logging.getLogger(__name__)
 
-* チェックポイントの保存名：
 
-  ```text
-  {version}-epoch{epoch:03d}-val_loss{val_loss:.4f}.ckpt
-  ```
+def setup_callbacks(cfg: DictConfig) -> List[Callback]:
+    """設定からコールバックを初期化します。"""
+    callbacks = []
+    
+    if "callbacks" in cfg:
+        for _, cb_conf in cfg.callbacks.items():
+            if "_target_" in cb_conf:
+                log.info(f"Instantiating callback <{cb_conf._target_}>")
+                callbacks.append(instantiate(cb_conf))
+    
+    return callbacks
 
-* Checkpoint 保存ルール：
 
-  * `save_top_k=3`
-  * `save_last=True`
+@hydra.main(version_base="1.3", config_path="../configs/train/ball", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """メイン学習関数"""
+    # 再現性のために乱数シードを設定
+    pl.seed_everything(cfg.seed)
+    
+    # バージョン名（ディレクトリ名）の設定
+    version = cfg.get("version", "default_version")
+    
+    # ロガーの設定
+    logger = TensorBoardLogger(
+        save_dir=os.path.join(cfg.trainer.default_root_dir, "tb_logs"),
+        name=version
+    )
+    
+    # コールバックの設定
+    callbacks = setup_callbacks(cfg)
+    
+    # データモジュールの初期化
+    log.info(f"Instantiating datamodule <{cfg.litdatamodule._target_}>")
+    datamodule = instantiate(cfg.litdatamodule)
+    
+    # 基本モデルの初期化
+    log.info(f"Instantiating base model <{cfg.model._target_}>")
+    base_model = instantiate(cfg.model)
+    
+    # LightningModuleの初期化（基本モデルを渡す）
+    log.info(f"Instantiating LightningModule <{cfg.litmodule._target_}>")
+    lit_model = instantiate(cfg.litmodule, model=base_model)
+    
+    # トレーナーの初期化
+    log.info(f"Instantiating trainer <{cfg.trainer}>")
+    trainer = Trainer(
+        **cfg.trainer,
+        callbacks=callbacks,
+        logger=logger,
+    )
+    
+    # 学習の実行
+    log.info("Starting training!")
+    trainer.fit(model=lit_model, datamodule=datamodule)
+    
+    # 学習後のテスト（オプション）
+    if cfg.get("test_after_training", False):
+        trainer.test(model=lit_model, datamodule=datamodule)
+    
+    # ベストモデルのパスをログ
+    best_model_path = None
+    for callback in callbacks:
+        if hasattr(callback, "best_model_path"):
+            best_model_path = callback.best_model_path
+            break
+            
+    if best_model_path:
+        log.info(f"Best model path: {best_model_path}")
+            
+    log.info("Training completed!")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### 4.2 コマンドライン実行例
+
+```bash
+# デフォルト設定で実行
+python scripts/train_ball.py
+
+# モデルアーキテクチャを変更
+python scripts/train_ball.py model=_sequence
+
+# LightningModuleを変更
+python scripts/train_ball.py litmodule=_coord
+
+# 特定のモデルを直接指定
+python scripts/train_ball.py model=_cat_frames model@model.cat_frames=lite_tracknet_xy
+
+# バッチサイズなど他のパラメータを変更
+python scripts/train_ball.py litdatamodule.batch_size=64 trainer.max_epochs=100
+
+# 実験名を明示的に指定
+python scripts/train_ball.py version=my_custom_experiment
+```
 
 ---
 
-## 5. 推論スクリプト（scripts/infer.py）
+## 5. 推論スクリプトの実装
 
-* 以下の構成で予測を行う：
-
-  ```python
-  model = LitModel.load_from_checkpoint(cfg.ckpt_path)
-  model.eval()
-  trainer = Trainer(accelerator="cpu", devices=1)
-  preds = trainer.predict(model, dataloaders=dm.predict_dataloader())
-  ```
----
-
-## 6. テストと再現性のルール
-
-* ユニットテストは **pytest** を使用し、以下のような構成とする：
-
-  ```
-  test/
-  ├─ data/
-  │   └─ test_ball_dataset.py
-  └─ models/
-      └─ test_resnet.py
-  ```
-
-* 実行前に `seed_everything(cfg.seed)` を呼び、**再現性を確保する**こと。
-
-* ハードコーディングは禁止し、**すべてのパラメータは `configs/` 経由で管理**する。
+```python
+@hydra.main(version_base="1.3", config_path="../configs/infer", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """推論実行メイン関数"""
+    # モデルの読み込み
+    lit_model = LitModule.load_from_checkpoint(cfg.ckpt_path)
+    lit_model.eval()
+    
+    # データの準備
+    datamodule = instantiate(cfg.litdatamodule)
+    datamodule.setup("predict")
+    
+    # 推論の実行
+    trainer = Trainer(accelerator="cpu", devices=1)
+    predictions = trainer.predict(lit_model, datamodule.predict_dataloader())
+    
+    # 結果の保存
+    output_dir = Path(cfg.output_dir) / cfg.version
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 結果の処理と保存
+    process_predictions(predictions, output_dir)
+```
 
 ---
 
-## 7. 不明点・判断必要事項の対処
+## 6. 実装のベストプラクティス
+
+### 6.1 モデル・LitModule・DataModuleの分離
+
+- **モデル（nn.Module）**: ネットワークアーキテクチャのみを定義
+- **LitModule**: トレーニングロジック（損失関数、最適化器、メトリクスなど）
+- **DataModule**: データの読み込み、前処理、データローダーの設定
+
+この分離により、同じモデルアーキテクチャで異なるトレーニング方法を試したり、異なるモデルアーキテクチャを同じトレーニングロジックで比較したりすることが容易になります。
+
+### 6.2 設定ファイルの階層化
+
+1. **タスク別ディレクトリ**: `configs/train/ball/`, `configs/train/court/` など
+2. **コンポーネント別サブディレクトリ**: `model/`, `litmodule/`, `litdatamodule/` など
+3. **タイプ別サブディレクトリ**: `model/cat_frames/`, `model/sequence/` など
+4. **選択用インデックスファイル**: `_cat_frames.yaml`, `_heatmap.yaml` など
+
+この階層化により、コマンドラインからの柔軟な設定変更が可能になります。
+
+### 6.3 再現性の確保
+
+- 乱数シードの固定: `pl.seed_everything(cfg.seed)`
+- バージョン管理: 実験ごとに一意の `version` を設定
+- ハイパーパラメータの保存: `self.save_hyperparameters()` の使用
+- チェックポイントの命名規則: `{version}-{epoch:03d}-{val_loss:.4f}.ckpt`
+
+### 6.4 テスト駆動開発
+
+- 各コンポーネント（モデル、データセット、変換など）に対するユニットテスト
+- 統合テスト（小規模データでのエンドツーエンド実行）
+- 回帰テスト（既知の入力に対する出力の一貫性確認）
+
+---
+
+## 7. 新規タスク実装の手順
+
+1. **ディレクトリ構造の作成**:
+   ```bash
+   mkdir -p configs/train/new_task/{model,litmodule,litdatamodule,trainer,callbacks}
+   ```
+
+2. **設定ファイルの作成**:
+   - `config.yaml`: メイン設定ファイル
+   - モデル定義ファイル: `model/*/model_name.yaml`
+   - LitModule定義ファイル: `litmodule/module_name.yaml`
+   - DataModule定義ファイル: `litdatamodule/data_name.yaml`
+   - トレーナー設定: `trainer/default.yaml`
+   - コールバック設定: `callbacks/default.yaml`
+
+3. **モデル選択インデックスの作成**:
+   ```yaml
+   # _model_type.yaml
+   # @package _global_
+   defaults:
+     - /train/new_task/model/model_type/default_model
+   ```
+
+4. **学習スクリプトの作成**:
+   ```bash
+   cp scripts/train_ball.py scripts/train_new_task.py
+   # config_pathを修正
+   ```
+
+5. **実行テスト**:
+   ```bash
+   python scripts/train_new_task.py
+   ```
+
+---
+
+## 8. 不明点・判断必要事項の対処
 
 * 仕様があいまい、不明確、または設計的判断が必要な場合は、**AIアシスタントが勝手に進めず、必ずユーザーに確認すること。**
 
 ---
-
