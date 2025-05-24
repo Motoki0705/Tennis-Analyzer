@@ -15,8 +15,15 @@ Hydra-driven Inference System for Tennis Analyzer
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+# プロジェクトルートディレクトリをPythonパスに追加
+project_root = Path(__file__).parent.parent.parent.absolute()
+sys.path.insert(0, str(project_root))
+
 from typing import Dict, Tuple
 
 import hydra
@@ -190,7 +197,7 @@ def setup_composite_predictors(cfg: DictConfig) -> Tuple:
 # ╭──────────────────────────────────────────────────╮
 # │  4. メイン                                      │
 # ╰──────────────────────────────────────────────────╯
-@hydra.main(config_path="../../configs/infer", config_name="infer", version_base="1.2")
+@hydra.main(config_path=str(project_root / "configs/infer"), config_name="infer", version_base="1.2")
 def main(cfg: DictConfig):
     logger.info("Starting inference…")
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg, resolve=True)}")
