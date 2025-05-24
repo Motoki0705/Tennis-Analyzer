@@ -11,7 +11,7 @@ hydra:
     dir: hydra_outputs/infer/${mode}/${now:%Y-%m-%d_%H-%M-%S}
 
 # --- Top-level Parameters ---
-mode: "court" # Default mode. Override with: python infer.py mode=court models=court/swin_court
+mode: "court" # ball, court, player, pose, multi, frames, image
 
 # --- Common Settings ---
 common:
@@ -81,3 +81,11 @@ predictors:
     batch_sizes: {"ball": 16, "court": 16, "pose": 16}
     frame_fmt: "frame_{:06d}.jpg"
     output_dir: "outputs/${mode}/${now:%Y-%m-%d_%H-%M-%S}"
+    
+  # 画像アノテータ設定（新規追加）
+  image_annotator:
+    # ball_predictor, court_predictor, pose_predictor は main.py で渡される
+    batch_sizes: {"ball": 16, "court": 16, "pose": 16}
+    ball_vis_thresh: ${predictors.ball.threshold}
+    court_vis_thresh: ${predictors.court.threshold}
+    pose_vis_thresh: ${predictors.pose.pose_score_thresh}
