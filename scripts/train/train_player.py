@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # プロジェクトルートをPYTHONPATHに追加
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.append(str(project_root))
 
 import hydra
@@ -68,7 +68,7 @@ def train(cfg: DictConfig) -> None:
         trainer.test(lit_module, datamodule=datamodule)
 
 
-@hydra.main(config_path="/../../configs/train/player", config_name="config", version_base="1.3")
+@hydra.main(config_path="../../configs/train/player", config_name="config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     """
     メイン関数
