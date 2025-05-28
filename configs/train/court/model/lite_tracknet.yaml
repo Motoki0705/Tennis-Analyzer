@@ -1,7 +1,14 @@
-# LiteTrackNetモデル設定
-name: lite_tracknet
-_target_: src.court.models.lite_tracknet.LiteTrackNet
+# @package _global_.model
 
-# モデルパラメータ
-in_channels: 3
-heatmap_channels: 15 
+# LiteTrackNetモデル設定
+net:
+  _target_: src.court.models.lite_tracknet.LiteTrackNet
+
+  # モデルパラメータ
+  in_channels: 3
+  out_channels: 15
+
+# メタ情報をまとめる
+meta:
+  name: lite_tracknet
+  output_type: "heatmap" 

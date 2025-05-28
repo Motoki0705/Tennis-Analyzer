@@ -1,7 +1,14 @@
-# ViTCourtモデル設定
-name: vit_court
-_target_: src.court.models.vit_court.ViTCourt
+# @package _global_.model
 
-# モデルパラメータ
-num_keypoints: 15
-pretrained_model: "google/vit-base-patch16-224-in21k" 
+# ViTCourtモデル設定
+net:
+  _target_: src.court.models.vit_court.ViTCourt
+
+  # モデルパラメータ
+  out_channels: 15
+  pretrained_model: "google/vit-base-patch16-224-in21k"
+
+# メタ情報をまとめる
+meta:
+  name: vit_court
+  output_type: "heatmap" 
