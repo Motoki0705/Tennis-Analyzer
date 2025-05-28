@@ -9,6 +9,8 @@ import torch
 from scipy.spatial import distance
 from tqdm import tqdm
 
+from src.utils.logging_utils import setup_logger
+
 
 class BallPredictor:
     def __init__(
@@ -24,7 +26,6 @@ class BallPredictor:
         use_half: bool = False,  # ★ 追加: 半精度推論を使うか
     ):
         # ────────── logger 初期化 ──────────
-        from utils.logging_utils import setup_logger
         self.logger = setup_logger(self.__class__)
 
         # ────────── パラメータ ──────────

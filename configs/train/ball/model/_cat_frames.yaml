@@ -1,3 +1,3 @@
 # @package _global_
 defaults:
-  - /train/ball/model/cat_frames/lite_tracknet 
+  - cat_frames/lite_tracknet 

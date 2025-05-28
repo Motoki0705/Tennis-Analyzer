@@ -1,0 +1,7 @@
+# FPNモデル設定
+name: fpn
+_target_: src.court.models.fpn.CourtDetectorFPN
+
+# モデルパラメータ
+in_channels: 3
+base_ch: 64 

@@ -1,0 +1,7 @@
+# LiteTrackNetモデル設定
+name: lite_tracknet
+_target_: src.court.models.lite_tracknet.LiteTrackNet
+
+# モデルパラメータ
+in_channels: 3
+heatmap_channels: 15 

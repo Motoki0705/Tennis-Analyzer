@@ -1,0 +1,7 @@
+# TimeSformerモデル設定
+name: tsformer_ball
+_target_: src.ball.models.sequence.TSformer_ball.TimeSformerBall
+
+# モデル構成パラメータ
+num_keypoints: 1
+pretrained_model: "facebook/timesformer-base-finetuned-k400" 

@@ -20,7 +20,7 @@ common:
   batch_size: 1
 
 # --- Paths ---
-input_path: "data/test/video_input2.mp4" # Override this
+input_path: "datasets/test/video_input2.mp4" # Override this
 output_path: "outputs/${mode}/${now:%Y-%m-%d_%H-%M-%S}.mp4"
 output_jsonl_path: null
 

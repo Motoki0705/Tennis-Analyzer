@@ -3,7 +3,7 @@ name: heatmap_regression
 _target_: src.ball.lit_module.cat_frames_lit_module.CatFramesLitModule
 
 # モデルは外部で定義されたものを参照
-model: ${model}
+# model: ${model} # 循環参照が発生するため削除
 
 # 学習パラメータ
 lr: 1e-3

@@ -103,7 +103,7 @@ class PixelShuffleBlock(nn.Module):
         return x
 
 
-class LiteBallTracker(nn.Module):
+class LiteTrackNet(nn.Module):
     """
     改良版 BallTracker:
       - 入力: （B, 9, H, W）
@@ -170,7 +170,7 @@ class LiteBallTracker(nn.Module):
 
 if __name__ == "__main__":
     # テスト実行例
-    model = LiteBallTracker(in_channels=9, heatmap_channels=1)
+    model = LiteTrackNet(in_channels=9, heatmap_channels=1)
     x = torch.randn(1, 9, 360, 640)
     y = model(x)
     print(f"out shape: {y.shape}")  # → torch.Size([1,1,360,640])

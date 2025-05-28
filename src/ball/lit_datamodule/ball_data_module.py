@@ -25,8 +25,8 @@ class TennisBallDataModule(pl.LightningDataModule):
         val_test_transform: A.ReplayCompose, # 追加
         annotation_file: Union[
             str, Path
-        ] = r"data/annotation_jsons/coco_annotations_globally_tracked.json",
-        image_root: Union[str, Path] = r"data/images",
+        ] = r"datasets/annotation_jsons/coco_annotations_globally_tracked.json",
+        image_root: Union[str, Path] = r"datasets/images",
         T: int = 3,
         batch_size: int = 32,
         num_workers: int = 8,

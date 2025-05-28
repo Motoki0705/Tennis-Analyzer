@@ -8,12 +8,12 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from src.ball.models.video.mobile_gru_unet import (
+from src.ball.models.sequence.mobile_gru_unet import (
     MobileNetUHeatmapNet,
     MobileNetUHeatmapWrapper,
     TemporalHeatmapModel,
 )
-from src.utils.load_model import load_model_weights
+from src.utils.model_utils import load_model_weights
 
 
 class BallPredictor:
