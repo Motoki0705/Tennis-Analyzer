@@ -1,11 +1,11 @@
 # 座標回帰用 LightningModule設定
-name: coord_regression
-_target_: src.ball.lit_module.coord_regression_lit_module.CoordRegressionModule
+module:
+  _target_: src.ball.lit_module.coord_regression_lit_module.CoordRegressionLitModule
+  # 学習パラメータ
+  lr: 1e-3
+  weight_decay: 1e-4
+  freeze_backbone_epochs: 0 
 
-# モデルは外部で定義されたものを参照
-model: ${model}
-
-# 学習パラメータ
-lr: 1e-3
-weight_decay: 1e-4
-freeze_backbone_epochs: 0 
+meta:
+  name: coord_regression
+  output_type: "coord"

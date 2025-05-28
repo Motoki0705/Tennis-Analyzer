@@ -9,6 +9,8 @@ import torch
 from scipy.special import expit
 from tqdm import tqdm
 
+from src.utils.logging_utils import setup_logger
+
 
 class CourtPredictor:
     """
@@ -31,7 +33,6 @@ class CourtPredictor:
         visualize_mode: str = "overlay",  # "overlay" | "heatmap" | "heatmap_channels"
     ):
         # ロガー設定
-        from utils.logging_utils import setup_logger
         self.logger = setup_logger(self.__class__)
 
         self.device = device

@@ -237,6 +237,20 @@ class MobileNetUHeatmapNet(nn.Module):
         return self.dequant(out)
 
 
+# ---------- MobileNetV3Ball ---------- #
+class MobileNetV3Ball(nn.Module):
+    def __init__(self, num_classes=1, pretrained=True):
+        super().__init__()
+        import torchvision.models as models
+        self.model = models.mobilenet_v3_small(pretrained=pretrained)
+        # 最終層を置き換え
+        in_features = self.model.classifier[-1].in_features
+        self.model.classifier[-1] = nn.Linear(in_features, num_classes)
+        
+    def forward(self, x):
+        return self.model(x)
+        
+        
 # ---------- 動作確認 ---------- #
 if __name__ == "__main__":
     # 1️⃣ モデル構築

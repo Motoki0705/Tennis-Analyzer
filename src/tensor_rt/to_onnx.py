@@ -1,7 +1,7 @@
 import torch
 
 from src.ball.models.cat_frames.lite_tracknet import LiteBallTracker
-from src.utils.load_model import load_model_weights
+from src.utils.model_utils import load_model_weights
 
 # 1. モデル構築＆重みロード
 model = LiteBallTracker(in_channels=9, heatmap_channels=1)

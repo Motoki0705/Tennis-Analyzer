@@ -1,7 +1,14 @@
-# RT-DETR モデル設定
-name: rtdetr
-_target_: transformers.RTDetrForObjectDetection.from_pretrained
+# @package _global_.model
 
-# モデルパラメータ
-pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
-num_labels: 1  # プレーヤーのみ 
+# RT-DETR モデル設定
+net:
+  _target_: transformers.RTDetrForObjectDetection.from_pretrained
+
+  # モデルパラメータ
+  pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  num_labels: 1  # プレーヤーのみ
+
+# メタ情報をまとめる
+meta:
+  name: rtdetr
+  output_type: "detection" 

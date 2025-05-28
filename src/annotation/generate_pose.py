@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from src.annotation.const import PLAYER_CATEGORY
 from src.pose.predictor import PosePredictor
-from src.utils.load_model import load_model_weights
+from src.utils.model_utils import load_model_weights
 
 
 # ─────────────── Dataset 定義 ─────────────────

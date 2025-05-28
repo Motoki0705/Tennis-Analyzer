@@ -65,7 +65,7 @@ class PixelShuffleBlock(nn.Module):
         return self.act(self.bn(self.ps(self.conv(x))))
 
 
-class LiteBallTrackerXY(nn.Module):
+class LiteTrackNetXY(nn.Module):
     """
     Ball位置を (x, y) ∈ [0, 1] × [0, 1] で出力する座標回帰モデル
     入力: (B, 9, H, W)
@@ -105,7 +105,7 @@ class LiteBallTrackerXY(nn.Module):
 
 
 if __name__ == "__main__":
-    model = LiteBallTrackerXY()
+    model = LiteTrackNetXY()
     x = torch.randn(1, 9, 360, 640)
     pred = model(x)
     print("座標予測 (正規化):", pred)  # → (B, 2)

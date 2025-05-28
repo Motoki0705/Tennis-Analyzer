@@ -1,0 +1,17 @@
+# @package _global_.model
+
+# Swin V2 256モデル設定
+net:
+  _target_: src.court.models.swin_v2_256_court.SwinCourtUNet
+
+  # モデルパラメータ
+  out_channels: 15
+  final_channels: [64, 32]
+  swin_model: "swinv2_large_window12to16_192to256.ms_in22k_ft_in1k"
+  pretrained: true
+  img_size: 256
+
+# メタ情報をまとめる
+meta:
+  name: swin_v2_256_court
+  output_type: "heatmap" 
