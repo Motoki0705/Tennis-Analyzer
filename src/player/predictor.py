@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from src.utils.logging_utils import setup_logger
+
 
 class PlayerPredictor:
     def __init__(
@@ -19,12 +21,7 @@ class PlayerPredictor:
         use_half: bool = False,
     ):
         # ─── logger 初期化 ───
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
-            h = logging.StreamHandler()
-            h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-            self.logger.addHandler(h)
-        self.logger.setLevel(logging.INFO)
+        self.logger = setup_logger(self.__class__)
 
         # ─── モデル・設定 ───
         self.device = device

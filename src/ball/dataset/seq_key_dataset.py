@@ -10,8 +10,8 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-from src.ball.utils.heatmap import generate_gaussian_heatmap
-from src.ball.utils.visualize import overlay_heatmaps_on_frames
+from src.utils.heatmap import generate_gaussian_heatmap
+from src.utils.visualization import overlay_heatmaps_on_frames
 
 
 class SequenceKeypointDataset(Dataset):

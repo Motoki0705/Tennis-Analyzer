@@ -22,6 +22,30 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 
 
+def validate_model_litmodule_compatibility(model_config, litmodule_config):
+    """
+    モデルとLitModuleの出力タイプの互換性を検証する関数
+    
+    Args:
+        model_config: モデルの設定
+        litmodule_config: LitModuleの設定
+        
+    Raises:
+        ValueError: 互換性がない場合
+    """
+    model_output_type = model_config.meta.output_type
+    litmodule_output_type = litmodule_config.meta.output_type
+    
+    if model_output_type != litmodule_output_type:
+        raise ValueError(
+            f"モデルの出力タイプ '{model_output_type}' と "
+            f"LitModuleの出力タイプ '{litmodule_output_type}' が一致しません。"
+            f"モデル: {model_config.meta.name}, LitModule: {litmodule_config.meta.name}"
+        )
+    
+    logging.info(f"モデルとLitModuleの出力タイプ '{model_output_type}' が一致しています")
+
+
 def train(cfg: DictConfig) -> None:
     """
     コート検出モデルのトレーニングを実行する関数
@@ -35,12 +59,15 @@ def train(cfg: DictConfig) -> None:
     # ロギングの設定
     logging.info(f"Training with config:\n{OmegaConf.to_yaml(cfg)}")
     
+    # モデルとLitModuleの互換性をチェック
+    validate_model_litmodule_compatibility(cfg.model, cfg.litmodule)
+    
     # モデルをインスタンス化
-    model = instantiate(cfg.model)
+    model = instantiate(cfg.model.net)
     logging.info(f"Model: {model.__class__.__name__}")
     
     # LightningModuleをインスタンス化
-    lit_module = instantiate(cfg.litmodule, model=model)
+    lit_module = instantiate(cfg.litmodule.module, model=model)
     logging.info(f"LightningModule: {lit_module.__class__.__name__}")
     
     # DataModuleをインスタンス化

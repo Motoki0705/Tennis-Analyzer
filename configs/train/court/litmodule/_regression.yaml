@@ -1,3 +1,4 @@
 # @package _global_
+
 defaults:
-  - /train/court/litmodule/heatmap_regression 
+  - heatmap_regression 

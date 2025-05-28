@@ -8,7 +8,8 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from torch.utils.data import Dataset
 
-from src.court.utils.visualize_dataset import visualize_overlay
+from src.utils.heatmap import draw_gaussian
+from src.utils.visualization import visualize_overlay
 
 
 class CourtDataset(Dataset):
@@ -188,32 +189,7 @@ class CourtDataset(Dataset):
             center (Tuple[float, float]): Center of the Gaussian
             sigma (float): Standard deviation of the Gaussian
         """
-        tmp_size = sigma * 3
-        mu_x, mu_y = center
-        w, h = heatmap.shape[1], heatmap.shape[0]
-
-        ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
-        br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
-
-        if ul[0] >= w or ul[1] >= h or br[0] < 0 or br[1] < 0:
-            return heatmap
-
-        size = 2 * tmp_size + 1
-        x = torch.arange(0, size, 1).float()
-        y = x[:, None]
-        x0 = y0 = size // 2
-        g = torch.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma**2))
-
-        g_x = max(0, -ul[0]), min(br[0], w) - ul[0]
-        g_y = max(0, -ul[1]), min(br[1], h) - ul[1]
-        img_x = max(0, ul[0]), min(br[0], w)
-        img_y = max(0, ul[1]), min(br[1], h)
-
-        heatmap[img_y[0] : img_y[1], img_x[0] : img_x[1]] = torch.max(
-            heatmap[img_y[0] : img_y[1], img_x[0] : img_x[1]],
-            g[g_y[0] : g_y[1], g_x[0] : g_x[1]],
-        )
-        return heatmap
+        return draw_gaussian(heatmap, center, sigma)
 
 
 if __name__ == "__main__":

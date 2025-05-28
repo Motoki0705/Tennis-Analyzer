@@ -9,8 +9,8 @@ model:
   model_name: "PekingU/rtdetr_v2_r18vd"
 
 data:
-  img_folder: "data/ball/images"
-  annotation_file: "data/ball/coco_annotations_ball_ranged.json"
+  img_folder: "datasets/ball/images"
+  annotation_file: "datasets/ball/coco_annotations_ball_ranged.json"
   cat_id_map: {2: 0}
   use_original_path: true
   batch_size: 4

@@ -31,8 +31,8 @@ class CourtDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        annotation_root: Union[str, Path] = r"data/",
-        image_root: Union[str, Path] = r"data/images",
+        annotation_root: Union[str, Path] = r"datasets/",
+        image_root: Union[str, Path] = r"datasets/images",
         batch_size: int = 8,
         num_workers: int = 8,
         input_size: Tuple[int, int] = (224, 224),

@@ -1,7 +1,14 @@
-# LiteTrackNetモデル設定
-name: lite_tracknet
-_target_: src.ball.models.cat_frames.lite_tracknet.LiteTrackNet
+# @package _global_.model
 
-# モデル構成パラメータ
-in_channels: ${litdatamodule.T}
-num_classes: 1 
+# LiteTrackNetモデル設定
+net:
+  _target_: src.ball.models.cat_frames.lite_tracknet.LiteTrackNet
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  out_channels: 1
+
+# メタ情報をまとめる
+meta:
+  name: lite_tracknet
+  output_type: "heatmap"

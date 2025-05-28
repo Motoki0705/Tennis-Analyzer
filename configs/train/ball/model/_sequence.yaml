@@ -1,3 +1,4 @@
 # @package _global_
+
 defaults:
-  - /train/ball/model/sequence/lstm_unet 
+  - sequence/lstm_unet

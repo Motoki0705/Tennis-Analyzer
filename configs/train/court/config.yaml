@@ -9,8 +9,8 @@ hydra:
 # デフォルト設定
 defaults:
   # モデルアーキテクチャの選択
-  # コマンドライン例: model=swin_court
-  - model: swin_court
+  # コマンドライン例: model=fpn
+  - model: fpn
   
   # LightningModuleの選択
   # コマンドライン例: litmodule=heatmap_regression

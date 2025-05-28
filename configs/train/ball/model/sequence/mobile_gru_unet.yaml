@@ -1,0 +1,24 @@
+# @package _global_.model
+
+# MobileGRU-UNetモデル設定
+net:
+  _target_: src.ball.models.sequence.mobile_gru_unet.TemporalHeatmapModel
+
+  # モデル構成パラメータ
+  backbone:
+    _target_: src.ball.models.sequence.mobile_gru_unet.MobileNetUHeatmapWrapper
+    pretrained_model:
+      _target_: src.ball.models.sequence.mobile_gru_unet.MobileNetUHeatmapNet
+      in_channels: 3
+      base_channels: 32
+      out_channels: 1
+      repeats: [1, 1, 2, 2, 1, 1]
+      expansion: 4
+      use_se: true
+      act: "hswish"
+  hidden_dim: 256
+
+# メタ情報をまとめる
+meta:
+  name: mobile_gru_unet
+  output_type: "heatmap" 
