@@ -1,0 +1,7 @@
+# ResNet回帰モデル設定
+name: resnet_regression
+_target_: src.ball.models.cat_frames.resnet_regression.ResNet50CoordRegression
+
+# モデル構成パラメータ
+input_channels: ${litdatamodule.T}
+pretrained: true 

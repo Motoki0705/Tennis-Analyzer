@@ -1,0 +1,11 @@
+# Swin 448モデル設定
+name: swin_448
+_target_: src.ball.models.cat_frames.swin_448.SwinBallUNet
+
+# モデル構成パラメータ
+num_keypoints: 1
+in_channels: ${litdatamodule.T}
+final_channels: [64, 32]
+swin_model: "swin_base_patch4_window7_224"
+pretrained: true
+img_size: 448 

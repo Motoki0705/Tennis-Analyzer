@@ -1,0 +1,3 @@
+# @package _global_
+defaults:
+  - /train/court/model/swin_court 

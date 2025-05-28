@@ -8,6 +8,9 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
+from src.utils.logging_utils import setup_logger
+
+
 # COCO スケルトン定義
 COCO_SKELETON = [
     (0, 1),
@@ -42,7 +45,7 @@ class PosePredictor:
         pose_score_thresh: float = 0.6,
         use_half: bool = False,
     ):
-        from utils.logging_utils import setup_logger
+
         self.logger = setup_logger(self.__class__)
 
         self.device = device

@@ -1,3 +1,0 @@
-tb_dir: tb_logs
-checkpoints_path: checkpoints
-version_name: conditional_detr

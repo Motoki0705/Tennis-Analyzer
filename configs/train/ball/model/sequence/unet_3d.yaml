@@ -1,0 +1,9 @@
+# UNet3Dモデル設定
+name: unet_3d
+_target_: src.ball.models.sequence.UNet_3D.UNet3D
+
+# モデル構成パラメータ
+in_ch: 3
+base_ch: 32
+t_frames: ${litdatamodule.T}
+num_keypoints: 1 
