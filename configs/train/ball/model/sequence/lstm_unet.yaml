@@ -1,9 +1,16 @@
-# LSTM-UNetモデル設定
-name: lstm_unet
-_target_: src.ball.models.sequence.LSTM_UNet.LSTM_UNet
+# @package _global_.model
 
-# モデル構成パラメータ
-in_channels: ${litdatamodule.T}
-num_classes: 1
-hidden_dim: 64
-bilinear: true 
+# LSTM-UNetモデル設定
+net:
+  _target_: src.ball.models.sequence.LSTM_UNet.UNet2DConvLSTM
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  base_channels: 64
+  num_keypoints: 1
+  t_frames: ${litdatamodule.T}
+
+# メタ情報をまとめる
+meta:
+  name: lstm_unet
+  output_type: "heatmap" 

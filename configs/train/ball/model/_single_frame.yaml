@@ -1,3 +1,4 @@
 # @package _global_
+
 defaults:
-  - /train/ball/model/single_frame/mobilenet 
+  - single_frame/mobilenet 

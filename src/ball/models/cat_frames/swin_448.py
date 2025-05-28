@@ -45,8 +45,8 @@ class UpBlock(nn.Module):
 class SwinBallUNet(nn.Module):
     def __init__(
         self,
-        num_keypoints=1,
         in_channels=9,
+        out_channels=1,
         final_channels=[64, 32],
         swin_model="swin_base_patch4_window7_224",
         pretrained=True,
@@ -109,7 +109,7 @@ class SwinBallUNet(nn.Module):
         # 入力画像分の + 3 (hidden_channels[4] + input_channels)
         self.final_res_conv = nn.Conv2d(
             in_channels=final_channels[1] + in_channels,
-            out_channels=num_keypoints,
+            out_channels=out_channels,
             kernel_size=3,
             stride=1,
             padding=1,
@@ -164,7 +164,7 @@ class SwinBallUNet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = SwinBallUNet(num_keypoints=3, in_channels=9, img_size=448)
+    model = SwinBallUNet(in_channels=9, out_channels=3, img_size=448)
     x = torch.randn(1, 9, 448, 448)  # 画像入力
     out = model(x)
     print(out.shape)

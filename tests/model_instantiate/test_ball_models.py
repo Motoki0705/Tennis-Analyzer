@@ -54,16 +54,9 @@ def test_ball_model_instantiate(model_config):
         print(f"\nTesting model: {model_config}")
         print(f"Model config: {OmegaConf.to_yaml(cfg)}")
         
-        try:
-            # nameパラメータを除外した新しいDictConfigを作成
-            model_params = {}
-            for k, v in cfg.items():
-                if k != "name":
-                    model_params[k] = v
-                
+        try:    
             # モデルのインスタンス化
-            # 実際のインスタンス化はテストしないでパスさせる
-            print(f"Model would be instantiated with params: {model_params}")
+            model = instantiate(cfg.model.net)
             assert True  # テスト成功
             
         except Exception as e:
