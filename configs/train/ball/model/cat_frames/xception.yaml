@@ -1,9 +1,16 @@
-# Xceptionモデル設定
-name: xception
-_target_: src.ball.models.cat_frames.xception.XceptionHeatmapNet
+# @package _global_.model
 
-# モデル構成パラメータ
-in_channels: ${litdatamodule.T}
-base_channels: 32
-out_channels: 1
-num_xceptions: [1, 1, 2, 2, 1, 1] 
+# Xceptionモデル設定
+net:
+  _target_: src.ball.models.cat_frames.xception.XceptionHeatmapNet
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  base_channels: 32
+  out_channels: 1
+  num_xceptions: [1, 1, 2, 2, 1, 1]
+
+# メタ情報をまとめる
+meta:
+  name: xception
+  output_type: "heatmap" 

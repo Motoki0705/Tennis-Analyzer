@@ -1,19 +1,26 @@
-# Uniformerモデル設定
-name: uniformer
-_target_: src.ball.models.sequence.uniformer.UniformerUNet
+# @package _global_.model
 
-# モデル構成パラメータ
-uniformer_cfg:
-  depth: [3, 4, 8, 3]
-  embed_dim: [64, 128, 320, 512]
-  head_dim: 64
-  mlp_ratio: 4
-  drop_rate: 0.5
-  attn_drop_rate: 0.0
-  drop_path_rate: 0.1
-  num_classes: 400
-  img_size: 224
-  in_chans: 3
-  split: false
-weight_path: "checkpoints/ball/uniformer/uniformer_small_k400_8x8.pth"
-up_t: true 
+# Uniformerモデル設定
+net:
+  _target_: src.ball.models.sequence.uniformer.UniformerUNet
+
+  # モデル構成パラメータ
+  uniformer_cfg:
+    depth: [3, 4, 8, 3]
+    embed_dim: [64, 128, 320, 512]
+    head_dim: 64
+    mlp_ratio: 4
+    drop_rate: 0.5
+    attn_drop_rate: 0.0
+    drop_path_rate: 0.1
+    num_classes: 400
+    img_size: 224
+    in_chans: 3
+    split: false
+  weight_path: "checkpoints/ball/uniformer/uniformer_small_k400_8x8.pth"
+  up_t: true
+
+# メタ情報をまとめる
+meta:
+  name: uniformer
+  output_type: "heatmap" 

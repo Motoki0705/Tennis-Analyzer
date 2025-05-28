@@ -1,7 +1,16 @@
-# ResNet回帰モデル設定
-name: resnet_regression
-_target_: src.ball.models.cat_frames.resnet_regression.ResNet50CoordRegression
+# @package _global_.model
 
-# モデル構成パラメータ
-input_channels: ${litdatamodule.T}
-pretrained: true 
+# ResNet回帰モデル設定
+net:
+  _target_: src.ball.models.cat_frames.resnet_regression.ResNetRegression
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  out_channels: 2
+  backbone: "resnet50"
+  pretrained: true
+
+# メタ情報をまとめる
+meta:
+  name: resnet_regression
+  output_type: "coord" 

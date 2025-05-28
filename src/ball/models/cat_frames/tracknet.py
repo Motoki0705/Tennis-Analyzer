@@ -25,11 +25,11 @@ class ConvBlock(nn.Module):
 
 
 class BallTrackerNet(nn.Module):
-    def __init__(self, out_channels=1):
+    def __init__(self, in_channels=9, out_channels=1):
         super().__init__()
         self.out_channels = out_channels
 
-        self.conv1 = ConvBlock(in_channels=9, out_channels=64)
+        self.conv1 = ConvBlock(in_channels=in_channels, out_channels=64)
         self.conv2 = ConvBlock(in_channels=64, out_channels=64)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.conv3 = ConvBlock(in_channels=64, out_channels=128)
@@ -99,7 +99,7 @@ class BallTrackerNet(nn.Module):
 
 if __name__ == "__main__":
     device = "cpu"
-    model = BallTrackerNet().to(device)
+    model = BallTrackerNet(in_channels=9, out_channels=1).to(device)
     inp = torch.rand(1, 9, 360, 640)
     out = model(inp)
     print("out = {}".format(out.shape))

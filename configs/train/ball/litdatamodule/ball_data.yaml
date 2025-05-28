@@ -2,7 +2,7 @@
 _target_: src.ball.lit_datamodule.ball_data_module.TennisBallDataModule
 
 # データパス
-annotation_file: 'datasets/ball/annotations/ball_annotations.json'
+annotation_file: 'datasets/ball/coco_annotations_ball_pose_court.json'
 image_root: 'datasets/ball/images'
 
 # 入力設定
