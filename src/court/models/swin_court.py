@@ -54,7 +54,7 @@ class UpBlock(nn.Module):
 class SwinCourtUNet(nn.Module):
     def __init__(
         self,
-        num_keypoints=15,
+        out_channels=15,
         final_channels=[64, 32],
         swin_model="swin_base_patch4_window7_224",
         pretrained=True,
@@ -128,7 +128,7 @@ class SwinCourtUNet(nn.Module):
         # 入力画像分の + 3 (hidden_channels[4] + 3)
         self.final_conv = nn.Conv2d(
             in_channels=final_channels[1] + 3,
-            out_channels=num_keypoints,
+            out_channels=out_channels,
             kernel_size=3,
             stride=1,
             padding=1,
@@ -151,7 +151,7 @@ class SwinCourtUNet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = SwinCourtUNet(num_keypoints=15)
+    model = SwinCourtUNet(out_channels=15)
     x = torch.randn(1, 3, 224, 224)  # 画像入力
     out = model(x)  # => torch.Size([1, 15, 224, 224])
     print(out.shape)

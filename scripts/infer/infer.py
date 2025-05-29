@@ -15,14 +15,18 @@ Hydra-driven Inference System for Tennis Analyzer
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any, Optional
 
 import hydra
 import torch
 from hydra.utils import instantiate, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
+
+# カレントディレクトリをPythonパスに追加（モジュールインポート用）
+sys.path.append('.')
 
 # ──────────────────────  logger  ──────────────────────
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -47,9 +51,39 @@ def _get_model_cfg(cfg: DictConfig, task: str) -> DictConfig:
 # ╭──────────────────────────────────────────────────╮
 # │  2. モデル instantiate + ckpt 読み込み           │
 # ╰──────────────────────────────────────────────────╯
+def extract_hparams_from_ckpt(ckpt_path: str) -> Optional[Dict[str, Any]]:
+    """
+    チェックポイントファイルからハイパーパラメータを抽出します。
+    Lightning形式のcheckpointからhyper_parametersを取得します。
+
+    Args:
+        ckpt_path (str): チェックポイントファイルのパス
+
+    Returns:
+        Optional[Dict[str, Any]]: ハイパーパラメータの辞書、または取得できない場合はNone
+    """
+    try:
+        ckpt = torch.load(ckpt_path, map_location="cpu")
+        
+        # Lightning形式のcheckpointからhyper_parametersを取得
+        if "hyper_parameters" in ckpt:
+            return ckpt["hyper_parameters"]
+        
+        # 古い形式のLightningはhparams
+        if "hparams" in ckpt:
+            return ckpt["hparams"]
+            
+        logger.warning(f"No hyperparameters found in checkpoint: {ckpt_path}")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to extract hyperparameters from checkpoint: {e}")
+        return None
+
+
 def instantiate_model(cfg: DictConfig, task: str):
     """
     - DictConfig から _target_ を持つ設定を取り出し
+    - ckpt_path があれば、そこからハイパーパラメータを抽出して設定をマージ
     - ckpt_path は **コンストラクタに渡さず**、ロード処理にのみ使用
     """
     full_cfg = _get_model_cfg(cfg, task)
@@ -57,6 +91,48 @@ def instantiate_model(cfg: DictConfig, task: str):
     # ckpt_path を退避してコンストラクタ用 DictConfig を作成
     ckpt_path = full_cfg.get("ckpt_path")
     ctor_cfg = OmegaConf.create({k: v for k, v in full_cfg.items() if k != "ckpt_path"})
+
+    # ckptからモデル設定パラメータを抽出し、設定とマージ
+    if ckpt_path:
+        ckpt_abs = to_absolute_path(ckpt_path)
+        
+        try:
+            # チェックポイントからモデルパラメータを抽出
+            state = torch.load(ckpt_abs, map_location="cpu")
+            
+            # hparamsまたはhyper_parametersからモデルパラメータを取得
+            model_params = {}
+            if "hyper_parameters" in state:
+                hparams = state["hyper_parameters"]
+            elif "hparams" in state:
+                hparams = state["hparams"]
+            else:
+                hparams = None
+                
+            if hparams:
+                # モデル関連のパラメータを抽出
+                if isinstance(hparams.get('model'), dict):
+                    model_params.update(hparams['model'])
+                
+                # 重要なパラメータを抽出
+                for key in ['in_channels', 'out_channels', 'num_keypoints', 'heatmap_channels']:
+                    if key in hparams:
+                        model_params[key] = hparams[key]
+                
+                # パラメータ名の変換（古いモデルとの互換性のため）
+                if 'num_keypoints' in model_params and 'out_channels' not in model_params:
+                    model_params['out_channels'] = model_params['num_keypoints']
+                    
+                if 'heatmap_channels' in model_params and 'out_channels' not in model_params:
+                    model_params['out_channels'] = model_params['heatmap_channels']
+                
+                # configにない項目のみをマージ（configを優先）
+                for k, v in model_params.items():
+                    if k not in ctor_cfg:
+                        logger.info(f"Using parameter from checkpoint for '{task}.{k}': {v}")
+                        ctor_cfg[k] = v
+        except Exception as e:
+            logger.warning(f"Failed to extract parameters from checkpoint: {e}")
 
     logger.info(f"Instantiating '{task}' model: {ctor_cfg._target_}")
     model = instantiate(ctor_cfg)
@@ -66,17 +142,28 @@ def instantiate_model(cfg: DictConfig, task: str):
         ckpt_abs = to_absolute_path(ckpt_path)
         logger.info(f"Loading checkpoint for '{task}' from: {ckpt_abs}")
         try:
-            from src.utils.model_utils import load_model_weights
-
-            model = load_model_weights(model, ckpt_abs)
-        except Exception as e:
-            logger.warning(f"load_model_weights failed ({e}); fallback to torch.load.")
+            # state_dictをロード
             state = torch.load(ckpt_abs, map_location="cpu")
-            # Lightning 形式と純 state_dict 両対応
-            sd = state.get("state_dict", state)
-            if isinstance(sd, dict):
-                sd = {k.replace("model.", "", 1): v for k, v in sd.items()}
-            model.load_state_dict(sd, strict=False)
+            
+            # state_dictを取得
+            if "state_dict" in state:
+                state_dict = state["state_dict"]
+            else:
+                state_dict = state
+                
+            # "model."というprefixを除去
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("model."):
+                    new_key = k[len("model.") :]  # "model."を取り除く
+                else:
+                    new_key = k  # そのまま
+                new_state_dict[new_key] = v
+                
+            # モデルにロード
+            model.load_state_dict(new_state_dict, strict=False)
+        except Exception as e:
+            logger.warning(f"Failed to load checkpoint: {e}")
 
     return model
 
