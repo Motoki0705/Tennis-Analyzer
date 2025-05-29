@@ -110,7 +110,7 @@ class LiteTrackNet(nn.Module):
       - 出力: （B, 1, H, W） ヒートマップ
     """
 
-    def __init__(self, in_channels: int = 9, heatmap_channels: int = 1):
+    def __init__(self, in_channels: int = 3, out_channels: int = 15):
         super().__init__()
 
         # Encoder
@@ -137,7 +137,7 @@ class LiteTrackNet(nn.Module):
             nn.Conv2d(32 + 16, 16, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(16),
             nn.Hardswish(inplace=True),
-            nn.Conv2d(16, heatmap_channels, kernel_size=1),
+            nn.Conv2d(16, out_channels, kernel_size=1),
         )
 
     def forward(self, x):
@@ -170,7 +170,7 @@ class LiteTrackNet(nn.Module):
 
 if __name__ == "__main__":
     # テスト実行例
-    model = LiteTrackNet(in_channels=9, heatmap_channels=1)
+    model = LiteTrackNet(in_channels=9, out_channels=15)
     x = torch.randn(1, 9, 360, 640)
     y = model(x)
-    print(f"out shape: {y.shape}")  # → torch.Size([1,1,360,640])
+    print(f"out shape: {y.shape}")  # → torch.Size([1,15,360,640])
