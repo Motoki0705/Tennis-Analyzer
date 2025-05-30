@@ -223,7 +223,7 @@ class SelfTrainingCoordLitModule(pl.LightningModule):
             self.log(
                 f"{stage}_pseudo_ratio",
                 num_pseudo / (num_pseudo + num_real),
-                on_step=False,
+                on_step=True,
                 on_epoch=True,
                 logger=True,
                 sync_dist=True,

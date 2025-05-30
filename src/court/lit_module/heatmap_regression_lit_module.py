@@ -84,7 +84,7 @@ class HeatmapRegressionLitModule(pl.LightningModule):
         self.log(
             f"{stage}_loss",
             loss,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=(stage == "val"),
             logger=True,
@@ -93,7 +93,7 @@ class HeatmapRegressionLitModule(pl.LightningModule):
         self.log(
             f"{stage}_IoU",
             masked_iou,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=(stage == "val"),
             logger=True,
