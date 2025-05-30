@@ -134,7 +134,7 @@ class CourtDataModule(pl.LightningDataModule):
             default_num_keypoints=self.default_keypoints,
             transform=transform,
             sigma=self.sigma,
-            is_each_keypoint_heatmap=self.is_each_keypoint,
+            is_each_keypoint=self.is_each_keypoint,
         )
 
     def train_dataloader(self):

@@ -9,7 +9,7 @@ from PIL import Image, UnidentifiedImageError
 from torch.utils.data import Dataset
 
 from src.utils.heatmap import draw_gaussian
-from src.utils.visualization import visualize_overlay
+from src.utils.visualization.court import visualize_court_overlay
 
 
 class CourtDataset(Dataset):
@@ -193,8 +193,8 @@ class CourtDataset(Dataset):
 
 
 if __name__ == "__main__":
-    json_path = r"C:\Users\kamim\code\Tennis-Analyzer\data\court\converted_train.json"
-    image_root = r"C:\Users\kamim\code\Tennis-Analyzer\data\court\images"
+    json_path = r"C:\Users\kamim\code\Tennis-Analyzer\datasets\court\converted_train.json"
+    image_root = r"C:\Users\kamim\code\Tennis-Analyzer\datasets\court\images"
     dataset = CourtDataset(json_path, image_root, is_each_keypoint=False)
     image, heatmap = dataset[0]
-    visualize_overlay(image, heatmap, alpha=0.6, cmap="jet", save_path="overlay.png")
+    visualize_court_overlay(image, heatmap, alpha=0.6, cmap="jet", save_path="overlay.png")
