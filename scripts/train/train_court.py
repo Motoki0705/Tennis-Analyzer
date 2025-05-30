@@ -90,9 +90,6 @@ def train(cfg: DictConfig) -> None:
     # トレーニングを実行
     trainer.fit(lit_module, datamodule=datamodule)
     
-    # テストを実行
-    if hasattr(datamodule, "test_dataloader"):
-        trainer.test(lit_module, datamodule=datamodule)
 
 
 @hydra.main(config_path="../../configs/train/court", config_name="config", version_base="1.3")

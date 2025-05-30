@@ -1,0 +1,38 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  # モデルアーキテクチャの選択
+  # コマンドライン例: model=fpn
+  - model: fpn
+  
+  # LightningModuleの選択（自己学習用）
+  - litmodule: self_training_heatmap
+  
+  # 自己学習用データモジュール
+  - litdatamodule: self_training_court_data
+  
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# 自己学習パラメータ
+self_training:
+  max_cycles: 3
+  confidence_threshold: 0.7
+  similarity_threshold: 0.8
+  max_keypoint_shift: 20.0
+  min_high_quality_frames: 3
+
+# 実験名（ディレクトリ名）の設定
+# モデル名とデータセットタイプから自動生成
+version: self_training_${model.name}_court_keypoints
+
+# 再現性のための乱数シード
+seed: 42 
