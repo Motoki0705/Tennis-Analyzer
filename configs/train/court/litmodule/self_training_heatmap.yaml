@@ -1,0 +1,14 @@
+# 自己学習ヒートマップ回帰用 LightningModule設定
+module:
+  _target_: src.court.lit_module.self_training_lit_module.SelfTrainingCourtLitModule
+
+  # 学習パラメータ
+  lr: 1e-4
+  weight_decay: 1e-4
+  warmup_epochs: 1
+  max_epochs: ${trainer.max_epochs}
+  pseudo_weight: 0.5  # 擬似ラベルの重み
+
+meta:
+  name: self_training_heatmap
+  output_type: "heatmap" 
