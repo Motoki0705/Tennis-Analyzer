@@ -1,2 +1,3 @@
 _target_: src.ball.models.cat_frames.lite_tracknet_xy.LiteTrackNetXY
+in_channels: 9
 ckpt_path: checkpoints/ball/lite_tracknet_xy/lite_tracknet_xy-epoch=09-val_loss=0.1234.ckpt

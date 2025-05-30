@@ -61,36 +61,49 @@ class BallPredictor:
 
     def predict(self, clips: List[List[np.ndarray]]) -> List[dict]:
         """
-        clips: List of length B, each element is List of T frames (H×W×3 numpy)
-        returns: List of dict {x:int, y:int, confidence:float or None}
-        """
-        batch_t = torch.cat([self._preprocess_clip(c) for c in clips], dim=0)
-        # 推論（half precision オプション対応）
-        with (
-            torch.no_grad(),
-            (
-                torch.amp.autocast(device_type=self.device, dtype=torch.float16)
-                if self.use_half
-                else torch.no_grad()
-            ),
-        ):
-            preds = self.model(batch_t)
+        複数のクリップ（各クリップは複数フレーム）を処理し、ボールの位置を予測します。
 
+        Args:
+            clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
+
+        Returns:
+            クリップごとの予測結果のリスト。各結果は {"x": int, "y": int, "confidence": float} 形式。
+        """
+        tensors = [self._preprocess_clip(clip) for clip in clips]
+        batch = torch.cat(tensors, dim=0)
+
+        with torch.no_grad():
+            if self.use_half:
+                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                    preds = self.model(batch)
+            else:
+                preds = self.model(batch)
+
+        # --- ヒートマップモード ---
         results = []
-        # --- Heatmap モード ---
-        if preds.ndim == 4:
-            heatmaps = torch.sigmoid(preds).cpu().numpy()  # [B,1,Hh,Wh]
-            for heat, clip in zip(heatmaps, clips, strict=False):
-                # 1チャンネルに squeeze
-                h = heat.squeeze(0)
-                # argmax
-                idx = int(np.argmax(h))
-                yh, xh = divmod(idx, h.shape[1])
-                # heatmap→原画スケール
+        
+        # 2次元の場合 (B, H, W) - ヒートマップ
+        if preds.ndim == 3:
+            heatmaps = torch.sigmoid(preds)
+            for h, clip in zip(heatmaps, clips, strict=False):
+                h_np = h.cpu().numpy()
+                xh, yh = self._argmax_coord(h_np)
                 xb, yb = self._to_original_scale(
                     (xh, yh), self.heatmap_size, clip[-1].shape[:2]
                 )
-                conf = float(h.max())
+                conf = float(h_np.max())
+                results.append({"x": xb, "y": yb, "confidence": conf})
+                
+        # 3次元の場合 (B, C, H, W) - ヒートマップ
+        elif preds.ndim == 4 and preds.shape[1] == 1:
+            heatmaps = torch.sigmoid(preds)
+            for h, clip in zip(heatmaps, clips, strict=False):
+                h_np = h.squeeze(0).cpu().numpy()
+                xh, yh = self._argmax_coord(h_np)
+                xb, yb = self._to_original_scale(
+                    (xh, yh), self.heatmap_size, clip[-1].shape[:2]
+                )
+                conf = float(h_np.max())
                 results.append({"x": xb, "y": yb, "confidence": conf})
 
         # --- 座標回帰モード ---

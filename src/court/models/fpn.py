@@ -37,7 +37,7 @@ class CourtDetectorFPN(nn.Module):
     入力:  [B, 3,  H,  W] → 出力: [B, 1,  H,  W]  （セグメンテーションマスク）
     """
 
-    def __init__(self, in_channels=3, base_ch=64):
+    def __init__(self, in_channels=3, base_ch=64, out_channels=15):
         super().__init__()
         # ─── Encoder (down × 3) ───────────────────────
         self.enc1 = ConvBlock(in_channels, base_ch)  # [B,  64, H,   W]
@@ -64,7 +64,7 @@ class CourtDetectorFPN(nn.Module):
         self.up1 = UpBlock(base_ch // 2, base_ch // 4)  # [B,  16, 8H,  8W]
 
         # ─── 最終セグメンテーションヘッド ───────────
-        self.head = nn.Conv2d(base_ch // 4, 1, kernel_size=1)
+        self.head = nn.Conv2d(base_ch // 4, out_channels, kernel_size=1)
 
     def forward(self, x):
         # Encoder

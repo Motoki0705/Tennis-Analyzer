@@ -5,7 +5,7 @@ from transformers import ViTModel
 
 class ViTCourt(nn.Module):
     def __init__(
-        self, num_keypoints=15, pretrained_model="google/vit-base-patch16-224-in21k"
+        self, in_channels=3, out_channels=15, pretrained_model="google/vit-base-patch16-224-in21k"
     ):
         super().__init__()
 
@@ -19,7 +19,7 @@ class ViTCourt(nn.Module):
         self.decoder = nn.Sequential(
             nn.ReLU(inplace=False),
             nn.Upsample(scale_factor=4, mode="bilinear", align_corners=True),
-            nn.Conv2d(hidden_dim, num_keypoints, kernel_size=3, padding=1),
+            nn.Conv2d(hidden_dim, out_channels, kernel_size=3, padding=1),
         )
 
     def forward(self, x):
@@ -39,7 +39,7 @@ class ViTCourt(nn.Module):
 
 if __name__ == "__main__":
     inputs = torch.rand(1, 3, 224, 224)
-    model = ViTCourt()
+    model = ViTCourt(in_channels=3, out_channels=15)
     with torch.no_grad():
         outputs = model(inputs)
     print(outputs.shape)
