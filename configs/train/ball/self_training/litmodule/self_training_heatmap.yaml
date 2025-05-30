@@ -1,0 +1,16 @@
+# SelfTraining Heatmap Regression用 LightningModule設定
+name: self_training_heatmap
+_target_: src.ball.lit_module.self_training_lit_module.SelfTrainingLitModule
+
+# モデルは外部で定義されたものを参照
+model: ${model}
+
+# 学習パラメータ
+lr: 1e-4  # self-trainingでは低めの学習率
+weight_decay: 1e-4
+warmup_epochs: 1
+max_epochs: ${trainer.max_epochs}
+bce_weight: 0.7
+
+# 擬似ラベルの重み
+pseudo_weight: ${self_training.pseudo_label_weight} 

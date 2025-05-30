@@ -1,0 +1,38 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  # 基本モデルアーキテクチャの選択
+  - /train/ball/model: _cat_frames
+  
+  # SelfTraining用のLightningModule
+  - litmodule: self_training_heatmap
+  
+  # データモジュール
+  - litdatamodule: ball_self_training_data
+  
+  # トレーナー設定
+  - trainer: self_training
+  
+  # コールバック設定
+  - callbacks: self_training
+  
+  # Self-training specific configs
+  - self_training: default
+  
+  - _self_
+
+# 実験名（ディレクトリ名）の設定
+version: ${model.name}_self_training_${self_training.confidence_threshold}
+
+# 再現性のための乱数シード
+seed: 42
+
+# チェックポイントパス（初期モデル）
+initial_checkpoint: null  # 必須：コマンドラインから指定 

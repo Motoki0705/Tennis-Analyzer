@@ -1,215 +1,273 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-ボール検出モデルの自己学習用スクリプト
+ボール検出タスクのSelf-Trainingスクリプト
 
 使用例:
-    python scripts/train/train_ball_self_training.py
+    # デフォルト設定で実行
+    python scripts/train/train_ball_self_training.py initial_checkpoint=path/to/checkpoint.ckpt
+    
+    # モデルアーキテクチャを変更
+    python scripts/train/train_ball_self_training.py initial_checkpoint=path/to/checkpoint.ckpt model=_sequence
+    
+    # 擬似ラベルのパラメータを調整
+    python scripts/train/train_ball_self_training.py initial_checkpoint=path/to/checkpoint.ckpt self_training.confidence_threshold=0.8
 """
 
-import json
 import logging
 import os
-import sys
 from pathlib import Path
-
-# プロジェクトルートをPYTHONPATHに追加
-project_root = Path(__file__).resolve().parents[2]
-sys.path.append(str(project_root))
+from typing import List, Dict, Tuple
 
 import hydra
 import pytorch_lightning as pl
-from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
 import torch
-import numpy as np
+import torch.nn as nn
+from hydra.utils import instantiate
+from omegaconf import DictConfig
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.loggers import TensorBoardLogger
 
-from src.ball.self_training.trajectory_tracker import TrajectoryTracker
-from src.ball.self_training.self_training_cycle import SelfTrainingCycle
+from src.ball.self_training.self_training_cycle import BallSelfTrainingCycle
+
+# ロガー設定
+log = logging.getLogger(__name__)
 
 
-def validate_model_litmodule_compatibility(model_config, litmodule_config):
+def setup_callbacks(cfg: DictConfig) -> List[Callback]:
     """
-    モデルとLitModuleの出力タイプの互換性を検証する関数
+    設定からコールバックを初期化します。
     
-    Args:
-        model_config: モデルの設定
-        litmodule_config: LitModuleの設定
-        
-    Raises:
-        ValueError: 互換性がない場合
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra設定
+    
+    Returns
+    -------
+    callbacks : List[Callback]
+        コールバックのリスト
     """
-    model_output_type = model_config.meta.output_type
-    litmodule_output_type = litmodule_config.meta.output_type
-    
-    if model_output_type != litmodule_output_type:
-        raise ValueError(
-            f"モデルの出力タイプ '{model_output_type}' と "
-            f"LitModuleの出力タイプ '{litmodule_output_type}' が一致しません。"
-            f"モデル: {model_config.meta.name}, LitModule: {litmodule_config.meta.name}"
-        )
-    
-    logging.info(f"モデルとLitModuleの出力タイプ '{model_output_type}' が一致しています")
-
-
-def train_cycle(cfg: DictConfig, cycle_index: int) -> pl.Trainer:
-    """
-    1サイクルの自己学習を実行する関数
-    
-    Args:
-        cfg: Hydra設定
-        cycle_index: 現在のサイクルインデックス
-    
-    Returns:
-        trainer: トレーニング済みのTrainer
-    """
-    # シードを設定
-    pl.seed_everything(cfg.seed + cycle_index)
-    
-    # モデルとLitModuleの互換性をチェック
-    validate_model_litmodule_compatibility(cfg.model, cfg.litmodule)
-    
-    # モデルをインスタンス化
-    model = instantiate(cfg.model.net)
-    logging.info(f"Model: {model.__class__.__name__}")
-    
-    # LightningModuleをインスタンス化
-    lit_module = instantiate(cfg.litmodule.module, model=model)
-    logging.info(f"LightningModule: {lit_module.__class__.__name__}")
-    
-    # DataModuleをインスタンス化
-    datamodule = instantiate(cfg.litdatamodule)
-    logging.info(f"DataModule: {datamodule.__class__.__name__}")
-    
-    # コールバックをインスタンス化
     callbacks = []
+    
     if "callbacks" in cfg:
         for _, cb_conf in cfg.callbacks.items():
             if "_target_" in cb_conf:
+                log.info(f"Instantiating callback <{cb_conf._target_}>")
                 callbacks.append(instantiate(cb_conf))
     
-    # トレーナーをインスタンス化
-    trainer = pl.Trainer(
+    return callbacks
+
+
+def load_initial_model(cfg: DictConfig) -> nn.Module:
+    """
+    初期モデルを読み込む
+    
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra設定
+    
+    Returns
+    -------
+    model : nn.Module
+        読み込まれたモデル
+    """
+    if cfg.initial_checkpoint is None:
+        raise ValueError("initial_checkpoint must be specified for self-training")
+    
+    checkpoint_path = Path(cfg.initial_checkpoint)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    log.info(f"Loading initial model from {checkpoint_path}")
+    
+    # チェックポイントから LightningModule を読み込む
+    try:
+        # LightningModuleとして読み込み
+        lit_module_class = cfg.litmodule._target_
+        lit_module = hydra.utils.get_class(lit_module_class).load_from_checkpoint(
+            checkpoint_path,
+            map_location="cpu"
+        )
+        # 内部のモデルを取得
+        model = lit_module.model
+        log.info("Successfully loaded model from LightningModule checkpoint")
+    except Exception as e:
+        log.warning(f"Failed to load as LightningModule: {e}")
+        # 通常のPyTorchモデルとして読み込み
+        try:
+            model = instantiate(cfg.model)
+            state_dict = torch.load(checkpoint_path, map_location="cpu")
+            if "state_dict" in state_dict:
+                state_dict = state_dict["state_dict"]
+            model.load_state_dict(state_dict)
+            log.info("Successfully loaded model as PyTorch model")
+        except Exception as e2:
+            log.error(f"Failed to load model: {e2}")
+            raise
+    
+    return model
+
+
+def run_self_training_cycle(
+    cfg: DictConfig,
+    model: nn.Module,
+    datamodule: pl.LightningDataModule,
+) -> Tuple[nn.Module, float, Dict]:
+    """
+    Self-trainingサイクルを実行
+    
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra設定
+    model : nn.Module
+        初期モデル
+    datamodule : pl.LightningDataModule
+        データモジュール
+    
+    Returns
+    -------
+    best_model : nn.Module
+        最良のモデル
+    best_score : float
+        最良スコア
+    metrics : Dict
+        メトリクス
+    """
+    # デバイスの設定
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info(f"Using device: {device}")
+    
+    # データセットの準備
+    datamodule.setup("fit")
+    datasets = datamodule.get_dataset_for_self_training()
+    
+    # Self-trainingサイクルの初期化
+    self_training = BallSelfTrainingCycle(
+        model=model.to(device),
+        labeled_dataset=datasets["labeled"],
+        unlabeled_dataset=datasets["unlabeled"],
+        val_dataset=datasets["val"],
+        save_dir=cfg.self_training.save_dir,
+        device=device,
+        confidence_threshold=cfg.self_training.confidence_threshold,
+        max_cycles=cfg.self_training.max_cycles,
+        pseudo_label_weight=cfg.self_training.pseudo_label_weight,
+        trajectory_params=cfg.self_training.trajectory_params,
+        use_trajectory_tracking=cfg.self_training.use_trajectory_tracking,
+    )
+    
+    # Self-trainingの実行
+    best_model, best_score, metrics = self_training.run_self_training()
+    
+    return best_model, best_score, metrics
+
+
+def train_final_model(
+    cfg: DictConfig,
+    model: nn.Module,
+    datamodule: pl.LightningDataModule,
+) -> None:
+    """
+    最終的なモデルをトレーニング（オプション）
+    
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra設定
+    model : nn.Module
+        Self-trainingで得られたモデル
+    datamodule : pl.LightningDataModule
+        データモジュール
+    """
+    # LightningModuleの初期化
+    log.info(f"Instantiating LightningModule <{cfg.litmodule._target_}>")
+    lit_model = instantiate(cfg.litmodule, model=model)
+    
+    # バージョン名（ディレクトリ名）の設定
+    version = cfg.get("version", "default_version")
+    
+    # ロガーの設定
+    logger = TensorBoardLogger(
+        save_dir=os.path.join(cfg.trainer.default_root_dir, "tb_logs"),
+        name=version
+    )
+    
+    # コールバックの設定
+    callbacks = setup_callbacks(cfg)
+    
+    # トレーナーの初期化
+    log.info(f"Instantiating trainer")
+    trainer = Trainer(
         **cfg.trainer,
         callbacks=callbacks,
+        logger=logger,
     )
     
-    # トレーニングを実行
-    trainer.fit(lit_module, datamodule=datamodule)
+    # 最終トレーニング
+    log.info("Starting final training with all pseudo labels!")
+    trainer.fit(model=lit_model, datamodule=datamodule)
     
-    return trainer, lit_module, datamodule
+    # テスト（オプション）
+    if cfg.get("test_after_training", False):
+        trainer.test(model=lit_model, datamodule=datamodule)
 
 
-def self_training(cfg: DictConfig) -> None:
-    """
-    自己学習の全サイクルを実行する関数
-    
-    Args:
-        cfg: Hydra設定
-    """
-    # 設定を表示
-    logging.info(f"Self-training with config:\n{OmegaConf.to_yaml(cfg)}")
-    
-    # 自己学習サイクルのインスタンス化
-    cycle = SelfTrainingCycle(
-        max_cycles=cfg.self_training.max_cycles,
-        confidence_threshold=cfg.self_training.confidence_threshold,
-        trajectory_window=cfg.self_training.trajectory_window,
-        max_trajectory_gap=cfg.self_training.max_trajectory_gap,
-        min_trajectory_length=cfg.self_training.min_trajectory_length,
-        output_dir=os.path.join("outputs", "ball", "self_training"),
-    )
-    
-    # 各サイクルを実行
-    for i in range(cfg.self_training.max_cycles):
-        logging.info(f"Starting self-training cycle {i+1}/{cfg.self_training.max_cycles}")
-        
-        # サイクルを実行
-        trainer, lit_module, datamodule = train_cycle(cfg, i)
-        
-        # 未ラベルデータに対する予測を生成
-        unlabeled_dataloader = datamodule.unlabeled_dataloader()
-        unlabeled_dataset = datamodule.get_unlabeled_dataset()
-        
-        # 予測を実行
-        lit_module.eval()
-        device = next(lit_module.parameters()).device
-        
-        predictions = []
-        confidences = []
-        
-        with torch.no_grad():
-            for batch in unlabeled_dataloader:
-                # 入力をデバイスに転送
-                if isinstance(batch, dict):
-                    batch_images = batch["image"].to(device)
-                    batch_image_ids = batch["image_id"]
-                else:
-                    batch_images = batch[0].to(device)
-                    batch_image_ids = batch[1]
-                
-                # 予測を実行
-                outputs = lit_module(batch_images)
-                
-                # 予測結果を処理（モデルの出力タイプに応じて）
-                if cfg.model.meta.output_type == "heatmap":
-                    # ヒートマップからキーポイントを抽出
-                    coords, scores = lit_module.extract_coordinates_from_heatmap(outputs)
-                    coords = coords.cpu().numpy()
-                    scores = scores.cpu().numpy()
-                else:  # coord
-                    coords = outputs.cpu().numpy()
-                    # 座標ベースの場合、信頼度スコアは別途計算する必要がある
-                    scores = np.ones(coords.shape[0])
-                
-                # 予測結果を保存
-                for i in range(len(batch_image_ids)):
-                    image_id = batch_image_ids[i].item() if isinstance(batch_image_ids[i], torch.Tensor) else batch_image_ids[i]
-                    prediction = {
-                        "image_id": image_id,
-                        "file_name": unlabeled_dataset.get_image_info(i)["file_name"],
-                        "coordinates": coords[i].tolist(),
-                        "confidence": float(scores[i]),
-                    }
-                    predictions.append(prediction)
-                    confidences.append(float(scores[i]))
-        
-        # 軌跡追跡で擬似ラベルを洗練
-        tracker = TrajectoryTracker(
-            window_size=cfg.self_training.trajectory_window,
-            max_gap=cfg.self_training.max_trajectory_gap,
-            min_length=cfg.self_training.min_trajectory_length,
-        )
-        
-        refined_predictions = tracker.refine_predictions(predictions)
-        
-        # 次のサイクルのための擬似ラベルを生成
-        pseudo_label_file = cycle.generate_pseudo_labels(refined_predictions, cycle_index=i)
-        
-        logging.info(f"Generated pseudo-labels for cycle {i+1}: {pseudo_label_file}")
-        
-        # テストを実行
-        trainer.test(lit_module, datamodule=datamodule)
-        
-        # 最終サイクルならループを抜ける
-        if i == cfg.self_training.max_cycles - 1:
-            break
-        
-        # 次のサイクルのための擬似ラベルパスを設定
-        cfg.litdatamodule.pseudo_label_path = pseudo_label_file
-
-
-@hydra.main(config_path="../../configs/train/ball", config_name="self_training_config", version_base="1.3")
+@hydra.main(version_base="1.3", config_path="../../configs/train/ball/self_training", config_name="config")
 def main(cfg: DictConfig) -> None:
     """
-    メイン関数
+    メインのSelf-training関数
     
-    Args:
-        cfg: Hydra設定
+    Parameters
+    ----------
+    cfg : DictConfig
+        Hydra設定
     """
+    # 再現性のために乱数シードを設定
+    pl.seed_everything(cfg.seed)
+    
     try:
-        self_training(cfg)
+        # 初期モデルの読み込み
+        initial_model = load_initial_model(cfg)
+        
+        # データモジュールの初期化
+        log.info(f"Instantiating datamodule <{cfg.litdatamodule._target_}>")
+        datamodule = instantiate(cfg.litdatamodule)
+        
+        # Self-trainingサイクルの実行
+        log.info("Starting self-training cycle")
+        best_model, best_score, metrics = run_self_training_cycle(
+            cfg, initial_model, datamodule
+        )
+        
+        log.info(f"Self-training completed with best score: {best_score:.4f}")
+        
+        # メトリクスの保存
+        metrics_path = Path(cfg.self_training.save_dir) / "self_training_metrics.json"
+        import json
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+        log.info(f"Saved metrics to {metrics_path}")
+        
+        # オプション：最終的なファインチューニング
+        if cfg.get("final_finetuning", False):
+            log.info("Starting final fine-tuning with all data")
+            # 最新の擬似ラベルでデータモジュールを更新
+            latest_pseudo_labels = sorted(
+                Path(cfg.self_training.save_dir).glob("pseudo_labels/pseudo_labels_cycle_*.json")
+            )[-1]
+            datamodule.update_pseudo_labels(latest_pseudo_labels)
+            
+            # 最終トレーニング
+            train_final_model(cfg, best_model, datamodule)
+        
+        log.info("Self-training pipeline completed successfully!")
+        
     except Exception as e:
-        logging.exception(f"Self-training failed: {e}")
+        log.error(f"Error in self-training: {e}")
         raise
 
 

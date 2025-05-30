@@ -1,0 +1,29 @@
+# Self-Training用トレーナー設定
+accelerator: gpu
+devices: 1
+precision: 16-mixed  # 混合精度学習
+max_epochs: 10  # サイクルごとのエポック数
+min_epochs: 5
+
+# チェックポイント設定
+enable_checkpointing: true
+default_root_dir: "outputs/ball/self_training"
+
+# ログ設定
+log_every_n_steps: 50
+enable_progress_bar: true
+
+# 検証設定
+check_val_every_n_epoch: 1
+val_check_interval: 1.0
+
+# 早期終了は使用しない（self-trainingで制御）
+# enable_early_stopping: false
+
+# 勾配クリッピング
+gradient_clip_val: 1.0
+gradient_clip_algorithm: "norm"
+
+# その他の設定
+deterministic: true
+benchmark: false 
