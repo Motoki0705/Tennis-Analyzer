@@ -46,7 +46,7 @@ class CoordRegressionLitModule(pl.LightningModule):
         self.log(
             f"{stage}_loss",
             loss,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=(stage == "val"),
             logger=True,
@@ -55,7 +55,7 @@ class CoordRegressionLitModule(pl.LightningModule):
         self.log(
             f"{stage}_L1Dist",
             l1_dist,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=(stage == "val"),
             logger=True,
