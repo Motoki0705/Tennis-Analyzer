@@ -13,7 +13,7 @@ defaults:
   - model: _cat_frames
   
   # LightningModuleの選択（自己学習用）
-  - litmodule: self_training_coord
+  - litmodule: self_training_heatmap
   
   # 自己学習用データモジュール
   - litdatamodule: self_training_ball_data
