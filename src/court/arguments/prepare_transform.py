@@ -56,4 +56,7 @@ def prepare_transform(
         ToTensorV2(),
     ])
 
-    return A.Compose(transforms) 
+    return A.Compose(
+        transforms,
+        keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
+    )

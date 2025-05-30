@@ -285,7 +285,7 @@ class BallPredictor:
         to_size: Tuple[int, int],
     ) -> Tuple[int, int]:
         w_from, h_from = from_size
-        h_to, w_to = to_size
+        w_to, h_to = to_size
         x, y = coord
         return int(x * w_to / w_from), int(y * h_to / h_from)
 
