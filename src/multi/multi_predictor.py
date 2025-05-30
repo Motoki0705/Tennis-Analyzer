@@ -20,8 +20,8 @@ class MultiPredictor:
         court_batch_size: int = 1,
         pose_batch_size: int = 1,
     ):
-        from utils.logging_utils import setup_logger
-        self.logger = setup_logger(self.__class__)
+        # ロガーを直接初期化
+        self.logger = logging.getLogger(self.__class__.__name__)
 
         self.ball_predictor = ball_predictor
         self.court_predictor = court_predictor
