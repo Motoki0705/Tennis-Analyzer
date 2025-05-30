@@ -36,6 +36,7 @@ def extract_frames_to_dir(
     quality: int = 95,
     coco_data: Optional[Dict] = None,
     game_id: str = None,
+    target_resolution: Tuple[int, int] = (640, 360),  # 幅, 高さ
 ) -> Dict:
     """
     動画から指定した秒数範囲でクリップを抽出し、フレームとして保存する
@@ -49,6 +50,7 @@ def extract_frames_to_dir(
         quality: JPEGの品質（0-100）
         coco_data: COCO形式のデータ辞書（追記モードの場合）
         game_id: ゲームID（Noneの場合は出力ディレクトリの最後の部分を使用）
+        target_resolution: 出力画像の解像度 (幅, 高さ)
 
     Returns:
         COCO形式のデータ辞書
@@ -101,7 +103,8 @@ def extract_frames_to_dir(
     logger.info(f"動画情報: {input_video}")
     logger.info(f"  FPS: {video_fps}")
     logger.info(f"  フレーム数: {frame_count}")
-    logger.info(f"  解像度: {width}x{height}")
+    logger.info(f"  元の解像度: {width}x{height}")
+    logger.info(f"  出力解像度: {target_resolution[0]}x{target_resolution[1]}")
     logger.info(f"  長さ: {duration:.2f}秒")
 
     # 抽出するFPSを設定
@@ -142,16 +145,19 @@ def extract_frames_to_dir(
 
             # 指定したフレーム間隔でフレームを抽出
             if frame_idx % frame_interval == 0:
+                # フレームをリサイズ
+                resized_frame = cv2.resize(frame, target_resolution)
+                
                 frame_file = clip_dir / f"frame_{extracted_count:05d}.jpg"
-                cv2.imwrite(str(frame_file), frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                cv2.imwrite(str(frame_file), resized_frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
                 # COCO形式のデータに画像情報を追加
                 rel_path = f"{game_id}/{clip_prefix}{clip_idx}/frame_{extracted_count:05d}.jpg"
                 image_entry = {
                     "id": next_image_id,
                     "file_name": rel_path,
-                    "width": width,
-                    "height": height,
+                    "width": target_resolution[0],
+                    "height": target_resolution[1],
                     "license": 1,
                     "game_id": game_id,
                     "clip_id": f"{clip_prefix}{clip_idx}",
@@ -198,11 +204,21 @@ def main():
     parser.add_argument("--json_output", type=str, required=True, help="COCO形式のJSONメタデータの出力パス")
     parser.add_argument("--game_id", type=str, help="ゲームID（指定なしの場合は出力ディレクトリの最後の部分を使用）")
     parser.add_argument("--append", action="store_true", help="既存のJSONファイルに追記する")
+    parser.add_argument("--resolution", type=str, default="640,360", 
+                        help="出力画像の解像度（幅,高さ）（例: '640,360'）")
 
     args = parser.parse_args()
 
     # 時間範囲の文字列をリストに変換
     time_ranges = parse_time_ranges(args.time_ranges)
+    
+    # 解像度の文字列をタプルに変換
+    try:
+        width, height = map(int, args.resolution.split(','))
+        target_resolution = (width, height)
+    except ValueError:
+        logger.warning(f"解像度の形式が不正です: {args.resolution}、デフォルト値(640,360)を使用します")
+        target_resolution = (640, 360)
 
     # 既存のJSONファイルを読み込む（追記モードの場合）
     coco_data = None
@@ -225,6 +241,7 @@ def main():
         quality=args.quality,
         coco_data=coco_data,
         game_id=args.game_id,
+        target_resolution=target_resolution,
     )
 
     # JSONファイルを保存
