@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - ball: lite_tracknet      # Ball 用モデル
-  - court: lite_tracknet     # Court 用モデル
-  - player: rt_detr          # Player 用モデル
-  - pose: vitpose_base       # Pose 用モデル
+  - ball: lite_tracknet      # lite_tracknet, swin_448
+  - court: lite_tracknet     # lite_tracknet, lite_tracknet_1heat
+  - player: rt_detr          # rt_detr
+  - pose: vitpose       # vitpose
 
 
 hydra:

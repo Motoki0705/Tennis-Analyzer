@@ -9,54 +9,51 @@ import numpy as np
 from tqdm import tqdm
 
 # FrameAnnotatorと同様のカテゴリ定義
-try:
-    from src.annotation.const import PLAYER_CATEGORY
-except ImportError:
-    PLAYER_CATEGORY = {
-        "id": 2,
-        "name": "player",
-        "supercategory": "person",
-        "keypoints": [
-            "nose",
-            "left_eye",
-            "right_eye",
-            "left_ear",
-            "right_ear",
-            "left_shoulder",
-            "right_shoulder",
-            "left_elbow",
-            "right_elbow",
-            "left_wrist",
-            "right_wrist",
-            "left_hip",
-            "right_hip",
-            "left_knee",
-            "right_knee",
-            "left_ankle",
-            "right_ankle",
-        ],
-        "skeleton": [
-            [15, 13],
-            [13, 11],
-            [16, 14],
-            [14, 12],
-            [11, 12],
-            [5, 11],
-            [6, 12],
-            [5, 6],
-            [5, 7],
-            [7, 9],
-            [6, 8],
-            [8, 10],
-            [1, 2],
-            [0, 1],
-            [0, 2],
-            [1, 3],
-            [2, 4],
-            [3, 5],
-            [4, 6],
-        ],
-    }
+PLAYER_CATEGORY = {
+    "id": 2,
+    "name": "player",
+    "supercategory": "person",
+    "keypoints": [
+        "nose",
+        "left_eye",
+        "right_eye",
+        "left_ear",
+        "right_ear",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+    ],
+    "skeleton": [
+        [15, 13],
+        [13, 11],
+        [16, 14],
+        [14, 12],
+        [11, 12],
+        [5, 11],
+        [6, 12],
+        [5, 6],
+        [5, 7],
+        [7, 9],
+        [6, 8],
+        [8, 10],
+        [1, 2],
+        [0, 1],
+        [0, 2],
+        [1, 3],
+        [2, 4],
+        [3, 5],
+        [4, 6],
+    ],
+}
 
 COURT_CATEGORY = {
     "id": 3,
@@ -126,15 +123,50 @@ class ImageAnnotator:
         file_path: Path,
         height: int,
         width: int,
+        base_dir: Path = None,
     ) -> int:
+        # 入力ディレクトリからの相対パスを取得
+        if base_dir is not None and file_path.is_relative_to(base_dir):
+            rel_path = str(file_path.relative_to(base_dir))
+        else:
+            # base_dirが指定されていないか、相対パス化に失敗した場合はフルパスを使用
+            rel_path = str(file_path)
+
+        # パスの各部分を取得
+        path_parts = file_path.parts
+        
+        # ゲームIDとクリップIDの初期化
+        game_id = None
+        clip_id = None
+        
+        # パスの各部分を確認してゲームIDとクリップIDを抽出
+        for part in path_parts:
+            if part.lower().startswith('game'):
+                try:
+                    game_id = int(part[4:])  # 'game' を除いた部分を整数に変換
+                except ValueError:
+                    pass
+            elif part.lower().startswith('clip'):
+                try:
+                    clip_id = int(part[4:])  # 'clip' を除いた部分を整数に変換
+                except ValueError:
+                    pass
+
         entry = {
             "id": self.image_id_counter,
             "file_name": file_path.name,
-            "original_path": str(file_path),
+            "original_path": rel_path,
             "height": height,
             "width": width,
             "license": 1,
         }
+
+        # ゲームIDとクリップIDが抽出できた場合は追加
+        if game_id is not None:
+            entry["game_id"] = game_id
+        if clip_id is not None:
+            entry["clip_id"] = clip_id
+
         self.coco_output["images"].append(entry)
         img_id = self.image_id_counter
         self.image_id_counter += 1
@@ -256,6 +288,7 @@ class ImageAnnotator:
             preds = predictor.predict(frames_buffer)
         else:
             out = predictor.predict(frames_buffer)
+            # courtはヒートマップそのものをindex1で出力するため、out[0]だけを取り出す
             preds = out[0] if predictor == self.court_predictor else out
 
         # キャッシュ登録とアノテーション追加
@@ -302,7 +335,7 @@ class ImageAnnotator:
         if image_extensions is None:
             image_extensions = ['.jpg', '.jpeg', '.png']
         
-        # 画像ファイルのリストを取得
+        # 画像ファイルのリストを取得（再帰的に検索）
         image_files = []
         for ext in image_extensions:
             image_files.extend(list(input_dir.glob(f"**/*{ext}")))
@@ -328,7 +361,7 @@ class ImageAnnotator:
 
                 # 画像エントリの追加
                 img_id = self._add_image_entry(
-                    img_path, frame.shape[0], frame.shape[1]
+                    img_path, frame.shape[0], frame.shape[1], input_dir
                 )
 
                 # Ball 用クリップ管理（時系列モデルの場合）

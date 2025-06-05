@@ -115,7 +115,9 @@ class SequenceCoordDataset(Dataset):
 
         for i, img_id in enumerate(frame_ids):
             info = self.images[img_id]
-            img_path = self.image_root / info["original_path"]
+            # original_pathが存在しない場合、file_nameを使用する
+            original_path = info.get("original_path", info["file_name"])
+            img_path = self.image_root / original_path
             img_np = np.array(Image.open(img_path).convert("RGB"))
             h_img, w_img = img_np.shape[:2]
 
@@ -168,7 +170,12 @@ class SequenceCoordDataset(Dataset):
                 visibilities[-1:], dtype=torch.float32
             )  # [1]
 
-        return input_tensor, coord_tensor, visibility_tensor
+        # 最後のフレームの画像情報を返す
+        last_img_id = frame_ids[-1]
+        image_info = self.images[last_img_id].copy()
+        image_info["id"] = last_img_id
+
+        return input_tensor, coord_tensor, visibility_tensor, image_info
 
     # ------------------------------------------------------------------ #
     @staticmethod
@@ -270,8 +277,9 @@ if __name__ == "__main__":
 
     dl = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0)
 
-    frames, coords, vis = next(iter(dl))
+    frames, coords, vis, image_info = next(iter(dl))
     print("frames:", frames.shape)  # cat: [B, C*T, H, W]
     print("coords:", coords.shape)  # last: [B, 2]
     print("vis   :", vis.shape)  # [B, 1]
+    print("image_info:", image_info)
     visualize_coords_on_frames(frames, coords, input_type="cat")
