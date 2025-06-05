@@ -286,6 +286,9 @@ def main(cfg: DictConfig):
     inp = Path(to_absolute_path(cfg.input_path))
     out_cfg = cfg.get("output_path")
     raw_out = cfg.get("output_path")
+    # .with_suffix("") は、Pathオブジェクトから拡張子（例: .mp4, .jpg など）を取り除くためのメソッドです。
+    # 例えば "output/frames.mp4" であれば "output/frames" になります。
+    # これは "frames" モードのとき、出力先ディレクトリ名として拡張子なしのパスを使いたい場合に利用されます。
     if mode == "frames" and raw_out:
         out_path = Path(to_absolute_path(raw_out)).with_suffix("")
     else:
