@@ -1,4 +1,4 @@
-_target_: src.ball.models.cat_frames.lite_tracknet.LiteTrackNet
+_target_: src.ball.models.lite_tracknet.LiteTrackNet
 # Constructor arguments for LiteBallTracker if any (e.g., in_channels, heatmap_channels)
 # in_channels: 9 # Example, if your LiteBallTracker takes it
 # heatmap_channels: 1 # Example

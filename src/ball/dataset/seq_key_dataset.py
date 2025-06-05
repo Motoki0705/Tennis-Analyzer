@@ -11,7 +11,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
 from src.utils.heatmap import generate_gaussian_heatmap
-from src.utils.visualization import overlay_heatmaps_on_frames
+from src.utils.visualization.ball import overlay_heatmaps_on_frames
 
 
 class SequenceKeypointDataset(Dataset):
@@ -145,7 +145,9 @@ class SequenceKeypointDataset(Dataset):
         frames, heatmaps, visibilities, replay = [], [], [], None
         for i, img_id in enumerate(frame_ids):
             info = self.images[img_id]
-            img_path = self.image_root / info["original_path"]
+            # original_pathが存在しない場合、file_nameを使用する
+            original_path = info.get("original_path", info["file_name"])
+            img_path = self.image_root / original_path
             img_np = np.array(Image.open(img_path).convert("RGB"))
             h_img, w_img = img_np.shape[:2]
 
@@ -199,7 +201,12 @@ class SequenceKeypointDataset(Dataset):
                 visibilities[-1:], dtype=torch.float32
             )  # [1]
 
-        return input_tensor, heatmap_tensor, visibility_tensor
+        # 最後のフレームの画像情報を返す
+        last_img_id = frame_ids[-1]
+        image_info = self.images[last_img_id].copy()
+        image_info["id"] = last_img_id
+
+        return input_tensor, heatmap_tensor, visibility_tensor, image_info
 
     @staticmethod
     def _clip_keypoints(
@@ -257,11 +264,12 @@ if __name__ == "__main__":
     )
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0)
-    for frames, heatmaps, visibility in dataloader:
+    for frames, heatmaps, visibility, image_info in dataloader:
         print(f"frames shape: {frames.shape}")
         print(f"heatmaps shape: {heatmaps.shape}")
         print(heatmaps.max())
         print(f"visibility shape: {visibility.shape}")
+        print(f"image_info: {image_info}")
         break
 
     overlay_heatmaps_on_frames(frames=frames, heatmaps=heatmaps)

@@ -10,7 +10,7 @@ hydra:
 defaults:
   # モデルアーキテクチャの選択
   # コマンドライン例: model=fpn
-  - model: fpn
+  - model: lite_tracknet
   
   # LightningModuleの選択
   # コマンドライン例: litmodule=heatmap_regression

@@ -1,2 +1,0 @@
-defaults:
-  - cat_frames/lite_tracknet  # デフォルトでlite_tracknetを選択
