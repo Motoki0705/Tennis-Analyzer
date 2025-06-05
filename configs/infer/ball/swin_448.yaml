@@ -1,4 +1,4 @@
-_target_: src.ball.models.cat_frames.swin_448.SwinBallUNet # Corrected path
+_target_: src.ball.models.swin_448.SwinBallUNet # Corrected path
 out_channels: 1 # Or 3 if that's what your SwinBallUNet outputs
 in_channels: 9
 img_size: 448

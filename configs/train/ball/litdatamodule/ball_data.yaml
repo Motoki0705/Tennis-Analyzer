@@ -12,7 +12,7 @@ num_workers: 8
 skip_frames_range: [1, 5]
 input_type: "cat"      # "cat" or "stack"
 output_type: "last"    # "all" or "last"
-dataset_type: "coord"  # "heatmap" or "coord"
+dataset_type: "heatmap"  # "heatmap" or "coord"
 
 # 画像サイズ設定
 input_size: [360, 640]

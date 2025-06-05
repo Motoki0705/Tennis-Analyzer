@@ -1,8 +1,6 @@
-# @package _global_.model
-
 # LiteTrackNetモデル設定
 net:
-  _target_: src.ball.models.cat_frames.lite_tracknet.LiteTrackNet
+  _target_: src.ball.models.lite_tracknet.LiteTrackNet
 
   # モデル構成パラメータ
   in_channels: ${litdatamodule.T}

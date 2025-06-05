@@ -1,8 +1,6 @@
-# @package _global_.model
-
 # Swin 448モデル設定
 net:
-  _target_: src.ball.models.cat_frames.swin_448.SwinBallUNet
+  _target_: src.ball.models.swin_448.SwinBallUNet
 
   # モデル構成パラメータ
   in_channels: ${litdatamodule.T}
