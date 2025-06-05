@@ -41,28 +41,28 @@ predictors:
     input_size: [360, 640] # These params are still needed by the predictor for pre/post processing
     heatmap_size: [360, 640]
     num_frames: 3 # Specific to the model type (e.g. LiteBallTracker needs 3)
-    threshold: 0.6
+    threshold: 0.7
     visualize_mode: "overlay"
   
   court:
     _target_: src.court.predictor.CourtPredictor
     input_size: [360, 640]
     num_keypoints: 15 # This might be specific to the model's output head (e.g. FPN outputs 1 channel)
-    threshold: 0.5
+    threshold: 0.9
     visualize_mode: "overlay"
 
   player:
     _target_: src.player.predictor.PlayerPredictor
     # model & processor are passed by main.py
     label_map: {0: "player"} # Adjust based on your player_detector model
-    threshold: 0.5
+    threshold: 0.7
 
   pose:
     _target_: src.pose.predictor.PosePredictor
     # det_model, det_processor, pose_model, pose_processor passed by main.py
     player_label_id: 0 # Label ID for 'person' in the detection model
-    det_score_thresh: 0.6
-    pose_score_thresh: 0.6
+    det_score_thresh: 0.7
+    pose_score_thresh: 0.7
 
   multi:
     _target_: src.multi.multi_predictor.MultiPredictor

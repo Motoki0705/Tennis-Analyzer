@@ -15,7 +15,7 @@ heatmap_size: [224, 224]
 
 # ヒートマップ設定
 default_keypoints: 15
-is_each_keypoint: true
+is_each_keypoint: false
 sigma: 2.0
 
 # 変換設定

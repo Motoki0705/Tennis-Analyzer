@@ -795,7 +795,7 @@ class ImageAnnotator:
         print(f"Court処理: {len(frames)}フレーム")
         
         # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
-        safe_batch_size = min(16, self.batch_sizes["court"])
+        safe_batch_size = min(128, self.batch_sizes["court"])
         
         try:
             for i in range(0, len(frames), safe_batch_size):
@@ -822,7 +822,7 @@ class ImageAnnotator:
         print(f"Pose処理: {len(frames)}フレーム")
         
         # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
-        safe_batch_size = min(8, self.batch_sizes["pose"])
+        safe_batch_size = min(128, self.batch_sizes["pose"])
         
         try:
             for i in range(0, len(frames), safe_batch_size):
@@ -849,7 +849,7 @@ class ImageAnnotator:
         print(f"Ball処理: {len(frames)}フレーム")
         
         # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
-        safe_batch_size = min(16, self.batch_sizes["ball"])
+        safe_batch_size = min(128, self.batch_sizes["ball"])
         
         # フレームごとにスライディングウィンドウを構築
         for i in range(len(frames)):

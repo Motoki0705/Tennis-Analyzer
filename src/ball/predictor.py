@@ -1,4 +1,6 @@
 import logging
+import queue
+import threading
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -10,6 +12,97 @@ from scipy.spatial import distance
 from tqdm import tqdm
 
 from src.utils.logging_utils import setup_logger
+
+
+class PreprocessThread(threading.Thread):
+    """
+    前処理を並列実行するためのスレッドクラス
+    """
+    def __init__(self, predictor, input_queue, output_queue, clips_metadata_queue):
+        super().__init__(daemon=True)
+        self.predictor = predictor
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        self.clips_metadata_queue = clips_metadata_queue
+        self.running = True
+        self.logger = setup_logger(self.__class__)
+
+    def run(self):
+        while self.running:
+            try:
+                # タイムアウト付きでキューからデータを取得
+                clips, metadata = self.input_queue.get(timeout=0.5)
+                
+                # 前処理実行
+                try:
+                    batch = self.predictor.preprocess(clips)
+                    # 前処理結果と元データのメタ情報を出力キューに送信
+                    self.output_queue.put((batch, metadata))
+                    # メタデータを別キューにも送信（後処理用）
+                    self.clips_metadata_queue.put((clips, metadata))
+                except Exception as e:
+                    self.logger.error(f"前処理エラー: {e}")
+                
+                # キュータスク完了を通知
+                self.input_queue.task_done()
+            except queue.Empty:
+                # タイムアウト - 次のループへ
+                continue
+            except Exception as e:
+                self.logger.error(f"前処理スレッドエラー: {e}")
+    
+    def stop(self):
+        self.running = False
+
+
+class PostprocessThread(threading.Thread):
+    """
+    後処理を並列実行するためのスレッドクラス
+    """
+    def __init__(self, predictor, input_queue, clips_metadata_queue, output_queue):
+        super().__init__(daemon=True)
+        self.predictor = predictor
+        self.input_queue = input_queue  # モデル出力を受け取る
+        self.clips_metadata_queue = clips_metadata_queue  # 元画像情報を受け取る
+        self.output_queue = output_queue  # 最終結果を出力する
+        self.running = True
+        self.logger = setup_logger(self.__class__)
+
+    def run(self):
+        while self.running:
+            try:
+                # タイムアウト付きでキューからモデル出力を取得
+                preds, metadata = self.input_queue.get(timeout=0.5)
+                
+                # 元画像情報を取得（順序が一致している必要がある）
+                clips, clips_metadata = self.clips_metadata_queue.get(timeout=0.5)
+                
+                # メタデータの一致を確認
+                if metadata != clips_metadata:
+                    self.logger.error(f"メタデータの不一致: {metadata} != {clips_metadata}")
+                    self.input_queue.task_done()
+                    self.clips_metadata_queue.task_done()
+                    continue
+                
+                # 後処理実行
+                try:
+                    results = self.predictor.postprocess(preds, clips)
+                    # 後処理結果を出力キューに送信
+                    self.output_queue.put((results, metadata))
+                except Exception as e:
+                    self.logger.error(f"後処理エラー: {e}")
+                
+                # キュータスク完了を通知
+                self.input_queue.task_done()
+                self.clips_metadata_queue.task_done()
+            except queue.Empty:
+                # タイムアウト - 次のループへ
+                continue
+            except Exception as e:
+                self.logger.error(f"後処理スレッドエラー: {e}")
+    
+    def stop(self):
+        self.running = False
 
 
 class BallPredictor:
@@ -24,6 +117,8 @@ class BallPredictor:
         visualize_mode: str = "overlay",
         feature_layer: int = -1,
         use_half: bool = False,  # ★ 追加: 半精度推論を使うか
+        use_parallel: bool = False,  # 並列処理を使うかどうか
+        queue_size: int = 8,  # キューサイズ
     ):
         # ────────── logger 初期化 ──────────
         self.logger = setup_logger(self.__class__)
@@ -37,6 +132,8 @@ class BallPredictor:
         self.visualize_mode = visualize_mode
         self.feature_layer = feature_layer
         self.use_half = use_half  # ★ 追加
+        self.use_parallel = use_parallel  # 並列処理を使うかどうか
+        self.queue_size = queue_size  # キューサイズ
 
         # ────────── モデル ──────────
         self.model = model.eval()
@@ -49,6 +146,63 @@ class BallPredictor:
                 A.pytorch.ToTensorV2(),
             ]
         )
+        
+        # ────────── 並列処理用のキューとスレッド ──────────
+        if self.use_parallel:
+            self._setup_parallel_processing()
+    
+    def _setup_parallel_processing(self):
+        """並列処理用のキューとスレッドを初期化"""
+        # キュー初期化
+        self.preprocess_input_queue = queue.Queue(maxsize=self.queue_size)
+        self.preprocess_output_queue = queue.Queue(maxsize=self.queue_size)
+        self.inference_output_queue = queue.Queue(maxsize=self.queue_size)
+        self.clips_metadata_queue = queue.Queue(maxsize=self.queue_size)
+        self.final_output_queue = queue.Queue(maxsize=self.queue_size)
+        
+        # スレッド初期化
+        self.preprocess_thread = PreprocessThread(
+            self, 
+            self.preprocess_input_queue, 
+            self.preprocess_output_queue,
+            self.clips_metadata_queue
+        )
+        self.postprocess_thread = PostprocessThread(
+            self, 
+            self.inference_output_queue, 
+            self.clips_metadata_queue,
+            self.final_output_queue
+        )
+        
+        # スレッド開始
+        self.preprocess_thread.start()
+        self.postprocess_thread.start()
+        
+        self.logger.info("並列処理スレッドを開始しました")
+    
+    def shutdown_parallel_processing(self):
+        """並列処理用のスレッドを終了"""
+        if self.use_parallel:
+            self.preprocess_thread.stop()
+            self.postprocess_thread.stop()
+            # スレッドの終了を待機
+            self.preprocess_thread.join(timeout=2.0)
+            self.postprocess_thread.join(timeout=2.0)
+            self.logger.info("並列処理スレッドを終了しました")
+
+    def preprocess(self, clips: List[List[np.ndarray]]) -> torch.Tensor:
+        """
+        複数のクリップを前処理し、モデル入力用のテンソルを生成します。
+
+        Args:
+            clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
+
+        Returns:
+            前処理済みのバッチテンソル
+        """
+        tensors = [self._preprocess_clip(clip) for clip in clips]
+        batch = torch.cat(tensors, dim=0)
+        return batch
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
         tens_list = []
@@ -59,27 +213,35 @@ class BallPredictor:
         clip = torch.cat(tens_list, dim=0)
         return clip.unsqueeze(0).to(self.device)
 
-    def predict(self, clips: List[List[np.ndarray]]) -> List[dict]:
+    def inference(self, batch: torch.Tensor) -> torch.Tensor:
         """
-        複数のクリップ（各クリップは複数フレーム）を処理し、ボールの位置を予測します。
+        モデル推論を実行します。
 
         Args:
-            clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
+            batch: 前処理済みのバッチテンソル
 
         Returns:
-            クリップごとの予測結果のリスト。各結果は {"x": int, "y": int, "confidence": float} 形式。
+            モデル出力テンソル
         """
-        tensors = [self._preprocess_clip(clip) for clip in clips]
-        batch = torch.cat(tensors, dim=0)
-
         with torch.no_grad():
             if self.use_half:
                 with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
                     preds = self.model(batch)
             else:
                 preds = self.model(batch)
+        return preds
 
-        # --- ヒートマップモード ---
+    def postprocess(self, preds: torch.Tensor, clips: List[List[np.ndarray]]) -> List[dict]:
+        """
+        モデル出力を後処理し、予測結果をフォーマットします。
+
+        Args:
+            preds: モデル出力テンソル
+            clips: 元の入力クリップ（元の解像度へのマッピングに使用）
+
+        Returns:
+            クリップごとの予測結果のリスト。各結果は {"x": int, "y": int, "confidence": float} 形式。
+        """
         results = []
         
         # 2次元の場合 (B, H, W) - ヒートマップ
@@ -127,12 +289,63 @@ class BallPredictor:
 
         return results
 
+    def predict(self, clips: List[List[np.ndarray]], metadata=None) -> List[dict]:
+        """
+        複数のクリップ（各クリップは複数フレーム）を処理し、ボールの位置を予測します。
+        前処理、モデル推論、後処理を一連の流れで実行します。
+
+        Args:
+            clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
+            metadata: 処理に関連付けるメタデータ（並列処理時に使用）
+
+        Returns:
+            クリップごとの予測結果のリスト。各結果は {"x": int, "y": int, "confidence": float} 形式。
+        """
+        # 並列処理モードの場合
+        if self.use_parallel:
+            # メタデータが指定されていない場合は生成
+            if metadata is None:
+                metadata = {"id": id(clips)}
+            
+            # 前処理キューに入力を追加
+            self.preprocess_input_queue.put((clips, metadata))
+            
+            # 前処理が完了し、バッチが用意できるまで待機
+            batch, batch_metadata = self.preprocess_output_queue.get()
+            self.preprocess_output_queue.task_done()
+            
+            # モデル推論実行（この部分はGPUを占有するため、メインスレッドで実行）
+            preds = self.inference(batch)
+            
+            # 後処理キューに推論結果を追加
+            self.inference_output_queue.put((preds, batch_metadata))
+            
+            # 後処理が完了し、結果が用意できるまで待機
+            results, results_metadata = self.final_output_queue.get()
+            self.final_output_queue.task_done()
+            
+            return results
+        
+        # 通常の同期処理モード
+        else:
+            # 1. 前処理
+            batch = self.preprocess(clips)
+            
+            # 2. モデル推論
+            preds = self.inference(batch)
+            
+            # 3. 後処理
+            results = self.postprocess(preds, clips)
+            
+            return results
+
     def _extract_feature_sequence(
         self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
     ) -> List[np.ndarray]:
-        tensors = [self._preprocess_clip(clip) for clip in clips]
-        batch = torch.cat(tensors, dim=0)
-
+        # 前処理
+        batch = self.preprocess(clips)
+        
+        # 特徴抽出
         if self.use_half:
             with (
                 torch.no_grad(),
@@ -148,6 +361,7 @@ class BallPredictor:
         avg = lowfeat.mean(dim=1)
         arr = avg.cpu().numpy()
 
+        # 後処理（可視化用）
         seq = []
         for m in arr:
             norm = (m - m.min()) / (m.max() - m.min() + 1e-6) * 255
@@ -160,9 +374,10 @@ class BallPredictor:
     def _extract_heatmap_sequence(
         self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
     ) -> List[np.ndarray]:
-        tensors = [self._preprocess_clip(clip) for clip in clips]
-        batch = torch.cat(tensors, dim=0)
-
+        # 前処理
+        batch = self.preprocess(clips)
+        
+        # 推論
         if self.use_half:
             with (
                 torch.no_grad(),
@@ -177,6 +392,7 @@ class BallPredictor:
 
         arr = heatmaps.cpu().numpy()
 
+        # 後処理（可視化用）
         seq = []
         for m in arr:
             norm = (m * 255).astype(np.uint8)
@@ -246,37 +462,47 @@ class BallPredictor:
         clip_buffer: List[List[np.ndarray]] = []
         last_frames: List[np.ndarray] = []
 
-        with tqdm(total=total, desc="Ball 推論処理") as pbar:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                buffer_frames.append(frame)
-                if len(buffer_frames) >= self.num_frames:
-                    clip_buffer.append(buffer_frames[-self.num_frames :])
-                    last_frames.append(frame)
-                if len(clip_buffer) >= batch_size:
+        try:
+            with tqdm(total=total, desc="Ball 推論処理") as pbar:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    buffer_frames.append(frame)
+
+                    if len(buffer_frames) >= self.num_frames:
+                        clip = buffer_frames[-self.num_frames :]
+                        clip_buffer.append(clip)
+                        last_frames.append(frame)
+
+                        if len(clip_buffer) >= batch_size:
+                            self._process_and_write(
+                                clip_buffer, last_frames, writer, w_org, h_org, pbar
+                            )
+                            clip_buffer = []
+                            last_frames = []
+
+                # 残りの clip があれば処理
+                if clip_buffer:
                     self._process_and_write(
                         clip_buffer, last_frames, writer, w_org, h_org, pbar
                     )
-                    clip_buffer.clear()
-                    last_frames.clear()
-
-            if clip_buffer:
-                self._process_and_write(
-                    clip_buffer, last_frames, writer, w_org, h_org, pbar
-                )
-
-        cap.release()
-        if writer:
-            writer.release()
-
-        self.logger.info(f"✅ Processing completed. Total frames processed: {pbar.n}")
+        finally:
+            # 並列処理を使用している場合は終了処理
+            if self.use_parallel:
+                self.shutdown_parallel_processing()
+                
+            if writer:
+                writer.release()
+            cap.release()
 
     def _argmax_coord(self, heat: np.ndarray) -> Tuple[int, int]:
-        idx = np.argmax(heat)
-        y, x = divmod(idx, heat.shape[1])
-        return (int(x), int(y))
+        """2次元のヒートマップから最も確率が高い座標を取得"""
+        h, w = heat.shape
+        idx = heat.argmax()
+        y, x = idx // w, idx % w
+        return int(x), int(y)
 
     def _to_original_scale(
         self,
@@ -284,46 +510,64 @@ class BallPredictor:
         from_size: Tuple[int, int],
         to_size: Tuple[int, int],
     ) -> Tuple[int, int]:
-        w_from, h_from = from_size
-        w_to, h_to = to_size
+        """座標をヒートマップサイズから元画像サイズにスケール変換"""
         x, y = coord
-        return int(x * w_to / w_from), int(y * h_to / h_from)
+        from_w, from_h = from_size
+        to_w, to_h = to_size
+        x_new = int(x * (to_w / from_w))
+        y_new = int(y * (to_h / from_h))
+        return x_new, y_new
 
     @staticmethod
     def remove_jumps(track, max_dist=80):
-        cleaned = [track[0]]
-        for prev, curr in zip(track, track[1:], strict=False):
-            if prev["x"] is not None and curr["x"] is not None:
-                d = distance.euclidean((prev["x"], prev["y"]), (curr["x"], curr["y"]))
-                if d > max_dist:
-                    curr = {"x": None, "y": None, "confidence": 0.0}
-            cleaned.append(curr)
-        return cleaned
+        """トラックから大きなジャンプを検出して除去"""
+        track_copy = track.copy()
+        if len(track) <= 1:
+            return track_copy
+        last_valid = None
+        for i, p in enumerate(track_copy):
+            if p["x"] is None or p["confidence"] is None:
+                continue
+            if last_valid is not None:
+                dist = distance.euclidean((track_copy[last_valid]["x"], track_copy[last_valid]["y"]), (p["x"], p["y"]))
+                if dist > max_dist:
+                    p["x"], p["y"], p["confidence"] = None, None, 0.0
+                else:
+                    last_valid = i
+            else:
+                last_valid = i
+        return track_copy
 
     @staticmethod
     def interpolate_track(track):
-        xs = np.array([p["x"] if p["x"] is not None else np.nan for p in track])
-        ys = np.array([p["y"] if p["y"] is not None else np.nan for p in track])
-        confs = np.array([p["confidence"] or 0.0 for p in track])
+        """None 値のある不連続なトラックを線形補間"""
+        if all(p["x"] is None for p in track):
+            return track
 
         def interp_nan(arr):
             nans = np.isnan(arr)
-            if nans.all():
+            if all(nans):
                 return arr
-            arr[nans] = np.interp(
-                np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans]
-            )
+            if any(nans):
+                arr[nans] = np.interp(
+                    np.flatnonzero(nans), np.flatnonzero(~nans), arr[~nans]
+                )
             return arr
 
-        xs = interp_nan(xs)
-        ys = interp_nan(ys)
+        x_vals = np.array([p["x"] if p["x"] is not None else np.nan for p in track])
+        y_vals = np.array([p["y"] if p["y"] is not None else np.nan for p in track])
+        conf = np.array(
+            [p["confidence"] if p["confidence"] is not None else np.nan for p in track]
+        )
 
-        result = []
-        for x, y, c in zip(xs, ys, confs, strict=False):
-            if np.isnan(x) or np.isnan(y):
-                result.append({"x": None, "y": None, "confidence": 0.0})
-            else:
-                result.append(
-                    {"x": int(round(x)), "y": int(round(y)), "confidence": float(c)}
-                )
-        return result
+        x_filled = interp_nan(x_vals)
+        y_filled = interp_nan(y_vals)
+        conf_filled = interp_nan(conf)
+
+        for i in range(len(track)):
+            if track[i]["x"] is None:
+                track[i]["x"] = int(round(x_filled[i]))
+                track[i]["y"] = int(round(y_filled[i]))
+                track[i]["confidence"] = float(conf_filled[i])
+
+        return track
