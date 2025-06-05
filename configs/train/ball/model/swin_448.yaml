@@ -1,0 +1,16 @@
+# Swin 448モデル設定
+net:
+  _target_: src.ball.models.swin_448.SwinBallUNet
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  out_channels: 1
+  final_channels: [64, 32]
+  swin_model: "swin_base_patch4_window7_224"
+  pretrained: true
+  img_size: 448
+
+# メタ情報をまとめる
+meta:
+  name: swin_448
+  output_type: "heatmap" 

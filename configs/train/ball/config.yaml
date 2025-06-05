@@ -8,9 +8,7 @@ hydra:
 
 # デフォルト設定
 defaults:
-  # モデルアーキテクチャの選択（cat_frames, single_frame, sequence）
-  # コマンドライン例: model=_cat_frames model@model.cat_frames=lite_tracknet_xy
-  - model: _cat_frames
+  - model: lite_tracknet
   
   # LightningModuleの選択（coord, heatmap）
   - litmodule: heatmap_regression

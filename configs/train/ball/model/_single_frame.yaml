@@ -1,4 +1,0 @@
-# @package _global_
-
-defaults:
-  - single_frame/mobilenet 

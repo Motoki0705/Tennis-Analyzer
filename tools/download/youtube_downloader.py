@@ -10,5 +10,5 @@ def download_video(url, output_dir="downloads", format="best"):
 
 if __name__ == "__main__":
     # ダウンロード対象の動画URL
-    url = "https://www.youtube.com/watch?v=CcU3GQSghhA&ab_channel=Wimbledon"
+    url = "https://www.youtube.com/watch?v=twpi3NIk2wQ&ab_channel=RogerThatTennis"
     download_video(url, output_dir="data/videos")

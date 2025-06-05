@@ -177,6 +177,7 @@ cython_debug/
 **/datasets/
 
 # 例外: すべての data フォルダ内の .py ファイルは追跡する
+data/
 !**/data/*.py
 
 # checkpointss

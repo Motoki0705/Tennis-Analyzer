@@ -1,3 +1,0 @@
-_target_: src.ball.models.cat_frames.resnet_regression.ResNet50CoordRegression
-in_channels: 9
-ckpt_path: checkpoints/ball/resnet_regression/resnet_regression-epoch=08-val_loss=0.1169.ckpt
