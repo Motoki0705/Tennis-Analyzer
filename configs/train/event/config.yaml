@@ -4,23 +4,23 @@
 hydra:
   output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
   run:
-    dir: .
+    dir: outputs/event/${model.meta.name}/${now:%Y-%m-%d_%H-%M-%S}
 
 # デフォルト設定
 defaults:
-  - model: transformer
-  
-  # LightningModuleの選択
+  - model: transformer  # デフォルトモデルタイプ（"transformer" または "bilstm"）
   - litmodule: event_detection
-  
   - litdatamodule: event_data
   - trainer: default
   - callbacks: default
   - _self_
 
+# 再現性のための乱数シード
+seed: 42
+
+# バランス調整済みデータセットのパス（指定された場合に使用）
+balanced_dataset_path: null
+
 # 実験名（ディレクトリ名）の設定
 # モデル名とデータセットタイプから自動生成
-version: ${model.meta.name}_${litdatamodule.output_type}
-
-# 再現性のための乱数シード
-seed: 42 
+version: ${model.meta.name}_${litdatamodule.output_type} 

@@ -1,140 +1,107 @@
 #!/usr/bin/env python
 """
-イベント検出モデルのトレーニングスクリプト（Hydra設定対応版）
+イベント検出モデルのトレーニングスクリプト
 """
-import os
 import logging
+import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Optional
 
 import hydra
-import pytorch_lightning as pl
-from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-from pytorch_lightning.loggers import TensorBoardLogger
-
-# ルートディレクトリへのパスを確保
-from hydra.utils import get_original_cwd, to_absolute_path
-
-# 再現性のための設定
-import random
-import numpy as np
 import torch
+from omegaconf import DictConfig
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 
+# ロガーの設定
 log = logging.getLogger(__name__)
 
 
-def set_seed(seed: int) -> None:
-    """再現性のためのシードを設定する"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # cudnnが有効な場合は再現性のために次の設定を追加
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-@hydra.main(
-    config_path="../../configs/train/event", 
-    config_name="config", 
-    version_base=None
-)
+@hydra.main(config_path="../../configs/train/event", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
-    Hydra設定に基づいてイベント検出モデルを訓練するメイン関数
+    イベント検出モデルのトレーニングを実行する
 
     Args:
         cfg: Hydra設定
     """
-    # 再現性のためのシード設定
-    if "seed" in cfg:
-        set_seed(cfg.seed)
-        log.info(f"シード固定: {cfg.seed}")
-
-    # 設定内容を表示
-    log.info(f"設定内容:\n{OmegaConf.to_yaml(cfg)}")
+    log.info("イベント検出モデルのトレーニングを開始します...")
     
-    # 絶対パスに変換（相対パスで設定されている場合）
-    if "annotation_file" in cfg.litdatamodule:
-        cfg.litdatamodule.annotation_file = to_absolute_path(cfg.litdatamodule.annotation_file)
-
-    # ディレクトリの準備
-    os.makedirs(cfg.trainer.default_root_dir, exist_ok=True)
-    log.info(f"出力ディレクトリ: {cfg.trainer.default_root_dir}")
-
-    # LitDataModuleの初期化
-    log.info("DataModuleを初期化中...")
+    # 乱数シードを設定
+    pl.seed_everything(cfg.get("seed", 42))
+    
+    # 設定の出力
+    log.info(f"設定: \n{cfg}")
+    
+    # DataModuleの作成
+    log.info("DataModuleを作成中...")
+    
+    # バランス調整したデータセットのパスが指定されていれば、litdatamoduleの設定を更新
+    balanced_dataset_path = cfg.get("balanced_dataset_path", None)
+    if balanced_dataset_path and os.path.exists(balanced_dataset_path):
+        log.info(f"バランス調整済みデータセットを使用します: {balanced_dataset_path}")
+        cfg.litdatamodule.annotation_file = balanced_dataset_path
+    
     datamodule = hydra.utils.instantiate(cfg.litdatamodule)
     
-    # データモジュールのセットアップ
-    datamodule.setup(stage="fit")
-    feature_dims = datamodule.get_feature_dims()
-    max_players = datamodule.get_max_players()
+    # モデルの作成
+    log.info("モデルを作成中...")
+    model = hydra.utils.instantiate(cfg.model.net)
     
-    log.info(f"特徴次元: {feature_dims}")
-    log.info(f"最大プレイヤー数: {max_players}")
-
-    # モデル構築の準備
-    log.info("モデルを構築中...")
-    # モデルパラメータ設定
-    model_params = OmegaConf.to_container(cfg.model.net, resolve=True)
+    # LightningModuleの作成
+    log.info("LightningModuleを作成中...")
+    lit_module = hydra.utils.instantiate(
+        cfg.litmodule.module,
+        model=model,
+    )
     
-    # バックボーン関連のパラメータを追加
-    model_params.update({
-        "ball_dim": feature_dims["ball"],
-        "player_bbox_dim": feature_dims["player_bbox"],
-        "player_pose_dim": feature_dims["player_pose"],
-        "court_dim": feature_dims["court"],
-        "max_players": max_players,
-    })
-    
-    # モデルの構築
-    model = hydra.utils.call(cfg.model.net._target_, **model_params)
-    
-    # LitModuleの初期化
-    log.info("LightningModuleを初期化中...")
-    lit_module_params = OmegaConf.to_container(cfg.litmodule.module, resolve=True)
-    lit_module_params["model"] = model
-    lit_module = hydra.utils.call(cfg.litmodule.module._target_, **lit_module_params)
-
-    # コールバックの準備
+    # Callbacksの設定
     callbacks = []
-    if "callbacks" in cfg:
-        for cb_name, cb_conf in cfg.callbacks.items():
-            if "_target_" in cb_conf:
-                log.info(f"コールバックを追加: {cb_name}")
-                callbacks.append(hydra.utils.instantiate(cb_conf))
-
-    # ロガーの準備
-    logger = TensorBoardLogger(
-        save_dir=cfg.trainer.default_root_dir,
-        name="",
-    )
-
-    # トレーナーの準備
-    log.info("トレーナーを初期化中...")
+    
+    # モデルチェックポイント
+    if "checkpoint" in cfg.callbacks:
+        log.info("ModelCheckpointを設定中...")
+        checkpoint_callback = ModelCheckpoint(**cfg.callbacks.checkpoint)
+        callbacks.append(checkpoint_callback)
+    
+    # 早期停止
+    if "early_stopping" in cfg.callbacks:
+        log.info("EarlyStoppingを設定中...")
+        early_stopping = EarlyStopping(**cfg.callbacks.early_stopping)
+        callbacks.append(early_stopping)
+    
+    # 学習率モニタリング
+    if "lr_monitor" in cfg.callbacks:
+        log.info("LearningRateMonitorを設定中...")
+        lr_monitor = LearningRateMonitor(**cfg.callbacks.lr_monitor)
+        callbacks.append(lr_monitor)
+    
+    # Trainerの作成
+    log.info("Trainerを作成中...")
     trainer = pl.Trainer(
-        logger=logger,
+        **cfg.trainer,
         callbacks=callbacks,
-        **{k: v for k, v in cfg.trainer.items() if k != "default_root_dir"}
     )
-
+    
     # トレーニングの実行
     log.info("トレーニング開始...")
     trainer.fit(lit_module, datamodule=datamodule)
     
-    # ベストモデルのパスを表示
+    # 最高性能のモデルチェックポイントのパスを取得
     best_model_path = None
+    best_score = None
+    
     for callback in callbacks:
-        if isinstance(callback, ModelCheckpoint):
+        if isinstance(callback, ModelCheckpoint) and hasattr(callback, "best_model_path"):
             best_model_path = callback.best_model_path
-            best_score = callback.best_model_score
+            best_score = callback.best_model_score.item() if callback.best_model_score else None
             break
     
     if best_model_path:
-        log.info(f"最高性能のモデルパス: {best_model_path}")
-        log.info(f"最高性能のスコア: {best_score:.4f}")
+        log.info(f"最高性能のモデルチェックポイント: {best_model_path}")
+        if best_score:
+            log.info(f"最高性能のスコア: {best_score:.4f}")
+
 
 if __name__ == "__main__":
     main() 
