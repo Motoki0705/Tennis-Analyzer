@@ -287,57 +287,6 @@ class ImageAnnotator:
             self.coco_output["annotations"].append(ann)
             self.annotation_id_counter += 1
 
-    def _process_batch(
-        self,
-        predictor,
-        frames_buffer: List,
-        meta_buffer: List[Tuple[int, Path]],
-        cache: Dict[int, Any],
-    ):
-        if not frames_buffer:
-            return
-
-        try:
-            # モデル予測の呼び出し
-            start_time = time.time()
-            
-            try:
-                if predictor == self.ball_predictor:
-                    preds = predictor.predict(frames_buffer)
-                else:
-                    out = predictor.predict(frames_buffer)
-                    # courtはヒートマップそのものをindex1で出力するため、out[0]だけを取り出す
-                    preds = out[0] if predictor == self.court_predictor else out
-                
-                elapsed = time.time() - start_time
-                
-                # 長時間かかっている場合は警告
-                if elapsed > 30:
-                    print(f"警告: 予測に{elapsed:.2f}秒かかりました。バッチサイズを小さくすることを検討してください。")
-                    
-            except Exception as e:
-                print(f"予測中にエラーが発生しました: {e}")
-                return
-
-            # キャッシュ登録とアノテーション追加
-            for ((img_id, _), pred) in zip(meta_buffer, preds, strict=False):
-                cache[img_id] = pred
-                if predictor == self.ball_predictor:
-                    self._add_ball_annotation(img_id, pred)
-                elif predictor == self.court_predictor:
-                    self._add_court_annotation(img_id, pred)
-                else:
-                    self._add_pose_annotations(img_id, pred)
-
-        except Exception as e:
-            print(f"処理中にエラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # バッファをクリア
-        frames_buffer.clear()
-        meta_buffer.clear()
-
     def _load_frame(self, img_path: Path, input_dir: Path) -> Tuple[np.ndarray, int, Path]:
         """
         画像を読み込み、返す（画像IDはimage_id_mapから取得）
@@ -609,7 +558,7 @@ class ImageAnnotator:
             try:
                 # 先読みデータの取得（あれば）
                 frames, frame_ids, valid_paths = self._get_clip_frames(
-                    idx, game_id, clip_id, next_clip_future, pbar
+                    game_id, clip_id, next_clip_future, pbar
                 )
                 
                 # 次のクリップの先読み開始
@@ -656,17 +605,6 @@ class ImageAnnotator:
                 
                 print(f"完了: Game {game_id}, Clip {clip_id}")
                 processed_clips += 1
-                
-                # 10クリップごとに中間JSONを保存
-                if processed_clips % 10 == 0:
-                    print(f"中間結果を保存します（処理済み: {processed_clips}/{len(sorted_group_keys)}クリップ）")
-                    try:
-                        temp_json_path = Path(f"outputs/temp_annotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-                        with open(temp_json_path, "w", encoding="utf-8") as f:
-                            json.dump(self.coco_output, f, ensure_ascii=False, indent=2)
-                        print(f"中間結果を保存しました: {temp_json_path}")
-                    except Exception as e:
-                        print(f"中間結果の保存中にエラーが発生しました: {e}")
                 
                 # メモリ解放
                 frames.clear()
@@ -731,9 +669,9 @@ class ImageAnnotator:
         
         return (preloaded_frames, preloaded_ids, preloaded_paths)
 
-    def _get_clip_frames(self, idx, game_id, clip_id, next_clip_future, pbar=None):
+    def _get_clip_frames(self, game_id, clip_id, next_clip_future, pbar=None):
         """クリップのフレームを取得（先読みまたは新規読み込み）"""
-        if idx == 0 and next_clip_future is not None:
+        if next_clip_future is not None:
             try:
                 frames, frame_ids, valid_paths = next_clip_future.result()
                 print(f"先読みデータ使用: Game {game_id}, Clip {clip_id} - {len(frames)}フレーム")
@@ -746,49 +684,6 @@ class ImageAnnotator:
             except Exception as e:
                 print(f"先読みデータの取得に失敗: {e}")
                 return [], [], []
-        else:
-            # クリップ画像の取得と読み込み
-            id_path_pairs = self.grouped_entries.get((game_id, clip_id), [])
-            print(f"処理中: Game {game_id}, Clip {clip_id} - {len(id_path_pairs)}フレーム")
-            
-            # 並列処理で画像を読み込む
-            frames = []
-            frame_ids = []
-            valid_paths = []
-            
-            # 並列読み込み処理
-            max_workers = min(32, len(id_path_pairs))
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_pair = {
-                    executor.submit(cv2.imread, str(img_path)): (img_id, img_path) 
-                    for img_id, img_path in id_path_pairs
-                }
-                
-                for future in tqdm(
-                    future_to_pair, 
-                    desc=f"フレーム読み込み中 (Game {game_id}, Clip {clip_id})",
-                    leave=False
-                ):
-                    try:
-                        frame = future.result()
-                        img_id, path = future_to_pair[future]
-                        if frame is not None:
-                            frames.append(frame)
-                            frame_ids.append(img_id)
-                            valid_paths.append(path)
-                            
-                            # メイン進捗バーの更新（あれば）
-                            if pbar is not None:
-                                pbar.update(1)
-                    except Exception as exc:
-                        img_id, path = future_to_pair[future]
-                        print(f"フレーム読み込み中にエラーが発生しました: {path}, {exc}")
-                        
-                        # エラーでも進捗は進める
-                        if pbar is not None:
-                            pbar.update(1)
-            
-            return frames, frame_ids, valid_paths
 
     def _process_court_batches(self, frames, frame_ids, valid_paths, court_buf, court_meta, court_cache):
         """コート検出のバッチ処理"""
@@ -893,6 +788,57 @@ class ImageAnnotator:
                 print(f"残りのバッファ処理中にエラーが発生しました: {e}")
                 import traceback
                 traceback.print_exc()
+                
+    def _process_batch(
+        self,
+        predictor,
+        frames_buffer: List,
+        meta_buffer: List[Tuple[int, Path]],
+        cache: Dict[int, Any],
+    ):
+        if not frames_buffer:
+            return
+
+        try:
+            # モデル予測の呼び出し
+            start_time = time.time()
+            
+            try:
+                if predictor == self.ball_predictor:
+                    preds = predictor.predict(frames_buffer)
+                else:
+                    out = predictor.predict(frames_buffer)
+                    # courtはヒートマップそのものをindex1で出力するため、out[0]だけを取り出す
+                    preds = out[0] if predictor == self.court_predictor else out
+                
+                elapsed = time.time() - start_time
+                
+                # 長時間かかっている場合は警告
+                if elapsed > 30:
+                    print(f"警告: 予測に{elapsed:.2f}秒かかりました。バッチサイズを小さくすることを検討してください。")
+                    
+            except Exception as e:
+                print(f"予測中にエラーが発生しました: {e}")
+                return
+
+            # キャッシュ登録とアノテーション追加
+            for ((img_id, _), pred) in zip(meta_buffer, preds, strict=False):
+                cache[img_id] = pred
+                if predictor == self.ball_predictor:
+                    self._add_ball_annotation(img_id, pred)
+                elif predictor == self.court_predictor:
+                    self._add_court_annotation(img_id, pred)
+                else:
+                    self._add_pose_annotations(img_id, pred)
+
+        except Exception as e:
+            print(f"処理中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # バッファをクリア
+        frames_buffer.clear()
+        meta_buffer.clear()
 
     def _save_coco_annotations(self, output_json: Path) -> None:
         """COCO形式のアノテーションを保存"""

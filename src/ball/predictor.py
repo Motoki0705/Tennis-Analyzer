@@ -1,6 +1,4 @@
 import logging
-import queue
-import threading
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -12,97 +10,6 @@ from scipy.spatial import distance
 from tqdm import tqdm
 
 from src.utils.logging_utils import setup_logger
-
-
-class PreprocessThread(threading.Thread):
-    """
-    前処理を並列実行するためのスレッドクラス
-    """
-    def __init__(self, predictor, input_queue, output_queue, clips_metadata_queue):
-        super().__init__(daemon=True)
-        self.predictor = predictor
-        self.input_queue = input_queue
-        self.output_queue = output_queue
-        self.clips_metadata_queue = clips_metadata_queue
-        self.running = True
-        self.logger = setup_logger(self.__class__)
-
-    def run(self):
-        while self.running:
-            try:
-                # タイムアウト付きでキューからデータを取得
-                clips, metadata = self.input_queue.get(timeout=0.5)
-                
-                # 前処理実行
-                try:
-                    batch = self.predictor.preprocess(clips)
-                    # 前処理結果と元データのメタ情報を出力キューに送信
-                    self.output_queue.put((batch, metadata))
-                    # メタデータを別キューにも送信（後処理用）
-                    self.clips_metadata_queue.put((clips, metadata))
-                except Exception as e:
-                    self.logger.error(f"前処理エラー: {e}")
-                
-                # キュータスク完了を通知
-                self.input_queue.task_done()
-            except queue.Empty:
-                # タイムアウト - 次のループへ
-                continue
-            except Exception as e:
-                self.logger.error(f"前処理スレッドエラー: {e}")
-    
-    def stop(self):
-        self.running = False
-
-
-class PostprocessThread(threading.Thread):
-    """
-    後処理を並列実行するためのスレッドクラス
-    """
-    def __init__(self, predictor, input_queue, clips_metadata_queue, output_queue):
-        super().__init__(daemon=True)
-        self.predictor = predictor
-        self.input_queue = input_queue  # モデル出力を受け取る
-        self.clips_metadata_queue = clips_metadata_queue  # 元画像情報を受け取る
-        self.output_queue = output_queue  # 最終結果を出力する
-        self.running = True
-        self.logger = setup_logger(self.__class__)
-
-    def run(self):
-        while self.running:
-            try:
-                # タイムアウト付きでキューからモデル出力を取得
-                preds, metadata = self.input_queue.get(timeout=0.5)
-                
-                # 元画像情報を取得（順序が一致している必要がある）
-                clips, clips_metadata = self.clips_metadata_queue.get(timeout=0.5)
-                
-                # メタデータの一致を確認
-                if metadata != clips_metadata:
-                    self.logger.error(f"メタデータの不一致: {metadata} != {clips_metadata}")
-                    self.input_queue.task_done()
-                    self.clips_metadata_queue.task_done()
-                    continue
-                
-                # 後処理実行
-                try:
-                    results = self.predictor.postprocess(preds, clips)
-                    # 後処理結果を出力キューに送信
-                    self.output_queue.put((results, metadata))
-                except Exception as e:
-                    self.logger.error(f"後処理エラー: {e}")
-                
-                # キュータスク完了を通知
-                self.input_queue.task_done()
-                self.clips_metadata_queue.task_done()
-            except queue.Empty:
-                # タイムアウト - 次のループへ
-                continue
-            except Exception as e:
-                self.logger.error(f"後処理スレッドエラー: {e}")
-    
-    def stop(self):
-        self.running = False
 
 
 class BallPredictor:
@@ -117,8 +24,6 @@ class BallPredictor:
         visualize_mode: str = "overlay",
         feature_layer: int = -1,
         use_half: bool = False,  # ★ 追加: 半精度推論を使うか
-        use_parallel: bool = False,  # 並列処理を使うかどうか
-        queue_size: int = 8,  # キューサイズ
     ):
         # ────────── logger 初期化 ──────────
         self.logger = setup_logger(self.__class__)
@@ -132,8 +37,6 @@ class BallPredictor:
         self.visualize_mode = visualize_mode
         self.feature_layer = feature_layer
         self.use_half = use_half  # ★ 追加
-        self.use_parallel = use_parallel  # 並列処理を使うかどうか
-        self.queue_size = queue_size  # キューサイズ
 
         # ────────── モデル ──────────
         self.model = model.eval()
@@ -146,49 +49,6 @@ class BallPredictor:
                 A.pytorch.ToTensorV2(),
             ]
         )
-        
-        # ────────── 並列処理用のキューとスレッド ──────────
-        if self.use_parallel:
-            self._setup_parallel_processing()
-    
-    def _setup_parallel_processing(self):
-        """並列処理用のキューとスレッドを初期化"""
-        # キュー初期化
-        self.preprocess_input_queue = queue.Queue(maxsize=self.queue_size)
-        self.preprocess_output_queue = queue.Queue(maxsize=self.queue_size)
-        self.inference_output_queue = queue.Queue(maxsize=self.queue_size)
-        self.clips_metadata_queue = queue.Queue(maxsize=self.queue_size)
-        self.final_output_queue = queue.Queue(maxsize=self.queue_size)
-        
-        # スレッド初期化
-        self.preprocess_thread = PreprocessThread(
-            self, 
-            self.preprocess_input_queue, 
-            self.preprocess_output_queue,
-            self.clips_metadata_queue
-        )
-        self.postprocess_thread = PostprocessThread(
-            self, 
-            self.inference_output_queue, 
-            self.clips_metadata_queue,
-            self.final_output_queue
-        )
-        
-        # スレッド開始
-        self.preprocess_thread.start()
-        self.postprocess_thread.start()
-        
-        self.logger.info("並列処理スレッドを開始しました")
-    
-    def shutdown_parallel_processing(self):
-        """並列処理用のスレッドを終了"""
-        if self.use_parallel:
-            self.preprocess_thread.stop()
-            self.postprocess_thread.stop()
-            # スレッドの終了を待機
-            self.preprocess_thread.join(timeout=2.0)
-            self.postprocess_thread.join(timeout=2.0)
-            self.logger.info("並列処理スレッドを終了しました")
 
     def preprocess(self, clips: List[List[np.ndarray]]) -> torch.Tensor:
         """
@@ -205,6 +65,15 @@ class BallPredictor:
         return batch
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
+        """
+        単一クリップ（複数フレーム）を前処理し、テンソルに変換します。
+
+        Args:
+            frames: フレームのリスト
+
+        Returns:
+            前処理済みのテンソル
+        """
         tens_list = []
         for img_bgr in frames:
             img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -289,79 +158,68 @@ class BallPredictor:
 
         return results
 
-    def predict(self, clips: List[List[np.ndarray]], metadata=None) -> List[dict]:
+    def predict(self, clips: List[List[np.ndarray]]) -> List[dict]:
         """
         複数のクリップ（各クリップは複数フレーム）を処理し、ボールの位置を予測します。
         前処理、モデル推論、後処理を一連の流れで実行します。
 
         Args:
             clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
-            metadata: 処理に関連付けるメタデータ（並列処理時に使用）
 
         Returns:
             クリップごとの予測結果のリスト。各結果は {"x": int, "y": int, "confidence": float} 形式。
         """
-        # 並列処理モードの場合
-        if self.use_parallel:
-            # メタデータが指定されていない場合は生成
-            if metadata is None:
-                metadata = {"id": id(clips)}
-            
-            # 前処理キューに入力を追加
-            self.preprocess_input_queue.put((clips, metadata))
-            
-            # 前処理が完了し、バッチが用意できるまで待機
-            batch, batch_metadata = self.preprocess_output_queue.get()
-            self.preprocess_output_queue.task_done()
-            
-            # モデル推論実行（この部分はGPUを占有するため、メインスレッドで実行）
-            preds = self.inference(batch)
-            
-            # 後処理キューに推論結果を追加
-            self.inference_output_queue.put((preds, batch_metadata))
-            
-            # 後処理が完了し、結果が用意できるまで待機
-            results, results_metadata = self.final_output_queue.get()
-            self.final_output_queue.task_done()
-            
-            return results
+        # 1. 前処理
+        batch = self.preprocess(clips)
         
-        # 通常の同期処理モード
-        else:
-            # 1. 前処理
-            batch = self.preprocess(clips)
-            
-            # 2. モデル推論
-            preds = self.inference(batch)
-            
-            # 3. 後処理
-            results = self.postprocess(preds, clips)
-            
-            return results
+        # 2. モデル推論
+        preds = self.inference(batch)
+        
+        # 3. 後処理
+        results = self.postprocess(preds, clips)
+        
+        return results
 
-    def _extract_feature_sequence(
-        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
-    ) -> List[np.ndarray]:
+    def extract_features(self, clips: List[List[np.ndarray]]) -> torch.Tensor:
+        """
+        特徴抽出を行います。可視化などに使用します。
+
+        Args:
+            clips: 各クリップのリスト
+
+        Returns:
+            抽出された特徴テンソル
+        """
         # 前処理
         batch = self.preprocess(clips)
         
         # 特徴抽出
-        if self.use_half:
-            with (
-                torch.no_grad(),
-                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
-            ):
+        with torch.no_grad():
+            if self.use_half:
+                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                    feats_nhwc = self.model.backbone(batch)
+            else:
                 feats_nhwc = self.model.backbone(batch)
-        else:
-            with torch.no_grad():
-                feats_nhwc = self.model.backbone(batch)
-
+        
         feats = [f.permute(0, 3, 1, 2).contiguous() for f in feats_nhwc]
+        return feats
+
+    def visualize_features(self, feats: List[torch.Tensor], original_size: Tuple[int, int]) -> List[np.ndarray]:
+        """
+        特徴マップを可視化します。
+
+        Args:
+            feats: 特徴テンソルのリスト
+            original_size: 元の画像サイズ
+
+        Returns:
+            可視化された特徴マップのリスト
+        """
         lowfeat = feats[self.feature_layer]
         avg = lowfeat.mean(dim=1)
         arr = avg.cpu().numpy()
 
-        # 後処理（可視化用）
+        # 可視化処理
         seq = []
         for m in arr:
             norm = (m - m.min()) / (m.max() - m.min() + 1e-6) * 255
@@ -371,28 +229,21 @@ class BallPredictor:
             seq.append(img)
         return seq
 
-    def _extract_heatmap_sequence(
-        self, clips: List[List[np.ndarray]], original_size: Tuple[int, int]
-    ) -> List[np.ndarray]:
-        # 前処理
-        batch = self.preprocess(clips)
-        
-        # 推論
-        if self.use_half:
-            with (
-                torch.no_grad(),
-                torch.amp.autocast(device_type=self.device, dtype=torch.float16),
-            ):
-                preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds)
-        else:
-            with torch.no_grad():
-                preds = self.model(batch)
-                heatmaps = torch.sigmoid(preds)
+    def visualize_heatmaps(self, preds: torch.Tensor, original_size: Tuple[int, int]) -> List[np.ndarray]:
+        """
+        ヒートマップを可視化します。
 
+        Args:
+            preds: モデル出力テンソル
+            original_size: 元の画像サイズ
+
+        Returns:
+            可視化されたヒートマップのリスト
+        """
+        heatmaps = torch.sigmoid(preds)
         arr = heatmaps.cpu().numpy()
 
-        # 後処理（可視化用）
+        # 可視化処理
         seq = []
         for m in arr:
             norm = (m * 255).astype(np.uint8)
@@ -402,6 +253,16 @@ class BallPredictor:
         return seq
 
     def overlay(self, frame: np.ndarray, result: dict) -> np.ndarray:
+        """
+        予測結果を画像に重ね合わせます。
+
+        Args:
+            frame: 元の画像
+            result: 予測結果
+
+        Returns:
+            重ね合わせ後の画像
+        """
         if result["x"] is not None and result["confidence"] > 0.5:
             cv2.circle(
                 frame,
@@ -413,35 +274,20 @@ class BallPredictor:
             )
         return frame
 
-    def _process_and_write(self, clip_buffer, last_frames, writer, w_org, h_org, pbar):
-        if self.visualize_mode == "features":
-            feature_frames = self._extract_feature_sequence(clip_buffer, (w_org, h_org))
-            for vf in feature_frames:
-                if writer:
-                    writer.write(vf)
-                pbar.update(1)
-        elif self.visualize_mode == "heatmap":
-            heatmap_frames = self._extract_heatmap_sequence(clip_buffer, (w_org, h_org))
-            for hm in heatmap_frames:
-                if writer:
-                    writer.write(hm)
-                pbar.update(1)
-        else:
-            results = self.predict(clip_buffer)
-            for result, last_frame in zip(results, last_frames, strict=False):
-                out_frame = last_frame.copy()
-                if result["confidence"] >= self.threshold:
-                    out_frame = self.overlay(out_frame, result)
-                if writer:
-                    writer.write(out_frame)
-                pbar.update(1)
-
     def run(
         self,
         input_path: Union[str, Path],
         output_path: Optional[Union[str, Path]] = None,
         batch_size: int = 4,
     ) -> None:
+        """
+        動画ファイルに対して予測を実行し、結果を出力します。
+
+        Args:
+            input_path: 入力動画のパス
+            output_path: 出力動画のパス
+            batch_size: バッチサイズ
+        """
         cap = cv2.VideoCapture(str(input_path))
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open video: {input_path}")
@@ -489,13 +335,49 @@ class BallPredictor:
                         clip_buffer, last_frames, writer, w_org, h_org, pbar
                     )
         finally:
-            # 並列処理を使用している場合は終了処理
-            if self.use_parallel:
-                self.shutdown_parallel_processing()
-                
             if writer:
                 writer.release()
             cap.release()
+            
+    def _process_and_write(self, clip_buffer, last_frames, writer, w_org, h_org, pbar):
+        """
+        バッチ処理して結果を書き出します。
+        
+        Args:
+            clip_buffer: クリップのバッファ
+            last_frames: 最終フレームのリスト
+            writer: 動画書き込みオブジェクト
+            w_org: 元の幅
+            h_org: 元の高さ
+            pbar: 進捗バー
+        """
+        if self.visualize_mode == "features":
+            # 特徴抽出モード
+            feats = self.extract_features(clip_buffer)
+            feature_frames = self.visualize_features(feats, (w_org, h_org))
+            for vf in feature_frames:
+                if writer:
+                    writer.write(vf)
+                pbar.update(1)
+        elif self.visualize_mode == "heatmap":
+            # ヒートマップモード
+            batch = self.preprocess(clip_buffer)
+            preds = self.inference(batch)
+            heatmap_frames = self.visualize_heatmaps(preds, (w_org, h_org))
+            for hm in heatmap_frames:
+                if writer:
+                    writer.write(hm)
+                pbar.update(1)
+        else:
+            # 通常の予測モード
+            results = self.predict(clip_buffer)
+            for result, last_frame in zip(results, last_frames, strict=False):
+                out_frame = last_frame.copy()
+                if result["confidence"] >= self.threshold:
+                    out_frame = self.overlay(out_frame, result)
+                if writer:
+                    writer.write(out_frame)
+                pbar.update(1)
 
     def _argmax_coord(self, heat: np.ndarray) -> Tuple[int, int]:
         """2次元のヒートマップから最も確率が高い座標を取得"""
