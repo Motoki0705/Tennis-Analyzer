@@ -27,7 +27,8 @@ class EventDataset(Dataset):
     - player_bbox_features: プレイヤーのBBox特徴量 [T, max_players, 5] (正規化済みx1, y1, x2, y2 + スコア)
     - player_pose_features: プレイヤーのポーズ特徴量 [T, max_players, num_keypoints*3] (正規化済み座標 + 可視性)
     - court_features: コートの特徴量 [T, num_keypoints*3] (正規化済み座標 + 可視性)
-    - target: イベントステータス [T] または スカラー
+    - target: イベントステータス [T, 2] (バウンド、ヒットのマルチラベル)
+            no_hit=(0,0), hit=(1,0), bounce=(0,1)の2チャンネル形式
     - image_info: 最後のフレームの画像情報
     """
 
@@ -136,7 +137,7 @@ class EventDataset(Dataset):
         player_bbox_features_list = []  # プレイヤーBBox+スコア: (x1, y1, x2, y2, score)
         player_pose_features_list = []  # プレイヤーポーズ: キーポイント
         court_features = []  # コートキーポイント+スコア: (kp_x, kp_y, ..., score)
-        event_statuses = []  # イベントステータス: int
+        event_statuses = []  # イベントステータス: (hit, bounce)の2チャネル
         
         # 全フレームで見つかったプレイヤーの最大数
         max_players_count = 0
@@ -168,14 +169,25 @@ class EventDataset(Dataset):
                     ball_score = 1.0 if v == 2 else 0.5
                 
                 ball_feat = torch.tensor([x_norm, y_norm, ball_score], dtype=torch.float32)
-                # イベントステータスの取得（マッピングなしでそのまま使用）
+                # イベントステータスの取得
                 event_status = self.event_status_by_image.get(img_id, 0)
+                
+                # event_statusを2チャンネルの形式に変換
+                # no_hit(0): [0, 0], hit(1): [1, 0], bounce(2): [0, 1]
+                if event_status == 0:  # no_hit
+                    event_status_vec = [0, 0]
+                elif event_status == 1:  # hit
+                    event_status_vec = [1, 0]
+                elif event_status == 2:  # bounce
+                    event_status_vec = [0, 1]
+                else:  # その他（ネットなど）
+                    event_status_vec = [0, 0]
             else:
                 ball_feat = torch.zeros(3, dtype=torch.float32)
-                event_status = 0  # デフォルト値
+                event_status_vec = [0, 0]  # デフォルト値
             
             ball_features.append(ball_feat)
-            event_statuses.append(event_status)
+            event_statuses.append(event_status_vec)
             
             # 2. プレイヤーの特徴抽出（すべてのプレイヤー）と正規化
             player_anns = self.player_anns_by_image.get(img_id, [])
@@ -319,14 +331,14 @@ class EventDataset(Dataset):
             player_bbox_tensor = torch.zeros((self.T, 0, 5), dtype=torch.float32)
             player_pose_tensor = torch.zeros((self.T, 0, pose_feat_dim), dtype=torch.float32)
         
-        # イベントステータスをテンソル化
-        event_status_tensor = torch.tensor(event_statuses, dtype=torch.long)  # [T]
+        # イベントステータスをテンソル化（2チャンネル形式）
+        event_status_tensor = torch.tensor(event_statuses, dtype=torch.float32)  # [T, 2]
         
         # 出力フォーマット
         if self.output_type == "all":
-            target_tensor = event_status_tensor  # [T]
+            target_tensor = event_status_tensor  # [T, 2]
         else:  # "last"
-            target_tensor = event_status_tensor[-1]  # スカラー
+            target_tensor = event_status_tensor[-1]  # [2]
         
         # 最後のフレームの画像情報を返す
         last_img_id = frame_ids[-1]
