@@ -1,0 +1,21 @@
+# イベント検出用 LightningModule設定
+module:
+  _target_: src.event.lit_module.event_detection_lit_module.EventDetectionLitModule
+
+  # モデルは外部で定義されたものを参照
+  # model: ${model} # 循環参照が発生するため削除
+
+  # クラス定義
+  num_classes: 4  # イベントステータスの数
+
+  # 学習パラメータ
+  lr: 1e-3
+  weight_decay: 1e-4
+  warmup_epochs: 5
+  max_epochs: ${trainer.max_epochs}
+
+  # クラス重みの設定（オプション）
+  # class_weights: [1.0, 2.0, 2.0, 2.0]  # 必要に応じて調整
+
+meta:
+  name: event_detection 

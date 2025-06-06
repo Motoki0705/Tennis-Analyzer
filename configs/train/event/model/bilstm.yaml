@@ -1,0 +1,17 @@
+# BiLSTMモデル設定
+net:
+  _target_: src.event.models.event_model.EventRNNModel
+
+  # モデル構成パラメータ
+  model_type: "bilstm"
+  hidden_dim: 256
+  num_layers: 2
+  dropout: 0.2
+  bidirectional: true
+  
+  # バックボーン関連のパラメータはDataModuleから自動取得されます
+
+# メタ情報をまとめる
+meta:
+  name: bilstm
+  output_type: "sequence" 

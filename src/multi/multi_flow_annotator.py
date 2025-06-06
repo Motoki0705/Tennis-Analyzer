@@ -436,38 +436,6 @@ class MultiFlowAnnotator:
                 # プレーヤー検出カウントを増やす
                 self.processed_tasks["player"] += 1
 
-    def _add_player_annotations(self, image_id: int, player_results: List[Dict]):
-        """
-        プレーヤーアノテーションを追加する（ポーズなしの検出のみ）
-        
-        Args:
-            image_id: 画像ID
-            player_results: プレーヤー検出結果
-        """
-        if not player_results:
-            return
-        
-        for res in player_results:
-            bbox = res.get("bbox")
-            score = res.get("score", 0.0)
-            if not bbox:
-                continue
-                
-            ann = {
-                "id": self.annotation_id_counter,
-                "image_id": image_id,
-                "category_id": PLAYER_CATEGORY["id"],
-                "bbox": [float(b) for b in bbox],
-                "area": float(bbox[2] * bbox[3]),
-                "iscrowd": 0,
-                "score": float(score),
-            }
-            
-            with self.annotation_lock:
-                self.coco_output["annotations"].append(ann)
-                self.annotation_id_counter += 1
-                self.processed_tasks["player"] += 1
-
     def _extract_game_clip_ids(self, img_path: Path) -> Tuple[Optional[int], Optional[int]]:
         """
         パスからゲームIDとクリップIDを抽出する

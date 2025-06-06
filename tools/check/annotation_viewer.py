@@ -175,7 +175,7 @@ def main():
     parser.add_argument(
         '--annotation', '-a', 
         required=False, 
-        default='datasets/ball/image_annotations_2025-06-05_08-55-52.json',
+        default='datasets/event/coco_annotations_ball_pose_court_event_status.json',
         help='COCO形式のアノテーションファイルパス'
     )
     parser.add_argument(

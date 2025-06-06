@@ -1,0 +1,26 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  - model: transformer
+  
+  # LightningModuleの選択
+  - litmodule: event_detection
+  
+  - litdatamodule: event_data
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# 実験名（ディレクトリ名）の設定
+# モデル名とデータセットタイプから自動生成
+version: ${model.meta.name}_${litdatamodule.output_type}
+
+# 再現性のための乱数シード
+seed: 42 
