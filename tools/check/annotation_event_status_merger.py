@@ -96,17 +96,20 @@ def main():
     )
     parser.add_argument(
         '--source', '-s', 
-        required=True, 
+        required=False, 
+        default='datasets/ball/coco_annotations_ball_pose_court.json',
         help='event_statusを取得する既存のCOCOファイル（datasets/ball/coco_annotations_ball_pose_court.json）'
     )
     parser.add_argument(
         '--target', '-t', 
-        required=True, 
+        required=False, 
+        default='datasets/ball/image_annotations_2025-06-05_08-55-52.json',
         help='event_statusを追加する新しく生成されたCOCOファイル（ImageAnnotatorで生成されたファイル）'
     )
     parser.add_argument(
         '--output', '-o', 
-        required=True,
+        required=False,
+        default='datasets/ball/coco_annotations_ball_pose_court_event_status.json',
         help='出力ファイルパス'
     )
     parser.add_argument(

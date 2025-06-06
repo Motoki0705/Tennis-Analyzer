@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Dict, Tuple, Optional, Any
 
 import cv2
 import numpy as np
@@ -59,21 +59,37 @@ class PosePredictor:
         self.pose_score_thresh = pose_score_thresh
         self.use_half = use_half
 
-    def predict(self, frames: List[np.ndarray]) -> List[List[dict]]:
+    def preprocess_detection(self, frames: List[np.ndarray]) -> Dict[str, torch.Tensor]:
         """
-        frames: List of BGR np.ndarray
-        returns: List (per frame) of List of {"bbox": [x0,y0,w,h], "keypoints": [...], "scores": [...]}
+        物体検出（DETR）のための前処理を行います。
+        
+        Args:
+            frames: 入力フレームリスト（BGR形式）
+            
+        Returns:
+            前処理済みの入力テンソル
         """
-        if not frames:
-            return []
-
-        # DETR への入力生成
+        # RGB変換
         batch_rgb = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames]
+        
+        # DETR入力生成
         det_inputs = self.det_processor(images=batch_rgb, return_tensors="pt").to(
             self.device
         )
+        
+        return det_inputs
 
-        # DETR 推論
+    def inference_detection(self, det_inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        物体検出（DETR）の推論を実行します。
+        
+        Args:
+            det_inputs: 前処理済みの入力テンソル
+            
+        Returns:
+            DETRモデルの出力
+        """
+        # DETR推論
         if self.use_half:
             with (
                 torch.no_grad(),
@@ -83,23 +99,41 @@ class PosePredictor:
         else:
             with torch.no_grad():
                 det_outputs = self.det_model(pixel_values=det_inputs["pixel_values"])
+        
+        return det_outputs
 
-        # 後処理：バウンディングボックス抽出
+    def postprocess_detection(
+        self, det_outputs: Dict[str, torch.Tensor], frames: List[np.ndarray]
+    ) -> Tuple[List[List[List[int]]], List[List[float]], List[int], List[Image.Image]]:
+        """
+        物体検出（DETR）の後処理を行います。
+        
+        Args:
+            det_outputs: DETRモデルの出力
+            frames: 元の入力フレーム
+            
+        Returns:
+            batch_boxes: バウンディングボックスのリスト
+            batch_scores: 検出スコアのリスト
+            batch_valid: 有効なフレームインデックスのリスト
+            images_for_pose: ポーズ推定用画像のリスト
+        """
+        # バウンディングボックス抽出
         target_sizes = [f.shape[:2] for f in frames]
         det_results = self.det_processor.post_process_object_detection(
             det_outputs, threshold=self.det_score_thresh, target_sizes=target_sizes
         )
-
+        
         # 各フレームごとの bbox, score, valid index, pose 用画像を蓄積
         batch_boxes = []
         batch_scores = []
         batch_valid = []
         images_for_pose = []
-
+        
         for idx, (frame, detections) in enumerate(zip(frames, det_results, strict=False)):
             frame_boxes = []
-            frame_scores = []  # ← ここを追加
-
+            frame_scores = []
+            
             for score, label, box in zip(
                 detections["scores"], detections["labels"], detections["boxes"], strict=False
             ):
@@ -107,36 +141,81 @@ class PosePredictor:
                     x0, y0, x1, y1 = box.int().tolist()
                     w, h = x1 - x0, y1 - y0
                     frame_boxes.append([x0, y0, w, h])
-                    frame_scores.append(float(score))  # ← ここを変更
-
+                    frame_scores.append(float(score))
+            
             if frame_boxes:
                 batch_boxes.append(frame_boxes)
-                batch_scores.append(frame_scores)  # ← ここを追加
+                batch_scores.append(frame_scores)
                 batch_valid.append(idx)
                 images_for_pose.append(
                     Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 )
+        
+        return batch_boxes, batch_scores, batch_valid, images_for_pose
 
-        # プレーヤー検出が一件もない場合は全フレーム空リスト
-        if not images_for_pose:
-            return [[] for _ in frames]
-
-        # ViTPose への入力生成
+    def preprocess_pose(
+        self, images_for_pose: List[Image.Image], batch_boxes: List[List[List[int]]]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        ポーズ推定（ViTPose）のための前処理を行います。
+        
+        Args:
+            images_for_pose: ポーズ推定用画像のリスト
+            batch_boxes: バウンディングボックスのリスト
+            
+        Returns:
+            前処理済みの入力テンソル
+        """
+        # ViTPose入力生成
         pose_inputs = self.pose_processor(
             images=images_for_pose, boxes=batch_boxes, return_tensors="pt"
         ).to(self.device)
+        
+        return pose_inputs
 
-        # ViTPose 推論
+    def inference_pose(self, pose_inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        ポーズ推定（ViTPose）の推論を実行します。
+        
+        Args:
+            pose_inputs: 前処理済みの入力テンソル
+            
+        Returns:
+            ViTPoseモデルの出力
+        """
         with torch.no_grad():
             pose_outputs = self.pose_model(**pose_inputs)
+        
+        return pose_outputs
 
-        # 後処理：キーポイント抽出
+    def postprocess_pose(
+        self,
+        pose_outputs: Dict[str, torch.Tensor],
+        batch_boxes: List[List[List[int]]],
+        batch_scores: List[List[float]],
+        batch_valid: List[int],
+        num_frames: int,
+    ) -> List[List[Dict]]:
+        """
+        ポーズ推定（ViTPose）の後処理を行います。
+        
+        Args:
+            pose_outputs: ViTPoseモデルの出力
+            batch_boxes: バウンディングボックスのリスト
+            batch_scores: 検出スコアのリスト
+            batch_valid: 有効なフレームインデックスのリスト
+            num_frames: 入力フレームの総数
+            
+        Returns:
+            検出結果のリスト
+        """
+        # キーポイント抽出
         pose_results = self.pose_processor.post_process_pose_estimation(
             pose_outputs, boxes=batch_boxes
         )
-
+        
         # 出力形式に整形
-        batch_result: List[List[dict]] = [[] for _ in frames]
+        batch_result: List[List[Dict]] = [[] for _ in range(num_frames)]
         for idx, poses, boxes, det_scores in zip(
             batch_valid, pose_results, batch_boxes, batch_scores, strict=False
         ):
@@ -155,10 +234,34 @@ class PosePredictor:
                     }
                 )
             batch_result[idx] = frame_objs
-
+        
         return batch_result
 
-    def overlay(self, frame: np.ndarray, detections: List[dict]) -> np.ndarray:
+    def predict(self, frames: List[np.ndarray]) -> List[List[Dict]]:
+        """
+        frames: List of BGR np.ndarray
+        returns: List (per frame) of List of {"bbox": [x0,y0,w,h], "keypoints": [...], "scores": [...]}
+        """
+        if not frames:
+            return []
+
+        # 物体検出（DETR）
+        det_inputs = self.preprocess_detection(frames)
+        det_outputs = self.inference_detection(det_inputs)
+        batch_boxes, batch_scores, batch_valid, images_for_pose = self.postprocess_detection(det_outputs, frames)
+        
+        # プレーヤー検出が一件もない場合は全フレーム空リスト
+        if not images_for_pose:
+            return [[] for _ in frames]
+        
+        # ポーズ推定（ViTPose）
+        pose_inputs = self.preprocess_pose(images_for_pose, batch_boxes)
+        pose_outputs = self.inference_pose(pose_inputs)
+        batch_result = self.postprocess_pose(pose_outputs, batch_boxes, batch_scores, batch_valid, len(frames))
+        
+        return batch_result
+
+    def overlay(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
         """
         frame: BGR np.ndarray
         detections: predict() の 1 フレーム分の結果

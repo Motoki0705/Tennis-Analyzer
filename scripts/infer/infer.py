@@ -346,7 +346,7 @@ def main(cfg: DictConfig):
             logger.info(f"[frames] Dir: {out_path}, JSONL: {jsonl_path}")
             frames_ann.run(inp, out_path, jsonl_path)
             
-        else:  # image
+        elif mode == "image":  # image
             # ImageAnnotator
             from src.multi.image_annotator import ImageAnnotator
             
@@ -367,11 +367,31 @@ def main(cfg: DictConfig):
             logger.info(f"[image] Input Dir: {inp}, Output JSON: {json_path}")
             image_ann.run(inp, json_path)
 
+        else:
+            from src.multi.multi_flow_annotator import MultiFlowAnnotator
+
+            multi_flow_ann = MultiFlowAnnotator(
+                ball_predictor=ball_pred,
+                court_predictor=court_pred,
+                pose_predictor=pose_pred,
+                batch_sizes=cfg.predictors.get("image_annotator", {}).get("batch_sizes", {"ball": 16, "court": 16, "pose": 16}),
+                ball_vis_thresh=cfg.predictors.ball.threshold,
+                court_vis_thresh=cfg.predictors.court.threshold,
+                pose_vis_thresh=cfg.predictors.pose.pose_score_thresh,
+            )
+            
+            # 出力JSONパスの設定
+            json_cfg = cfg.get("output_json_path")
+            json_path = Path(to_absolute_path(json_cfg)) if json_cfg else Path(f"outputs/image_annotations_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+            
+            logger.info(f"[image] Input Dir: {inp}, Output JSON: {json_path}")
+            multi_flow_ann.run(inp, json_path)
+
         logger.info("Finished.")
         return
 
     logger.error(f"Unknown mode: {mode}")
 
-
+ 
 if __name__ == "__main__":
     main()
