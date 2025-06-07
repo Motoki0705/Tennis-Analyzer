@@ -8,6 +8,7 @@ Hydra-driven Inference System for Tennis Analyzer
 - court  : コート 15 キーポイント検出
 - player : プレーヤー検出
 - pose   : 検出器＋ViT-Pose による姿勢推定
+- event  : ボール、プレイヤー、コートの特徴からイベント（ヒット、バウンド）検出
 - multi  : ball + court + pose を同時にオーバレイ
 - frames : 各フレームを推論し JSONL へ書き出し
 - image  : 画像ディレクトリ内の画像に対して推論し、JSONのみ出力
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 def _get_model_cfg(cfg: DictConfig, task: str) -> DictConfig:
     """
     `cfg.<task>` があればそれを、なければ `cfg._group_[task]` を返す。
-    ─ task: 'ball' | 'court' | 'player' | 'pose'
+    ─ task: 'ball' | 'court' | 'player' | 'pose' | 'event'
     """
     if task in cfg:
         return cfg[task]
@@ -175,7 +176,7 @@ def get_predictor(
     cfg: DictConfig, mode: str, cache: Dict[str, torch.nn.Module] | None = None
 ):
     """
-    単一モード(ball / court / player / pose)用 Predictor を返す。
+    単一モード(ball / court / player / pose / event)用 Predictor を返す。
     既に生成済みモデルは `cache` から再利用。
     """
     if cache is None:
@@ -220,6 +221,12 @@ def get_predictor(
             pose_processor=pose_proc,
             device=device,
             use_half=use_half,
+        )
+        
+    if mode == "event":
+        cache.setdefault("event", instantiate_model(cfg, "event").to(device))
+        return instantiate(
+            cfg.predictors.event, model=cache["event"], device=device, use_half=use_half
         )
 
     raise ValueError(f"Unsupported mode: {mode}")
@@ -297,13 +304,22 @@ def main(cfg: DictConfig):
     device = cfg.common.device
 
     # ─── 単一モード ───────────────────────────
-    if mode in ("ball", "court", "player", "pose"):
+    if mode in ("ball", "court", "player", "pose", "event"):
         predictor = get_predictor(cfg, mode)
         if not out_path:
             sel = Path(_get_model_cfg(cfg, mode)._target_.split(".")[-1]).stem
             out_path = inp.with_name(f"{inp.stem}_{mode}_{sel}.mp4")
         logger.info(f"[{mode}] → {out_path}")
-        predictor.run(inp, out_path, batch_size=batch)
+        
+        # eventモードの場合はjson出力パスも設定
+        if mode == "event":
+            json_cfg = cfg.get("output_json_path")
+            json_path = Path(to_absolute_path(json_cfg)) if json_cfg else out_path.with_suffix(".json")
+            logger.info(f"[{mode}] JSON → {json_path}")
+            predictor.run(inp, out_path, json_output_path=json_path, batch_size=batch)
+        else:
+            predictor.run(inp, out_path, batch_size=batch)
+            
         logger.info("Finished.")
         return
 

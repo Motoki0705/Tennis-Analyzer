@@ -1,35 +1,63 @@
 import json
-import os
 import random
 from collections import defaultdict
-from pathlib import Path
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, List, Dict
 
-import albumentations as A
 import numpy as np
 import torch
-from PIL import Image, UnidentifiedImageError
 from torch.utils.data import Dataset
 
+
+# --------------------------------------------------
+# ソフトターゲット生成ユーティリティ
+# --------------------------------------------------
+def create_soft_target(
+    event_statuses: List[List[int]],
+    sigma: float = 1.5,
+    clip: float = 1.0,
+) -> torch.Tensor:
+    """
+    スパースなイベントラベル（[T, 2] one-hot）を
+    ガウス状に時間方向へ拡散し、滑らかなターゲットに変換する。
+
+    Args:
+        event_statuses: [[hit,bounce], …] 形のリスト（要素は0/1）
+        sigma        : ガウス分布の標準偏差（フレーム単位）
+        clip         : 最大値をどこでクリップするか（0–1）
+
+    Returns:
+        torch.FloatTensor [T, 2]
+    """
+    T = len(event_statuses)
+    soft = np.zeros((T, 2), dtype=np.float32)
+
+    radius = int(3 * sigma)  # 有効範囲 ≈ ±3σ
+    for t, (hit, bounce) in enumerate(event_statuses):
+        for cls, flag in enumerate((hit, bounce)):
+            if flag == 0:
+                continue
+            for dt in range(-radius, radius + 1):
+                tt = t + dt
+                if 0 <= tt < T:
+                    weight = np.exp(-(dt**2) / (2 * sigma**2))
+                    soft[tt, cls] += weight
+
+    # 最大値を 1.0 に正規化してクリップ
+    soft = np.clip(soft / soft.max(initial=1.0), 0.0, clip)
+    return torch.from_numpy(soft)
+
+
+# --------------------------------------------------
+# EventDataset
+# --------------------------------------------------
 class EventDataset(Dataset):
     """
-    EventDataset
-    ------------
-    時系列データからボールのイベント状態を予測するためのデータセット。
-    入力として:
-    - ボールの中心座標とスコア
-    - プレーヤーのbboxとスコア + poseキーポイント（すべてplayerカテゴリに含まれる）
-    - コートのキーポイントとスコア
-    を使用し、ボールカテゴリのevent_statusを出力します。
-    
-    返り値:
-    - ball_features: ボールの特徴量 [T, 3] (正規化済みx, y座標 + スコア)
-    - player_bbox_features: プレイヤーのBBox特徴量 [T, max_players, 5] (正規化済みx1, y1, x2, y2 + スコア)
-    - player_pose_features: プレイヤーのポーズ特徴量 [T, max_players, num_keypoints*3] (正規化済み座標 + 可視性)
-    - court_features: コートの特徴量 [T, num_keypoints*3] (正規化済み座標 + 可視性)
-    - target: イベントステータス [T, 2] (バウンド、ヒットのマルチラベル)
-            no_hit=(0,0), hit=(1,0), bounce=(0,1)の2チャンネル形式
-    - image_info: 最後のフレームの画像情報
+    シーケンスから
+        * ball_features      [T, 3]
+        * player_bbox_feats  [T, max_players, 5]
+        * player_pose_feats  [T, max_players, K*3]
+        * court_features     [T, C*3]
+    を生成し、スムージング済みターゲット (hit, bounce) を返す。
     """
 
     def __init__(
@@ -41,322 +69,197 @@ class EventDataset(Dataset):
         train_ratio: float = 0.8,
         val_ratio: float = 0.1,
         seed: int = 42,
-        output_type: str = "all",  # "all" or "last"
+        output_type: str = "all",          # {"all", "last"}
         skip_frames_range: Tuple[int, int] = (1, 5),
+        smoothing_sigma: float = 1.5,      # ★ 追加：ターゲット平滑化用 σ
     ):
         assert output_type in {"all", "last"}
-
         self.T = T
         self.split = split
         self.skip_min, self.skip_max = skip_frames_range
         self.output_type = output_type
+        self.sigma = smoothing_sigma
 
-        # --- JSON 読み込み ---
+        # ---------- アノテーション読み込み ----------
         with open(annotation_file, "r") as f:
             data = json.load(f)
-        
-        self.images = {img["id"]: img for img in data["images"]}
-        
-        # カテゴリごとのアノテーション分類
-        self.ball_anns_by_image = {}
-        self.player_anns_by_image = defaultdict(list)
-        self.court_anns_by_image = {}
-        self.event_status_by_image = {}
-        
-        # カテゴリIDの特定（データにより異なる可能性あり）
-        category_ids = {cat["name"]: cat["id"] for cat in data["categories"]}
-        ball_id = category_ids.get("ball", 1)
-        player_id = category_ids.get("player", 2)
-        court_id = category_ids.get("court", 3)
-        
+
+        self.images: Dict[int, dict] = {img["id"]: img for img in data["images"]}
+        self.ball_anns_by_image: Dict[int, dict] = {}
+        self.player_anns_by_image: Dict[int, list] = defaultdict(list)
+        self.court_anns_by_image: Dict[int, dict] = {}
+        self.event_status_by_image: Dict[int, int] = {}
+
+        cat_ids = {c["name"]: c["id"] for c in data["categories"]}
+        ball_id = cat_ids.get("ball", 1)
+        player_id = cat_ids.get("player", 2)
+        court_id = cat_ids.get("court", 3)
+
         for ann in data["annotations"]:
             img_id = ann["image_id"]
-            cat_id = ann["category_id"]
-            
-            if cat_id == ball_id:
+            cid = ann["category_id"]
+            if cid == ball_id:
                 self.ball_anns_by_image[img_id] = ann
                 if "event_status" in ann:
                     self.event_status_by_image[img_id] = ann["event_status"]
-            elif cat_id == player_id:
+            elif cid == player_id:
                 self.player_anns_by_image[img_id].append(ann)
-            elif cat_id == court_id:
+            elif cid == court_id:
                 self.court_anns_by_image[img_id] = ann
-        
-        # クリップ単位のグループ化
-        clip_groups = defaultdict(list)
+
+        # ---------- クリップ単位のグループ化 ----------
+        clip_groups: Dict[Tuple[int, int], List[int]] = defaultdict(list)
         for img in data["images"]:
             key = (img["game_id"], img["clip_id"])
             clip_groups[key].append(img["id"])
+        self.clip_groups = clip_groups
 
-        # クリップ単位 Split
-        clip_keys = list(clip_groups.keys())
-        train_keys, val_keys, test_keys = (
-            self.group_split_clip(clip_keys, train_ratio, val_ratio, seed)
-            if use_group_split
-            else self.group_split_clip(clip_keys, train_ratio, val_ratio, seed)
-        )
-        target_keys = {"train": train_keys, "val": val_keys, "test": test_keys}[split]
+        keys = list(clip_groups.keys())
+        train_k, val_k, test_k = self.group_split_clip(keys, train_ratio, val_ratio, seed)
+        target_keys = {"train": train_k, "val": val_k, "test": test_k}[split]
 
-        # スライディングウィンドウ
-        self.windows = []
+        # ---------- スライディングウィンドウ ----------
+        self.windows: List[Tuple[Tuple[int, int], int]] = []
         for key in target_keys:
             ids_sorted = sorted(clip_groups[key])
             if len(ids_sorted) < T:
                 continue
-            for start in range(0, len(ids_sorted) - T + 1):
-                self.windows.append((key, start))
+            for s in range(0, len(ids_sorted) - T + 1):
+                self.windows.append((key, s))
 
-        self.clip_groups = clip_groups
-        print(
-            f"[{split.upper()}] clips: {len(target_keys)}, windows: {len(self.windows)}"
-        )
+        print(f"[{split.upper()}] clips: {len(target_keys)}, windows: {len(self.windows)}")
+
+    # --------------------------------------------------
 
     def __len__(self):
         return len(self.windows)
-    
+
     def __getitem__(self, idx):
         clip_key, start = self.windows[idx]
         ids_sorted = sorted(self.clip_groups[clip_key])
         L = len(ids_sorted)
 
-        # --- フレーム間 skip（訓練時のみ） ---
-        if (
-            self.T > 1
-            and self.split == "train"
-            and (self.skip_min, self.skip_max) != (1, 1)
-        ):
+        # フレーム skip
+        if self.T > 1 and self.split == "train" and (self.skip_min, self.skip_max) != (1, 1):
             max_allowed = (L - 1 - start) // (self.T - 1)
-            skip_upper = min(self.skip_max, max_allowed) if max_allowed > 0 else 1
-            skip = random.randint(self.skip_min, skip_upper)
+            skip = random.randint(self.skip_min, min(self.skip_max, max_allowed) or 1)
             frame_ids = [ids_sorted[start + i * skip] for i in range(self.T)]
         else:
-            frame_ids = ids_sorted[start : start + self.T]
+            frame_ids = ids_sorted[start:start + self.T]
 
-        # 各フレームの特徴量を格納するリスト
-        ball_features = []  # ボール座標+スコア: (x, y, score)
-        player_bbox_features_list = []  # プレイヤーBBox+スコア: (x1, y1, x2, y2, score)
-        player_pose_features_list = []  # プレイヤーポーズ: キーポイント
-        court_features = []  # コートキーポイント+スコア: (kp_x, kp_y, ..., score)
-        event_statuses = []  # イベントステータス: (hit, bounce)の2チャネル
-        
-        # 全フレームで見つかったプレイヤーの最大数
-        max_players_count = 0
-        
-        # 最初のパスでプレイヤー数の最大値を計算
+        # ---------- 各フレームの特徴量抽出 ----------
+        ball_feats, player_bbox_lst, player_pose_lst, court_feats, event_labels = \
+            self._extract_sequence_features(frame_ids)
+
+        # stack / padding
+        ball_tensor = torch.stack(ball_feats)                       # [T, 3]
+        court_tensor = torch.stack(court_feats)                     # [T, C*3]
+        player_bbox_tensor, player_pose_tensor = self._pad_player_features(player_bbox_lst, player_pose_lst)
+
+        # ---------- スムージングターゲット ----------
+        target_tensor = create_soft_target(event_labels, sigma=self.sigma)   # [T, 2]
+        if self.output_type == "last":
+            target_tensor = target_tensor[-1]                                  # [2]
+
+        last_img_info = self.images[frame_ids[-1]].copy()
+        last_img_info["id"] = frame_ids[-1]
+
+        return ball_tensor, player_bbox_tensor, player_pose_tensor, court_tensor, target_tensor, last_img_info
+
+    # --------------------------------------------------
+    # 内部ユーティリティ
+    # --------------------------------------------------
+    def _extract_sequence_features(self, frame_ids):
+        ball_feats, player_bbox_lst, player_pose_lst, court_feats, event_labels = [], [], [], [], []
+        max_players = 0
+
+        # 1st pass: 最大プレイヤー数
         for img_id in frame_ids:
-            player_anns = self.player_anns_by_image.get(img_id, [])
-            max_players_count = max(max_players_count, len(player_anns))
-        
-        # 各フレームの特徴を抽出
-        for i, img_id in enumerate(frame_ids):
-            img_info = self.images[img_id]
-            img_width = img_info["width"]
-            img_height = img_info["height"]
-            
-            # 1. ボールの特徴抽出と正規化
-            ball_ann = self.ball_anns_by_image.get(img_id)
-            if ball_ann is not None:
-                x, y, v = ball_ann["keypoints"][:3]
-                # 座標を画像サイズで正規化
-                x_norm = x / img_width
-                y_norm = y / img_height
-                
-                # キーポイントスコアを使用
-                ball_score = 0.0
-                if "keypoints_scores" in ball_ann and ball_ann["keypoints_scores"]:
-                    ball_score = float(ball_ann["keypoints_scores"][0])
-                elif v > 0:  # キーポイントスコアがない場合は可視性に基づいてスコアを設定
-                    ball_score = 1.0 if v == 2 else 0.5
-                
-                ball_feat = torch.tensor([x_norm, y_norm, ball_score], dtype=torch.float32)
-                # イベントステータスの取得
-                event_status = self.event_status_by_image.get(img_id, 0)
-                
-                # event_statusを2チャンネルの形式に変換
-                # no_hit(0): [0, 0], hit(1): [1, 0], bounce(2): [0, 1]
-                if event_status == 0:  # no_hit
-                    event_status_vec = [0, 0]
-                elif event_status == 1:  # hit
-                    event_status_vec = [1, 0]
-                elif event_status == 2:  # bounce
-                    event_status_vec = [0, 1]
-                else:  # その他（ネットなど）
-                    event_status_vec = [0, 0]
-            else:
-                ball_feat = torch.zeros(3, dtype=torch.float32)
-                event_status_vec = [0, 0]  # デフォルト値
-            
-            ball_features.append(ball_feat)
-            event_statuses.append(event_status_vec)
-            
-            # 2. プレイヤーの特徴抽出（すべてのプレイヤー）と正規化
-            player_anns = self.player_anns_by_image.get(img_id, [])
-            frame_bbox_features = []
-            frame_pose_features = []
-            
-            for p_ann in player_anns:
-                # a. BBox特徴（正規化）
-                x1, y1, w, h = p_ann["bbox"]
-                x2, y2 = x1 + w, y1 + h
-                # 座標を画像サイズで正規化
-                x1_norm = x1 / img_width
-                y1_norm = y1 / img_height
-                x2_norm = x2 / img_width
-                y2_norm = y2 / img_height
-                # スコアの取得
-                player_score = float(p_ann.get("score", 1.0))
-                bbox_feat = torch.tensor([x1_norm, y1_norm, x2_norm, y2_norm, player_score], dtype=torch.float32)
-                frame_bbox_features.append(bbox_feat)
-                
-                # b. Poseキーポイント特徴（正規化）
-                keypoints = p_ann["keypoints"]
-                keypoints_scores = p_ann.get("keypoints_scores", [])
-                
-                keypoints_norm = []
-                for i in range(0, len(keypoints), 3):
-                    kp_x, kp_y, kp_v = keypoints[i:i+3]
-                    # 座標を正規化
-                    kp_x_norm = kp_x / img_width
-                    kp_y_norm = kp_y / img_height
-                    
-                    # キーポイントスコアがある場合は可視性を更新
-                    if keypoints_scores and i//3 < len(keypoints_scores):
-                        kp_score = keypoints_scores[i//3]
-                        # 可視性の設定
-                        if kp_score >= 0.5:
-                            kp_v = 2
-                        elif kp_score > 0.01:
-                            kp_v = 1
-                        else:
-                            kp_v = 0
-                    
-                    keypoints_norm.extend([kp_x_norm, kp_y_norm, kp_v])
-                
-                keypoints_tensor = torch.tensor(keypoints_norm, dtype=torch.float32)
-                frame_pose_features.append(keypoints_tensor)
-            
-            player_bbox_features_list.append(frame_bbox_features)
-            player_pose_features_list.append(frame_pose_features)
-            
-            # 3. コートの特徴抽出と正規化
-            court_ann = self.court_anns_by_image.get(img_id)
-            if court_ann is not None:
-                keypoints = court_ann["keypoints"]
-                keypoints_scores = court_ann.get("keypoints_scores", [])
-                
-                keypoints_norm = []
-                for i in range(0, len(keypoints), 3):
-                    kp_x, kp_y, kp_v = keypoints[i:i+3]
-                    # 座標を正規化
-                    kp_x_norm = kp_x / img_width
-                    kp_y_norm = kp_y / img_height
-                    
-                    # キーポイントスコアがある場合は可視性を更新
-                    if keypoints_scores and i//3 < len(keypoints_scores):
-                        kp_score = keypoints_scores[i//3]
-                        # 可視性の設定
-                        if kp_score >= 0.6:  # コート用の閾値
-                            kp_v = 2
-                        elif kp_score > 0.01:
-                            kp_v = 1
-                        else:
-                            kp_v = 0
-                    
-                    keypoints_norm.extend([kp_x_norm, kp_y_norm, kp_v])
-                
-                # すべてのキーポイントを平坦化
-                keypoints_flat = torch.tensor(keypoints_norm, dtype=torch.float32)
-                court_feat = keypoints_flat
-            else:
-                # コートキーポイント数 * 3
-                court_keypoints_count = 15  # 一般的なコートキーポイント数
-                court_feat = torch.zeros(court_keypoints_count * 3, dtype=torch.float32)
-            
-            court_features.append(court_feat)
-        
-        # 時系列特徴量をスタック
-        ball_tensor = torch.stack(ball_features)  # [T, 3]
-        court_tensor = torch.stack(court_features)  # [T, court_keypoints_count*3]
-        
-        # プレイヤーのBBox特徴とポーズ特徴を別々に処理
-        # BBox特徴の次元: 5 (x1, y1, x2, y2, score)
-        # ポーズ特徴の次元: キーポイント数 * 3 (例: 17 keypoints * 3 = 51)
-        
-        # 最初のプレイヤーと最初のフレームからポーズキーポイントの次元を取得
-        pose_feat_dim = 0
-        if player_pose_features_list and player_pose_features_list[0]:
-            pose_feat_dim = player_pose_features_list[0][0].shape[0]
-        
-        # 各フレームのプレイヤー特徴をパディング
-        padded_bbox_features = []
-        padded_pose_features = []
-        
-        for frame_idx in range(self.T):
-            # 現在のフレームのプレイヤー数
-            if frame_idx < len(player_bbox_features_list):
-                frame_bbox = player_bbox_features_list[frame_idx]
-                frame_pose = player_pose_features_list[frame_idx]
-                num_players = len(frame_bbox)
-            else:
-                frame_bbox = []
-                frame_pose = []
-                num_players = 0
-            
-            # BBox特徴のパディング
-            if num_players > 0:
-                bbox_tensor = torch.stack(frame_bbox)  # [num_players, 5]
-                
-                # ポーズ特徴のパディング
-                pose_tensor = torch.stack(frame_pose)  # [num_players, pose_feat_dim]
-            else:
-                bbox_tensor = torch.zeros((0, 5), dtype=torch.float32)
-                pose_tensor = torch.zeros((0, pose_feat_dim), dtype=torch.float32)
-            
-            # max_players_countまでパディング
-            if num_players < max_players_count:
-                bbox_padding = torch.zeros((max_players_count - num_players, 5), dtype=torch.float32)
-                bbox_tensor = torch.cat([bbox_tensor, bbox_padding], dim=0)
-                
-                pose_padding = torch.zeros((max_players_count - num_players, pose_feat_dim), dtype=torch.float32)
-                pose_tensor = torch.cat([pose_tensor, pose_padding], dim=0)
-            
-            padded_bbox_features.append(bbox_tensor)
-            padded_pose_features.append(pose_tensor)
-        
-        # フレーム間でスタック
-        if max_players_count > 0:
-            player_bbox_tensor = torch.stack(padded_bbox_features)  # [T, max_players, 5]
-            player_pose_tensor = torch.stack(padded_pose_features)  # [T, max_players, pose_feat_dim]
-        else:
-            player_bbox_tensor = torch.zeros((self.T, 0, 5), dtype=torch.float32)
-            player_pose_tensor = torch.zeros((self.T, 0, pose_feat_dim), dtype=torch.float32)
-        
-        # イベントステータスをテンソル化（2チャンネル形式）
-        event_status_tensor = torch.tensor(event_statuses, dtype=torch.float32)  # [T, 2]
-        
-        # 出力フォーマット
-        if self.output_type == "all":
-            target_tensor = event_status_tensor  # [T, 2]
-        else:  # "last"
-            target_tensor = event_status_tensor[-1]  # [2]
-        
-        # 最後のフレームの画像情報を返す
-        last_img_id = frame_ids[-1]
-        image_info = self.images[last_img_id].copy()
-        image_info["id"] = last_img_id
-        
-        return ball_tensor, player_bbox_tensor, player_pose_tensor, court_tensor, target_tensor, image_info
+            max_players = max(max_players, len(self.player_anns_by_image.get(img_id, [])))
 
+        for img_id in frame_ids:
+            img = self.images[img_id]
+            w, h = img["width"], img["height"]
+
+            # --- Ball ---
+            ball_ann = self.ball_anns_by_image.get(img_id)
+            if ball_ann:
+                x, y, v = ball_ann["keypoints"][:3]
+                ball_score = ball_ann.get("keypoints_scores", [1.0])[0] if ball_ann.get("keypoints_scores") else (1.0 if v == 2 else 0.5 if v == 1 else 0.0)
+                ball_feats.append(torch.tensor([x / w, y / h, ball_score], dtype=torch.float32))
+                evt = self.event_status_by_image.get(img_id, 0)
+                event_labels.append([1, 0] if evt == 1 else [0, 1] if evt == 2 else [0, 0])
+            else:
+                ball_feats.append(torch.zeros(3))
+                event_labels.append([0, 0])
+
+            # --- Players ---
+            bbox_feats, pose_feats = [], []
+            for p in self.player_anns_by_image.get(img_id, []):
+                x1, y1, bw, bh = p["bbox"]
+                x2, y2 = x1 + bw, y1 + bh
+                bbox_feats.append(torch.tensor([x1 / w, y1 / h, x2 / w, y2 / h, p.get("score", 1.0)], dtype=torch.float32))
+
+                kps, kps_s = p["keypoints"], p.get("keypoints_scores", [])
+                kp_out = []
+                for i in range(0, len(kps), 3):
+                    kx, ky, kv = kps[i:i + 3]
+                    if kps_s and i // 3 < len(kps_s):
+                        kp_score = kps_s[i // 3]
+                        kv = 2 if kp_score >= 0.5 else 1 if kp_score > 0.01 else 0
+                    kp_out.extend([kx / w, ky / h, kv])
+                pose_feats.append(torch.tensor(kp_out, dtype=torch.float32))
+
+            player_bbox_lst.append(bbox_feats)
+            player_pose_lst.append(pose_feats)
+
+            # --- Court ---
+            court_ann = self.court_anns_by_image.get(img_id)
+            if court_ann:
+                kps, kps_s = court_ann["keypoints"], court_ann.get("keypoints_scores", [])
+                court_vec = []
+                for i in range(0, len(kps), 3):
+                    cx, cy, cv = kps[i:i + 3]
+                    if kps_s and i // 3 < len(kps_s):
+                        cscore = kps_s[i // 3]
+                        cv = 2 if cscore >= 0.6 else 1 if cscore > 0.01 else 0
+                    court_vec.extend([cx / w, cy / h, cv])
+                court_feats.append(torch.tensor(court_vec, dtype=torch.float32))
+            else:
+                court_feats.append(torch.zeros(45))  # 15kp*3 の例
+
+        return ball_feats, player_bbox_lst, player_pose_lst, court_feats, event_labels
+
+    def _pad_player_features(self, bbox_lst, pose_lst):
+        max_players = max(len(b) for b in bbox_lst)
+        bbox_dim = 5
+        pose_dim = pose_lst[0][0].shape[0] if pose_lst and pose_lst[0] else 0
+
+        padded_bbox, padded_pose = [], []
+        for bbox_f, pose_f in zip(bbox_lst, pose_lst):
+            if bbox_f:
+                bbox_t = torch.stack(bbox_f)
+                pose_t = torch.stack(pose_f)
+            else:
+                bbox_t = torch.zeros((0, bbox_dim))
+                pose_t = torch.zeros((0, pose_dim))
+
+            if len(bbox_f) < max_players:
+                pad_n = max_players - len(bbox_f)
+                bbox_t = torch.cat([bbox_t, torch.zeros((pad_n, bbox_dim))], dim=0)
+                pose_t = torch.cat([pose_t, torch.zeros((pad_n, pose_dim))], dim=0)
+
+            padded_bbox.append(bbox_t)
+            padded_pose.append(pose_t)
+
+        return torch.stack(padded_bbox), torch.stack(padded_pose)
+
+    # --------------------------------------------------
     @staticmethod
-    def group_split_clip(clip_keys, train_ratio, val_ratio, seed):
+    def group_split_clip(keys, train_ratio, val_ratio, seed):
         random.seed(seed)
-        random.shuffle(clip_keys)
-        n = len(clip_keys)
+        random.shuffle(keys)
+        n = len(keys)
         n_train = int(n * train_ratio)
         n_val = int(n * val_ratio)
-        return (
-            clip_keys[:n_train],
-            clip_keys[n_train : n_train + n_val],
-            clip_keys[n_train + n_val :],
-        )
-
+        return keys[:n_train], keys[n_train:n_train + n_val], keys[n_train + n_val:]

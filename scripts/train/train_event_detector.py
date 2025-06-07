@@ -44,16 +44,9 @@ def main(cfg: DictConfig) -> None:
     
     datamodule = hydra.utils.instantiate(cfg.litdatamodule)
     
-    # モデルの作成
-    log.info("モデルを作成中...")
-    model = hydra.utils.instantiate(cfg.model.net)
-    
     # LightningModuleの作成
     log.info("LightningModuleを作成中...")
-    lit_module = hydra.utils.instantiate(
-        cfg.litmodule.module,
-        model=model,
-    )
+    lit_module = hydra.utils.instantiate(cfg.litmodule.module)
     
     # Callbacksの設定
     callbacks = []
@@ -61,19 +54,19 @@ def main(cfg: DictConfig) -> None:
     # モデルチェックポイント
     if "checkpoint" in cfg.callbacks:
         log.info("ModelCheckpointを設定中...")
-        checkpoint_callback = ModelCheckpoint(**cfg.callbacks.checkpoint)
+        checkpoint_callback = hydra.utils.instantiate(cfg.callbacks.checkpoint)
         callbacks.append(checkpoint_callback)
     
     # 早期停止
     if "early_stopping" in cfg.callbacks:
         log.info("EarlyStoppingを設定中...")
-        early_stopping = EarlyStopping(**cfg.callbacks.early_stopping)
+        early_stopping = hydra.utils.instantiate(cfg.callbacks.early_stopping)
         callbacks.append(early_stopping)
     
     # 学習率モニタリング
     if "lr_monitor" in cfg.callbacks:
         log.info("LearningRateMonitorを設定中...")
-        lr_monitor = LearningRateMonitor(**cfg.callbacks.lr_monitor)
+        lr_monitor = hydra.utils.instantiate(cfg.callbacks.lr_monitor)
         callbacks.append(lr_monitor)
     
     # Trainerの作成

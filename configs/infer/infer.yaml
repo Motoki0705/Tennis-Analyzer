@@ -4,6 +4,7 @@ defaults:
   - court: lite_tracknet_1heat     # lite_tracknet, lite_tracknet_1heat
   - player: rt_detr          # rt_detr
   - pose: vitpose       # vitpose
+  - event: transformer   # 追加: イベント検出モデル
 
 
 hydra:
@@ -11,7 +12,7 @@ hydra:
     dir: hydra_outputs/infer/${mode}/${now:%Y-%m-%d_%H-%M-%S}
 
 # --- Top-level Parameters ---
-mode: "court" # ball, court, player, pose, multi, frames, image
+mode: "court" # ball, court, player, pose, event, multi, frames, image
 
 # --- Common Settings ---
 common:
@@ -63,6 +64,15 @@ predictors:
     player_label_id: 0 # Label ID for 'person' in the detection model
     det_score_thresh: 0.7
     pose_score_thresh: 0.7
+
+  # イベント検出器の設定を追加
+  event:
+    _target_: src.event.predictor.EventPredictor
+    # model is passed by main.py
+    input_size: [360, 640]
+    sequence_length: 32
+    threshold: 0.5
+    visualize_mode: "overlay"
 
   multi:
     _target_: src.multi.multi_predictor.MultiPredictor
