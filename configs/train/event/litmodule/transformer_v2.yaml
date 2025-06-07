@@ -1,6 +1,14 @@
-# イベント検出用 LightningModule設定
+# TransformerV2モデル用 LightningModule設定
 module:
   _target_: src.event.lit_module.event_detection_lit_module.EventDetectionLitModule
+
+  # モデル構成パラメータ
+  d_model: 128
+  nhead: 8
+  num_layers: 4
+  dropout: 0.1
+  max_seq_len: 512
+  pose_dim: 51  # プレイヤーポーズキーポイントの次元
 
   # 学習パラメータ
   lr: 0.0005
@@ -15,4 +23,4 @@ module:
   clarity_weight: 0.5   # 明確な予測を促進する重み
 
 meta:
-  name: event_detection 
+  name: transformer_v2 
