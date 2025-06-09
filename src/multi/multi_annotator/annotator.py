@@ -57,20 +57,42 @@ class MultiFlowAnnotator:
 
         # 処理キューの初期化
         self._initialize_queues()
+        
+        # 結果キューの初期化
+        self.results_queue = queue.Queue()
+        
+        # 結果処理スレッド
+        self.result_thread = None
+        self.running = False
 
         # ワーカーの初期化
         self.workers = {
             "ball": BallWorker(
-                ball_predictor, self.queues["ball"]["preprocess"], self.queues["ball"]["inference"],
-                self.queues["ball"]["postprocess"], self.coco_manager, self.vis_thresholds["ball"], self.debug
+                ball_predictor, 
+                self.queues["ball"]["preprocess"], 
+                self.queues["ball"]["inference"],
+                self.queues["ball"]["postprocess"], 
+                self.results_queue,
+                self.vis_thresholds["ball"], 
+                self.debug
             ),
             "court": CourtWorker(
-                court_predictor, self.queues["court"]["preprocess"], self.queues["court"]["inference"],
-                self.queues["court"]["postprocess"], self.coco_manager, self.vis_thresholds["court"], self.debug
+                court_predictor, 
+                self.queues["court"]["preprocess"], 
+                self.queues["court"]["inference"],
+                self.queues["court"]["postprocess"], 
+                self.results_queue,
+                self.vis_thresholds["court"], 
+                self.debug
             ),
             "pose": PoseWorker(
-                pose_predictor, self.queues["pose"]["preprocess"], self.queues["pose"]["inference"],
-                self.queues["pose"]["postprocess"], self.coco_manager, self.vis_thresholds["pose"], self.debug
+                pose_predictor, 
+                self.queues["pose"]["preprocess"], 
+                self.queues["pose"]["inference"],
+                self.queues["pose"]["postprocess"], 
+                self.results_queue,
+                self.vis_thresholds["pose"], 
+                self.debug
             ),
         }
 
@@ -84,8 +106,47 @@ class MultiFlowAnnotator:
                 "postprocess": queue.Queue(maxsize=self.max_queue_size),
             }
 
+    def _process_results(self):
+        """結果キューからアノテーション結果を取得し、COCOマネージャーに追加するスレッド処理"""
+        while self.running:
+            try:
+                result = self.results_queue.get(timeout=0.1)
+                try:
+                    # 結果タイプに応じてCOCOマネージャーの適切なメソッドを呼び出す
+                    if result["type"] == "ball":
+                        self.coco_manager.add_ball_annotation(
+                            result["image_id"], 
+                            result["result"], 
+                            self.vis_thresholds["ball"]
+                        )
+                    elif result["type"] == "court":
+                        self.coco_manager.add_court_annotation(
+                            result["image_id"], 
+                            result["result"], 
+                            self.vis_thresholds["court"]
+                        )
+                    elif result["type"] == "pose":
+                        self.coco_manager.add_pose_annotations(
+                            result["image_id"], 
+                            result["result"], 
+                            self.vis_thresholds["pose"]
+                        )
+                except Exception as e:
+                    print(f"結果処理中にエラーが発生: {e}")
+                finally:
+                    self.results_queue.task_done()
+            except queue.Empty:
+                continue
+
     def _start_workers(self):
         """全てのワーカーのスレッドを開始します。"""
+        self.running = True
+        
+        # 結果処理スレッドを開始
+        self.result_thread = threading.Thread(target=self._process_results, daemon=True)
+        self.result_thread.start()
+        
+        # ワーカースレッドを開始
         for worker in self.workers.values():
             worker.start()
         print("✅ 全てのワーカースレッドを開始しました。")
@@ -93,8 +154,21 @@ class MultiFlowAnnotator:
     def _stop_workers(self):
         """全てのワーカーのスレッドを停止します。"""
         print("\n⏳ ワーカースレッドの停止処理を開始します...")
+        self.running = False
+        
+        # ワーカースレッドを停止
         for worker in self.workers.values():
             worker.stop()
+            
+        # 結果キューが空になるまで待機
+        if not self.results_queue.empty():
+            print("結果キューの処理を完了しています...")
+            self.results_queue.join()
+            
+        # 結果処理スレッドの終了を待機
+        if self.result_thread:
+            self.result_thread.join(timeout=2.0)
+            
         print("✅ 全てのワーカースレッドを停止しました。")
 
     def _prepare_image_metadata(
