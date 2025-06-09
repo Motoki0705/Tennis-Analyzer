@@ -1,0 +1,12 @@
+# イベント検出用データモジュール設定
+_target_: src.event.lit_datamodule.event_data_module.EventDataModule
+
+# データパス
+annotation_file: 'datasets/event/coco_annotations_ball_pose_court_event_status.json'
+
+# 入力設定
+T: 512  # 時系列の長さ
+batch_size: 32
+num_workers: 8
+skip_frames_range: [1, 5]
+output_type: "all"  # "all" or "last" 

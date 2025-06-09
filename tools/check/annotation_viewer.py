@@ -2,6 +2,7 @@
 """
 COCO形式のアノテーションファイルを可視化するビューワー
 Ball/Court/Poseの各アノテーションを画像上に描画して表示する
+イベントステータス（バウンド/ショット/ネット）も可視化
 """
 import argparse
 import json
@@ -13,6 +14,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+# イベントステータスの定義
+from src.utils.event_status_dict import event_status_dict
 
 # 色の定義
 BALL_COLOR = (0, 255, 0)  # 緑
@@ -21,6 +24,13 @@ PLAYER_COLORS = [
     (255, 0, 0),  # 青
     (0, 0, 255),  # 赤
 ]
+# イベントステータスの色
+EVENT_STATUS_COLORS = {
+    0: (0, 255, 0),       # no_hit: 緑
+    1: (0, 165, 255),     # bounce: オレンジ
+    2: (0, 0, 255),       # hit: 赤
+    3: (255, 0, 255),     # net: マゼンタ
+}
 # 骨格ライン
 PLAYER_SKELETON = [
     [15, 13],
@@ -55,7 +65,7 @@ def load_coco_annotations(file_path: str) -> Dict:
         return None
 
 
-def draw_ball(image: np.ndarray, keypoints: List[float], visibility_threshold: float = 0.5) -> np.ndarray:
+def draw_ball(image: np.ndarray, keypoints: List[float], event_status: int = None, visibility_threshold: float = 0.5) -> np.ndarray:
     """ボールアノテーションを画像上に描画"""
     if len(keypoints) < 3:
         return image
@@ -64,10 +74,35 @@ def draw_ball(image: np.ndarray, keypoints: List[float], visibility_threshold: f
     if v < 1:  # visibility check
         return image
     
+    # イベントステータスに応じた色の選択
+    color = BALL_COLOR
+    if event_status is not None and event_status in EVENT_STATUS_COLORS:
+        color = EVENT_STATUS_COLORS[event_status]
+    
     # ボールの位置に円を描画
     center = (int(x), int(y))
-    cv2.circle(image, center, 5, BALL_COLOR, -1)  # 塗りつぶし円
-    cv2.circle(image, center, 8, BALL_COLOR, 2)  # 外枠円
+    cv2.circle(image, center, 5, color, -1)  # 塗りつぶし円
+    cv2.circle(image, center, 8, color, 2)  # 外枠円
+    
+    # イベントステータスのテキスト表示
+    if event_status is not None:
+        status_name = ""
+        # イベントステータス辞書から名前を取得
+        for name, value in event_status_dict.items():
+            if value == event_status:
+                status_name = name
+                break
+        
+        if status_name:
+            cv2.putText(
+                image, 
+                status_name, 
+                (int(x) + 10, int(y) - 10), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.5, 
+                color, 
+                2
+            )
     
     return image
 
@@ -136,7 +171,8 @@ def process_image(
     annotations: List[Dict], 
     draw_balls: bool = True, 
     draw_courts: bool = True, 
-    draw_players: bool = True
+    draw_players: bool = True,
+    show_event_status: bool = True
 ) -> np.ndarray:
     """画像と関連するアノテーションを処理して可視化"""
     # 画像の読み込み
@@ -153,7 +189,8 @@ def process_image(
         # ボールの描画
         if category_id == 1 and draw_balls:
             keypoints = ann.get('keypoints', [])
-            image = draw_ball(image, keypoints)
+            event_status = ann.get('event_status') if show_event_status else None
+            image = draw_ball(image, keypoints, event_status)
         
         # コートの描画
         elif category_id == 3 and draw_courts:
@@ -175,7 +212,7 @@ def main():
     parser.add_argument(
         '--annotation', '-a', 
         required=False, 
-        default='datasets/ball/coco_annotations_ball_pose_court.json',
+        default='datasets/event/coco_annotations_ball_pose_court_event_status.json',
         help='COCO形式のアノテーションファイルパス'
     )
     parser.add_argument(
@@ -201,6 +238,17 @@ def main():
         '--no-player', 
         action='store_true', 
         help='選手のアノテーションを描画しない'
+    )
+    parser.add_argument(
+        '--no-event-status',
+        action='store_true',
+        help='イベントステータスを表示しない'
+    )
+    parser.add_argument(
+        '--event-status-filter',
+        type=int,
+        choices=[0, 1, 2, 3],
+        help='特定のイベントステータスのみを表示 (0=no_hit, 1=bounce, 2=hit, 3=net)'
     )
     parser.add_argument(
         '--limit', '-l', 
@@ -271,6 +319,17 @@ def main():
     if args.clip is not None:
         filtered_images = [img for img in filtered_images if img.get('clip_id') == args.clip]
     
+    # イベントステータスでフィルタリング
+    if args.event_status_filter is not None:
+        # イベントステータスでフィルタリングするための画像IDリストを作成
+        status_image_ids = set()
+        for ann in coco_data['annotations']:
+            if ann.get('category_id') == 1 and ann.get('event_status') == args.event_status_filter:
+                status_image_ids.add(ann['image_id'])
+        
+        # フィルタリングされた画像IDに基づいて画像をフィルタリング
+        filtered_images = [img for img in filtered_images if img['id'] in status_image_ids]
+    
     # 処理する画像数の制限
     if args.limit > 0:
         filtered_images = filtered_images[:args.limit]
@@ -278,6 +337,15 @@ def main():
     print(f"アノテーション: {args.annotation}")
     print(f"画像ディレクトリ: {base_dir}")
     print(f"処理対象画像数: {len(filtered_images)}")
+    
+    # イベントステータスのフィルタリング情報
+    if args.event_status_filter is not None:
+        status_name = "unknown"
+        for name, value in event_status_dict.items():
+            if value == args.event_status_filter:
+                status_name = name
+                break
+        print(f"イベントステータスフィルタ: {args.event_status_filter} ({status_name})")
     
     # 各画像を処理
     for img_data in tqdm(filtered_images, desc="画像処理中"):
@@ -302,7 +370,8 @@ def main():
                 annotations,
                 not args.no_ball,
                 not args.no_court,
-                not args.no_player
+                not args.no_player,
+                not args.no_event_status
             )
             
             if vis_image is not None:
