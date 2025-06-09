@@ -8,7 +8,6 @@ import torchvision
 from PIL import Image
 
 from src.player.arguments.prepare_transform import prepare_transform
-from src.player.utils import visualize_dataset
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):

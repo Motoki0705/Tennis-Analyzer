@@ -8,11 +8,9 @@ hydra:
 
 # デフォルト設定
 defaults:
-  # モデルアーキテクチャの選択
-  - model: rtdetr
-  
   # LightningModuleの選択
-  - litmodule: detr
+  # コマンドライン例: litmodule=rtdetr
+  - litmodule: rtdetr
   
   - litdatamodule: coco_data
   - trainer: default
@@ -20,7 +18,7 @@ defaults:
   - _self_
 
 # 実験名（ディレクトリ名）の設定
-version: ${model.name}_player_detection
+version: ${litmodule.meta.name}_player_detection
 
 # 再現性のための乱数シード
 seed: 42 
