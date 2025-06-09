@@ -3,17 +3,18 @@
 import queue
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 class BaseWorker(ABC):
     """前処理、推論、後処理のパイプラインを管理するワーカーの基底クラス。
 
     Attributes:
+        name (str): ワーカーの名前（例: "ball", "court"）。
         predictor (Any): 推論を実行するモデル予測器。
         preprocess_queue (queue.Queue): 前処理タスクを保持するキュー。
         inference_queue (queue.Queue): 推論タスクを保持するキュー。
         postprocess_queue (queue.Queue): 後処理タスクを保持するキュー。
-        coco_manager (Any): COCOアノテーションを管理するマネージャー。
+        results_queue (queue.Queue): 処理結果を送信するためのキュー。
         vis_thresh (float): 可視性の閾値。
         processed_counter (int): このワーカーによって処理されたアイテムの数。
         running (bool): ワーカーが実行中かどうかを示すフラグ。
@@ -28,7 +29,7 @@ class BaseWorker(ABC):
         preprocess_queue: queue.Queue,
         inference_queue: queue.Queue,
         postprocess_queue: queue.Queue,
-        coco_manager: Any,
+        results_queue: queue.Queue,
         vis_thresh: float,
         debug: bool = False,
     ):
@@ -40,7 +41,7 @@ class BaseWorker(ABC):
             preprocess_queue (queue.Queue): 前処理タスク用のキュー。
             inference_queue (queue.Queue): 推論タスク用のキュー。
             postprocess_queue (queue.Queue): 後処理タスク用のキュー。
-            coco_manager (Any): CocoManagerのインスタンス。
+            results_queue (queue.Queue): 処理結果を送信するためのキュー。
             vis_thresh (float): 可視性を判断するための信頼度閾値。
             debug (bool): デバッグログを有効にするかどうか。
         """
@@ -49,7 +50,7 @@ class BaseWorker(ABC):
         self.preprocess_queue = preprocess_queue
         self.inference_queue = inference_queue
         self.postprocess_queue = postprocess_queue
-        self.coco_manager = coco_manager
+        self.results_queue = results_queue
         self.vis_thresh = vis_thresh
         self.processed_counter = 0
         self.running = False
@@ -105,7 +106,6 @@ class BaseWorker(ABC):
         self._loop_body(self.inference_queue, self._process_inference_task)
 
     def _postprocess_loop(self):
-        self.running_post = True
         self._loop_body(self.postprocess_queue, self._process_postprocess_task)
 
     @abstractmethod
