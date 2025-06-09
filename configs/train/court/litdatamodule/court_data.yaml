@@ -2,7 +2,7 @@
 _target_: src.court.lit_datamodule.court_datamodule.CourtDataModule
 
 # データパス
-annotation_root: 'datasets/court/annotations'
+annotation_root: 'datasets/court/'
 image_root: 'datasets/court/images'
 
 # データローダー設定

@@ -8,13 +8,9 @@ hydra:
 
 # デフォルト設定
 defaults:
-  # モデルアーキテクチャの選択
-  # コマンドライン例: model=fpn
-  - model: lite_tracknet
-  
   # LightningModuleの選択
-  # コマンドライン例: litmodule=heatmap_regression
-  - litmodule: heatmap_regression
+  # コマンドライン例: litmodule=fpn
+  - litmodule: lite_tracknet
   
   - litdatamodule: court_data
   - trainer: default
@@ -23,7 +19,7 @@ defaults:
 
 # 実験名（ディレクトリ名）の設定
 # モデル名とデータセットタイプから自動生成
-version: ${model.name}_court_keypoints
+version: ${litmodule.meta.name}_court_keypoints
 
 # 再現性のための乱数シード
 seed: 42 
