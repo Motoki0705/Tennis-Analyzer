@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Dict, Optional
 
 import albumentations as A
 import cv2
@@ -42,6 +42,7 @@ class CourtPredictor:
         self.kp_color = kp_color
         self.use_half = use_half
         self.visualize_mode = visualize_mode
+        self.input_size = input_size
 
         # モデル
         self.model = model.to(self.device).eval()
@@ -55,48 +56,107 @@ class CourtPredictor:
             ]
         )
 
+    def preprocess(self, frames: List[np.ndarray]) -> Tuple[torch.Tensor, List[Tuple[int, int]]]:
+        """
+        画像の前処理を行い、モデル入力用テンソルを返します。
+        
+        Args:
+            frames: 入力画像リスト
+            
+        Returns:
+            batch_tensor: バッチテンソル
+            original_shapes: 元の画像サイズのリスト
+        """
+        tensors = []
+        original_shapes = []
+        
+        for img in frames:
+            # 元のサイズを保存
+            original_shapes.append(img.shape[:2])  # (height, width)
+            
+            # BGR -> RGB変換
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+            # 前処理
+            aug = self.transform(image=rgb)
+            tensors.append(aug["image"])
+        
+        # バッチテンソル作成
+        batch_tensor = torch.stack(tensors).to(self.device)
+        
+        return batch_tensor, original_shapes
+
+    def inference(self, batch_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        モデル推論を実行します。
+        
+        Args:
+            batch_tensor: 前処理済みバッチテンソル
+            
+        Returns:
+            outputs: モデル出力テンソル
+        """
+        with torch.no_grad():
+            if self.use_half:
+                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                    outputs = self.model(batch_tensor)
+            else:
+                outputs = self.model(batch_tensor)
+        
+        return outputs
+
+    def postprocess(
+        self, outputs: torch.Tensor, original_shapes: List[Tuple[int, int]]
+    ) -> Tuple[List[List[Dict]], List[np.ndarray]]:
+        """
+        モデル出力を後処理し、キーポイント情報とヒートマップを返します。
+        
+        Args:
+            outputs: モデル出力テンソル
+            original_shapes: 元の画像サイズのリスト
+            
+        Returns:
+            kps_list: キーポイント情報のリスト
+            hm_list: ヒートマップのリスト
+        """
+        # sigmoid適用してnumpy変換
+        heatmaps = expit(outputs.cpu().numpy())
+
+        kps_list, hm_list = [], []
+        for hm, orig_shape in zip(heatmaps, original_shapes, strict=False):
+            # hm の shape によって単一 or マルチチャネルを自動判定
+            if hm.ndim == 3 and hm.shape[0] == self.num_keypoints:
+                keypoints = self._extract_keypoints_multichannel(hm, orig_shape)
+            else:
+                keypoints = self._extract_keypoints_singlechannel(hm, orig_shape)
+            kps_list.append(keypoints)
+            hm_list.append(hm)
+        
+        return kps_list, hm_list
+
     def predict(
         self, frames: List[np.ndarray]
-    ) -> Tuple[List[List[dict]], List[np.ndarray]]:
+    ) -> Tuple[List[List[Dict]], List[np.ndarray]]:
         """
         B 枚のフレームに対して、
         - keypoints: List[List[{"x","y","confidence"}]]
         - raw_heatmaps: List[np.ndarray]（shape=(1,H,W) か (C,H,W)）
         を返す。
         """
-        # 前処理 → バッチテンソル
-        tensors = []
-        for img in frames:
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            aug = self.transform(image=rgb)
-            tensors.append(aug["image"])
-        batch = torch.stack(tensors).to(self.device)
-
+        # 前処理
+        batch_tensor, original_shapes = self.preprocess(frames)
+        
         # 推論
-        with torch.no_grad():
-            if self.use_half:
-                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
-                    outputs = self.model(batch)
-            else:
-                outputs = self.model(batch)
-
-        # sigmoid → numpy
-        heatmaps = expit(outputs.cpu().numpy())
-
-        kps_list, hm_list = [], []
-        for hm, frame in zip(heatmaps, frames, strict=False):
-            # hm の shape によって単一 or マルチチャネルを自動判定
-            if hm.ndim == 3 and hm.shape[0] == self.num_keypoints:
-                keypoints = self._extract_keypoints_multichannel(hm, frame.shape[:2])
-            else:
-                keypoints = self._extract_keypoints_singlechannel(hm, frame.shape[:2])
-            kps_list.append(keypoints)
-            hm_list.append(hm)
+        outputs = self.inference(batch_tensor)
+        
+        # 後処理
+        kps_list, hm_list = self.postprocess(outputs, original_shapes)
+        
         return kps_list, hm_list
 
     def _extract_keypoints_multichannel(
         self, heatmaps: np.ndarray, orig_shape: Tuple[int, int]
-    ) -> List[dict]:
+    ) -> List[Dict]:
         """
         各チャンネル最大値位置を 1 点ずつ取り出す。
         """
@@ -114,7 +174,7 @@ class CourtPredictor:
 
     def _extract_keypoints_singlechannel(
         self, heatmap: np.ndarray, orig_shape: Tuple[int, int]
-    ) -> List[dict]:
+    ) -> List[Dict]:
         """
         単一チャネルのヒートマップから局所最大点を NMS で取り出す（従来方式）。
         """
@@ -145,7 +205,7 @@ class CourtPredictor:
             kps.append({"x": X, "y": Y, "confidence": conf})
         return kps
 
-    def overlay(self, frame: np.ndarray, keypoints: List[dict]) -> np.ndarray:
+    def overlay(self, frame: np.ndarray, keypoints: List[Dict]) -> np.ndarray:
         """
         円だけを重ねる。
         """

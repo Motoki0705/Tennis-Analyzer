@@ -1,0 +1,26 @@
+# TransformerV2モデル用 LightningModule設定
+module:
+  _target_: src.event.lit_module.lit_transformer_v2.LitTransformerV2
+
+  # モデル構成パラメータ
+  d_model: 128
+  nhead: 8
+  num_layers: 4
+  dropout: 0.1
+  max_seq_len: 512
+  pose_dim: 51  # プレイヤーポーズキーポイントの次元
+
+  # 学習パラメータ
+  lr: 0.0005
+  weight_decay: 0.001
+  warmup_epochs: 5
+  max_epochs: ${trainer.max_epochs}
+  
+  # 損失関数の重み
+  no_hit_weight: 0.01   # no_hit(0,0)の重み
+  hit_weight: 1.0       # hit(1,0)の重み
+  bounce_weight: 1.0    # bounce(0,1)の重み
+  clarity_weight: 0.02  # 明確な予測を促進する重み
+
+meta:
+  name: transformer_v2 

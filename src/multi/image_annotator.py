@@ -1,5 +1,7 @@
 import json
 import os
+import time
+import signal
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +74,14 @@ BALL_CATEGORY = {
     "skeleton": [],
 }
 
+# タイムアウトエラー用の例外クラス
+class PredictionTimeoutError(Exception):
+    """モデル予測がタイムアウトした場合に発生する例外"""
+    pass
+
+# タイムアウトハンドラ
+def timeout_handler(signum, frame):
+    raise PredictionTimeoutError("モデル予測がタイムアウトしました")
 
 class ImageAnnotator:
     """
@@ -277,37 +287,6 @@ class ImageAnnotator:
             self.coco_output["annotations"].append(ann)
             self.annotation_id_counter += 1
 
-    def _process_batch(
-        self,
-        predictor,
-        frames_buffer: List,
-        meta_buffer: List[Tuple[int, Path]],
-        cache: Dict[int, Any],
-    ):
-        if not frames_buffer:
-            return
-
-        # モデル予測の呼び出し
-        if predictor == self.ball_predictor:
-            preds = predictor.predict(frames_buffer)
-        else:
-            out = predictor.predict(frames_buffer)
-            # courtはヒートマップそのものをindex1で出力するため、out[0]だけを取り出す
-            preds = out[0] if predictor == self.court_predictor else out
-
-        # キャッシュ登録とアノテーション追加
-        for (img_id, _), pred in zip(meta_buffer, preds, strict=False):
-            cache[img_id] = pred
-            if predictor == self.ball_predictor:
-                self._add_ball_annotation(img_id, pred)
-            elif predictor == self.court_predictor:
-                self._add_court_annotation(img_id, pred)
-            else:
-                self._add_pose_annotations(img_id, pred)
-
-        frames_buffer.clear()
-        meta_buffer.clear()
-
     def _load_frame(self, img_path: Path, input_dir: Path) -> Tuple[np.ndarray, int, Path]:
         """
         画像を読み込み、返す（画像IDはimage_id_mapから取得）
@@ -363,7 +342,8 @@ class ImageAnnotator:
         total_images = self._prepare_image_metadata(input_dir, grouped_files, sorted_group_keys)
         
         # 進捗表示用のtqdmとバッチ処理の準備
-        with tqdm(total=total_images, desc="画像アノテーション処理中") as pbar:
+        print(f"\n推論処理を開始します: 総画像数 {total_images}枚")
+        with tqdm(total=total_images, desc="アノテーション処理中") as pbar:
             self._process_clips_with_batching(input_dir, sorted_group_keys, pbar)
 
         # JSON 出力
@@ -443,61 +423,79 @@ class ImageAnnotator:
         """画像メタデータを準備してCOCOエントリを作成"""
         all_image_entries = []
         
-        # 各グループごとに画像メタデータを準備
-        for group_key in sorted_group_keys:
-            game_id, clip_id = group_key
-            clip_images = grouped_files[group_key]
-            
-            # フレーム番号で正しくソート
-            clip_images.sort(key=self._extract_frame_number)
-            
-            # イメージエントリを生成
-            for img_path in clip_images:
-                try:
-                    # 画像の情報を取得（サイズなど）
-                    img = cv2.imread(str(img_path))
-                    if img is None:
-                        print(f"警告: 画像の読み込みに失敗しました: {img_path}")
-                        continue
-                    
-                    height, width = img.shape[:2]
-                    
-                    # 相対パスを取得
-                    if img_path.is_relative_to(input_dir):
-                        rel_path = str(img_path.relative_to(input_dir))
-                    else:
-                        rel_path = str(img_path)
-                    
-                    # イメージエントリを作成
-                    image_entry = {
-                        "id": self.image_id_counter,
-                        "file_name": img_path.name,
-                        "original_path": rel_path,
-                        "height": height,
-                        "width": width,
-                        "license": 1,
-                        "date_captured": datetime.now().isoformat(),
-                    }
-                    
-                    # ゲームIDとクリップIDが抽出できた場合は追加
-                    if game_id is not None and game_id != -1:
-                        image_entry["game_id"] = game_id
-                    if clip_id is not None and clip_id != -1:
-                        image_entry["clip_id"] = clip_id
-                    
-                    # フレーム番号を抽出して追加
-                    frame_num = self._extract_frame_number(img_path)
-                    if frame_num > 0:
-                        image_entry["frame_number"] = frame_num
-                    
-                    # エントリを追加
-                    all_image_entries.append((image_entry, img_path))
-                    self.image_id_counter += 1
-                    
-                except Exception as e:
-                    print(f"画像メタデータの生成中にエラーが発生: {img_path}, {e}")
+        # 画像の総数を計算
+        total_images = sum(len(grouped_files[key]) for key in sorted_group_keys)
+        
+        print(f"画像メタデータの生成を開始: 総数 {total_images}枚")
+        
+        # 全体の進捗表示用
+        with tqdm(total=total_images, desc="画像メタデータ生成中") as meta_pbar:
+            # 各グループごとに画像メタデータを準備
+            for group_key in sorted_group_keys:
+                game_id, clip_id = group_key
+                clip_images = grouped_files[group_key]
+                
+                # グループの情報表示
+                print(f"メタデータ処理中: Game {game_id}, Clip {clip_id} - {len(clip_images)}フレーム")
+                
+                # フレーム番号で正しくソート
+                clip_images.sort(key=self._extract_frame_number)
+                
+                # イメージエントリを生成
+                for img_path in clip_images:
+                    try:
+                        # 画像の情報を取得（サイズなど）
+                        img = cv2.imread(str(img_path))
+                        if img is None:
+                            print(f"警告: 画像の読み込みに失敗しました: {img_path}")
+                            meta_pbar.update(1)
+                            continue
+                        
+                        height, width = img.shape[:2]
+                        
+                        # 相対パスを取得
+                        if img_path.is_relative_to(input_dir):
+                            rel_path = str(img_path.relative_to(input_dir))
+                        else:
+                            rel_path = str(img_path)
+                        
+                        # イメージエントリを作成
+                        image_entry = {
+                            "id": self.image_id_counter,
+                            "file_name": img_path.name,
+                            "original_path": rel_path,
+                            "height": height,
+                            "width": width,
+                            "license": 1,
+                            "date_captured": datetime.now().isoformat(),
+                        }
+                        
+                        # ゲームIDとクリップIDが抽出できた場合は追加
+                        if game_id is not None and game_id != -1:
+                            image_entry["game_id"] = game_id
+                        if clip_id is not None and clip_id != -1:
+                            image_entry["clip_id"] = clip_id
+                        
+                        # フレーム番号を抽出して追加
+                        frame_num = self._extract_frame_number(img_path)
+                        if frame_num > 0:
+                            image_entry["frame_number"] = frame_num
+                        
+                        # エントリを追加
+                        all_image_entries.append((image_entry, img_path))
+                        self.image_id_counter += 1
+                        
+                        # 進捗バーを更新
+                        meta_pbar.update(1)
+                        
+                    except Exception as e:
+                        print(f"画像メタデータの生成中にエラーが発生: {img_path}, {e}")
+                        meta_pbar.update(1)  # エラーでも進捗は進める
+        
+        print(f"メタデータ生成完了: {len(all_image_entries)}枚")
         
         # イメージエントリをCOCO出力に追加
+        print("COCOエントリ作成中...")
         for entry, _ in all_image_entries:
             self.coco_output["images"].append(entry)
         
@@ -514,6 +512,8 @@ class ImageAnnotator:
                 if (curr_game, curr_clip) == group_key:
                     self.grouped_entries[group_key].append((entry["id"], img_path))
         
+        print(f"画像メタデータの生成とグループ化が完了しました")
+        
         # 総画像数を返す
         return len(all_image_entries)
 
@@ -525,10 +525,18 @@ class ImageAnnotator:
         ball_buf, court_buf, pose_buf = [], [], []
         ball_meta, court_meta, pose_meta = [], [], []
         ball_cache, court_cache, pose_cache = {}, {}, {}
-        
+
         # 先読み用の変数
         next_clip_idx = 0
         next_clip_future = None
+        
+        # 総画像数を計算
+        total_images = sum(len(self.grouped_entries[key]) for key in sorted_group_keys)
+        print(f"全クリップの総フレーム数: {total_images}")
+        
+        # pbarの更新をリセット（既に一部更新されている場合）
+        pbar.reset(total=total_images)
+        pbar.set_description("画像アノテーション処理中")
         
         # 最初のクリップを先読み
         if next_clip_idx < len(sorted_group_keys):
@@ -539,50 +547,85 @@ class ImageAnnotator:
                 )
                 next_clip_idx += 1
         
+        # 処理済みクリップ数のカウンタ
+        processed_clips = 0
+        
         # 各クリップごとに処理
         for idx, group_key in enumerate(sorted_group_keys):
             game_id, clip_id = group_key
+            print(f"処理中: Game {game_id}, Clip {clip_id} [{idx+1}/{len(sorted_group_keys)}]")
             
-            # 先読みデータの取得（あれば）
-            frames, frame_ids, valid_paths = self._get_clip_frames(
-                idx, game_id, clip_id, next_clip_future
-            )
-            
-            # 次のクリップの先読み開始
-            if next_clip_idx < len(sorted_group_keys):
-                with ThreadPoolExecutor(max_workers=1) as pre_executor:
-                    next_group_key = sorted_group_keys[next_clip_idx]
-                    next_clip_future = pre_executor.submit(
-                        self._preload_clip, next_group_key, input_dir
-                    )
-                    next_clip_idx += 1
-                    print(f"次のクリップを先読み中: Game {next_group_key[0]}, Clip {next_group_key[1]}")
-            
-            if not frames:
-                print(f"警告: クリップ内に有効なフレームがありません: Game {game_id}, Clip {clip_id}")
-                continue
-            
-            # クリップ切り替え時にスライディングウィンドウとバッファをリセット
-            self.ball_sliding_window = []
-            ball_buf, ball_meta = [], []
-            court_buf, court_meta = [], []
-            pose_buf, pose_meta = [], []
-            
-            # 各モデル（Court/Pose/Ball）でバッチ処理
-            self._process_court_batches(frames, frame_ids, valid_paths, court_buf, court_meta, court_cache)
-            self._process_pose_batches(frames, frame_ids, valid_paths, pose_buf, pose_meta, pose_cache)
-            self._process_ball_batches(frames, frame_ids, valid_paths, ball_buf, ball_meta, ball_cache)
-            
-            print(f"完了: Game {game_id}, Clip {clip_id}")
-            
-            # メモリ解放
-            frames.clear()
-            frame_ids.clear()
-            valid_paths.clear()
+            try:
+                # 先読みデータの取得（あれば）
+                frames, frame_ids, valid_paths = self._get_clip_frames(
+                    game_id, clip_id, next_clip_future, pbar
+                )
+                
+                # 次のクリップの先読み開始
+                if next_clip_idx < len(sorted_group_keys):
+                    with ThreadPoolExecutor(max_workers=1) as pre_executor:
+                        next_group_key = sorted_group_keys[next_clip_idx]
+                        next_clip_future = pre_executor.submit(
+                            self._preload_clip, next_group_key, input_dir
+                        )
+                        next_clip_idx += 1
+                        print(f"次のクリップを先読み中: Game {next_group_key[0]}, Clip {next_group_key[1]}")
+                
+                if not frames:
+                    print(f"警告: クリップ内に有効なフレームがありません: Game {game_id}, Clip {clip_id}")
+                    continue
+                
+                # クリップ切り替え時にスライディングウィンドウとバッファをリセット
+                self.ball_sliding_window = []
+                ball_buf, ball_meta = [], []
+                court_buf, court_meta = [], []
+                pose_buf, pose_meta = [], []
+                
+                # 各モデル（Court/Pose/Ball）でバッチ処理
+                try:
+                    self._process_court_batches(frames, frame_ids, valid_paths, court_buf, court_meta, court_cache)
+                except Exception as e:
+                    print(f"コート検出処理中にエラーが発生しました: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                try:
+                    self._process_pose_batches(frames, frame_ids, valid_paths, pose_buf, pose_meta, pose_cache)
+                except Exception as e:
+                    print(f"ポーズ検出処理中にエラーが発生しました: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                try:
+                    self._process_ball_batches(frames, frame_ids, valid_paths, ball_buf, ball_meta, ball_cache)
+                except Exception as e:
+                    print(f"ボール検出処理中にエラーが発生しました: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                print(f"完了: Game {game_id}, Clip {clip_id}")
+                processed_clips += 1
+                
+                # メモリ解放
+                frames.clear()
+                frame_ids.clear()
+                valid_paths.clear()
+                
+                # 明示的にGCを呼び出してメモリを解放
+                import gc
+                gc.collect()
+                
+            except Exception as e:
+                print(f"クリップ処理中にエラーが発生しました: Game {game_id}, Clip {clip_id}, エラー: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        print(f"処理完了: {processed_clips}/{len(sorted_group_keys)}クリップ")
 
     def _preload_clip(self, group_key, input_dir_path):
         """クリップを先読みする"""
         game_id, clip_id = group_key
+        
         # 新しいグループエントリー構造から取得
         id_path_pairs = self.grouped_entries[group_key]
         
@@ -592,134 +635,210 @@ class ImageAnnotator:
         
         # 並列読み込み処理
         max_workers = min(32, len(id_path_pairs))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_path = {
-                executor.submit(cv2.imread, str(img_path)): (img_id, img_path) 
-                for img_id, img_path in id_path_pairs
-            }
-            
-            for future in future_to_path:
-                try:
-                    frame = future.result()
-                    img_id, path = future_to_path[future]
-                    if frame is not None:
-                        preloaded_frames.append(frame)
-                        preloaded_ids.append(img_id)
-                        preloaded_paths.append(path)
-                except Exception as exc:
-                    img_id, path = future_to_path[future]
-                    print(f"先読み中にエラーが発生: {path}, {exc}")
         
-        return (preloaded_frames, preloaded_ids, preloaded_paths)
-
-    def _get_clip_frames(self, idx, game_id, clip_id, next_clip_future):
-        """クリップのフレームを取得（先読みまたは新規読み込み）"""
-        if idx == 0 and next_clip_future is not None:
-            try:
-                frames, frame_ids, valid_paths = next_clip_future.result()
-                print(f"先読みデータ使用: Game {game_id}, Clip {clip_id} - {len(frames)}フレーム")
-                return frames, frame_ids, valid_paths
-            except Exception as e:
-                print(f"先読みデータの取得に失敗: {e}")
-                return [], [], []
-        else:
-            # クリップ画像の取得と読み込み
-            id_path_pairs = self.grouped_entries.get((game_id, clip_id), [])
-            print(f"処理中: Game {game_id}, Clip {clip_id} - {len(id_path_pairs)}フレーム")
-            
-            # 並列処理で画像を読み込む
-            frames = []
-            frame_ids = []
-            valid_paths = []
-            
-            # 並列読み込み処理
-            max_workers = min(32, len(id_path_pairs))
+        try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_pair = {
+                future_to_path = {
                     executor.submit(cv2.imread, str(img_path)): (img_id, img_path) 
                     for img_id, img_path in id_path_pairs
                 }
                 
-                for future in tqdm(
-                    future_to_pair, 
-                    desc=f"フレーム読み込み中 (Game {game_id}, Clip {clip_id})",
-                    leave=False
-                ):
+                completed = 0
+                for future in future_to_path:
                     try:
                         frame = future.result()
-                        img_id, path = future_to_pair[future]
+                        img_id, path = future_to_path[future]
                         if frame is not None:
-                            frames.append(frame)
-                            frame_ids.append(img_id)
-                            valid_paths.append(path)
+                            preloaded_frames.append(frame)
+                            preloaded_ids.append(img_id)
+                            preloaded_paths.append(path)
+                        else:
+                            print(f"警告: 画像の読み込みに失敗しました: {path}")
+                        
+                        completed += 1
+                        if completed % 50 == 0 or completed == len(future_to_path):
+                            pass
+                            
                     except Exception as exc:
-                        img_id, path = future_to_pair[future]
-                        print(f"フレーム読み込み中にエラーが発生しました: {path}, {exc}")
-            
-            return frames, frame_ids, valid_paths
+                        img_id, path = future_to_path[future]
+                        print(f"先読み中にエラーが発生: {path}, {exc}")
+        except Exception as e:
+            print(f"先読み処理全体でエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return (preloaded_frames, preloaded_ids, preloaded_paths)
+
+    def _get_clip_frames(self, game_id, clip_id, next_clip_future, pbar=None):
+        """クリップのフレームを取得（先読みまたは新規読み込み）"""
+        if next_clip_future is not None:
+            try:
+                frames, frame_ids, valid_paths = next_clip_future.result()
+                print(f"先読みデータ使用: Game {game_id}, Clip {clip_id} - {len(frames)}フレーム")
+                
+                # メイン進捗バーの更新（あれば）
+                if pbar is not None:
+                    pbar.update(len(frames))
+                    
+                return frames, frame_ids, valid_paths
+            except Exception as e:
+                print(f"先読みデータの取得に失敗: {e}")
+                return [], [], []
 
     def _process_court_batches(self, frames, frame_ids, valid_paths, court_buf, court_meta, court_cache):
         """コート検出のバッチ処理"""
         print(f"Court処理: {len(frames)}フレーム")
-        for i in range(0, len(frames), self.batch_sizes["court"]):
-            batch_frames = frames[i:i+self.batch_sizes["court"]]
-            batch_ids = frame_ids[i:i+self.batch_sizes["court"]]
-            batch_paths = valid_paths[i:i+self.batch_sizes["court"]]
-            
-            batch_meta = list(zip(batch_ids, batch_paths))
-            court_buf = [frame.copy() for frame in batch_frames]
-            
-            print(f"Court バッチ処理: {len(court_buf)}枚")
-            self._process_batch(
-                self.court_predictor, court_buf, batch_meta, court_cache
-            )
+        
+        # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
+        safe_batch_size = min(128, self.batch_sizes["court"])
+        
+        try:
+            for i in range(0, len(frames), safe_batch_size):
+                batch_end = min(i + safe_batch_size, len(frames))
+                
+                batch_frames = frames[i:batch_end]
+                batch_ids = frame_ids[i:batch_end]
+                batch_paths = valid_paths[i:batch_end]
+                
+                batch_meta = list(zip(batch_ids, batch_paths))
+                court_buf = [frame.copy() for frame in batch_frames]
+                
+                print(f"Court バッチ処理: {len(court_buf)}枚")
+                self._process_batch(
+                    self.court_predictor, court_buf, batch_meta, court_cache
+                )
+        except Exception as e:
+            print(f"コート検出処理中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_pose_batches(self, frames, frame_ids, valid_paths, pose_buf, pose_meta, pose_cache):
         """ポーズ検出のバッチ処理"""
         print(f"Pose処理: {len(frames)}フレーム")
-        for i in range(0, len(frames), self.batch_sizes["pose"]):
-            batch_frames = frames[i:i+self.batch_sizes["pose"]]
-            batch_ids = frame_ids[i:i+self.batch_sizes["pose"]]
-            batch_paths = valid_paths[i:i+self.batch_sizes["pose"]]
-            
-            batch_meta = list(zip(batch_ids, batch_paths))
-            pose_buf = [frame.copy() for frame in batch_frames]
-            
-            print(f"Pose バッチ処理: {len(pose_buf)}枚")
-            self._process_batch(
-                self.pose_predictor, pose_buf, batch_meta, pose_cache
-            )
+        
+        # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
+        safe_batch_size = min(128, self.batch_sizes["pose"])
+        
+        try:
+            for i in range(0, len(frames), safe_batch_size):
+                batch_end = min(i + safe_batch_size, len(frames))
+                
+                batch_frames = frames[i:batch_end]
+                batch_ids = frame_ids[i:batch_end]
+                batch_paths = valid_paths[i:batch_end]
+                
+                batch_meta = list(zip(batch_ids, batch_paths))
+                pose_buf = [frame.copy() for frame in batch_frames]
+                
+                print(f"Pose バッチ処理: {len(pose_buf)}枚")
+                self._process_batch(
+                    self.pose_predictor, pose_buf, batch_meta, pose_cache
+                )
+        except Exception as e:
+            print(f"ポーズ検出処理中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_ball_batches(self, frames, frame_ids, valid_paths, ball_buf, ball_meta, ball_cache):
         """ボール検出のバッチ処理（スライディングウィンドウ使用）"""
         print(f"Ball処理: {len(frames)}フレーム")
         
+        # バッチサイズを調整（大きすぎるとメモリ不足やタイムアウトの原因になる）
+        safe_batch_size = min(128, self.batch_sizes["ball"])
+        
         # フレームごとにスライディングウィンドウを構築
         for i in range(len(frames)):
             # スライディングウィンドウに追加
-            self.ball_sliding_window.append(frames[i].copy())
-            if len(self.ball_sliding_window) > self.ball_predictor.num_frames:
-                self.ball_sliding_window.pop(0)
-            
-            # スライディングウィンドウが十分な長さになったらバッファに追加
-            if len(self.ball_sliding_window) == self.ball_predictor.num_frames:
-                ball_buf.append(list(self.ball_sliding_window))
-                ball_meta.append((frame_ids[i], valid_paths[i]))
+            try:
+                self.ball_sliding_window.append(frames[i].copy())
                 
-                # バッチサイズに達したら処理
-                if len(ball_buf) >= self.batch_sizes["ball"]:
-                    print(f"Ball バッチ処理: {len(ball_buf)}枚")
-                    self._process_batch(
-                        self.ball_predictor, ball_buf, ball_meta, ball_cache
-                    )
-                    ball_buf, ball_meta = [], []
+                if len(self.ball_sliding_window) > self.ball_predictor.num_frames:
+                    self.ball_sliding_window.pop(0)
+                
+                # スライディングウィンドウが十分な長さになったらバッファに追加
+                if len(self.ball_sliding_window) == self.ball_predictor.num_frames:
+                    ball_buf.append(list(self.ball_sliding_window))
+                    ball_meta.append((frame_ids[i], valid_paths[i]))
+                    
+                    # バッチサイズに達したら処理
+                    if len(ball_buf) >= safe_batch_size:
+                        print(f"Ball バッチ処理: {len(ball_buf)}枚")
+                        self._process_batch(
+                            self.ball_predictor, ball_buf, ball_meta, ball_cache
+                        )
+                        ball_buf, ball_meta = [], []
+                        
+                        # メモリ使用量を減らすためにGCを呼び出す
+                        if i % 500 == 0:
+                            import gc
+                            gc.collect()
+            except Exception as e:
+                print(f"ボールフレーム処理中にエラーが発生しました: {e}")
+                import traceback
+                traceback.print_exc()
         
         # 残りのバッチを処理
         if ball_buf:
             print(f"Ball 残りバッチ処理: {len(ball_buf)}枚")
-            self._process_batch(
-                self.ball_predictor, ball_buf, ball_meta, ball_cache
-            )
+            try:
+                self._process_batch(
+                    self.ball_predictor, ball_buf, ball_meta, ball_cache
+                )
+            except Exception as e:
+                print(f"残りのバッファ処理中にエラーが発生しました: {e}")
+                import traceback
+                traceback.print_exc()
+                
+    def _process_batch(
+        self,
+        predictor,
+        frames_buffer: List,
+        meta_buffer: List[Tuple[int, Path]],
+        cache: Dict[int, Any],
+    ):
+        if not frames_buffer:
+            return
+
+        try:
+            # モデル予測の呼び出し
+            start_time = time.time()
+            
+            try:
+                if predictor == self.ball_predictor:
+                    preds = predictor.predict(frames_buffer)
+                else:
+                    out = predictor.predict(frames_buffer)
+                    # courtはヒートマップそのものをindex1で出力するため、out[0]だけを取り出す
+                    preds = out[0] if predictor == self.court_predictor else out
+                
+                elapsed = time.time() - start_time
+                
+                # 長時間かかっている場合は警告
+                if elapsed > 30:
+                    print(f"警告: 予測に{elapsed:.2f}秒かかりました。バッチサイズを小さくすることを検討してください。")
+                    
+            except Exception as e:
+                print(f"予測中にエラーが発生しました: {e}")
+                return
+
+            # キャッシュ登録とアノテーション追加
+            for ((img_id, _), pred) in zip(meta_buffer, preds, strict=False):
+                cache[img_id] = pred
+                if predictor == self.ball_predictor:
+                    self._add_ball_annotation(img_id, pred)
+                elif predictor == self.court_predictor:
+                    self._add_court_annotation(img_id, pred)
+                else:
+                    self._add_pose_annotations(img_id, pred)
+
+        except Exception as e:
+            print(f"処理中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # バッファをクリア
+        frames_buffer.clear()
+        meta_buffer.clear()
 
     def _save_coco_annotations(self, output_json: Path) -> None:
         """COCO形式のアノテーションを保存"""
