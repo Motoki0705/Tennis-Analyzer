@@ -4,23 +4,18 @@
 hydra:
   output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
   run:
-    dir: .
+    dir: outputs/ball/${litmodule.meta.name}/${now:%Y-%m-%d_%H-%M-%S}
 
 # デフォルト設定
 defaults:
-  - model: lite_tracknet
-  
-  # LightningModuleの選択（coord, heatmap）
-  - litmodule: heatmap_regression
-  
+  - litmodule: lite_tracknet
   - litdatamodule: ball_data
   - trainer: default
   - callbacks: default
   - _self_
 
-# 実験名（ディレクトリ名）の設定
-# モデル名とデータセットタイプから自動生成
-version: ${model.meta.name}_${litdatamodule.dataset_type}
-
 # 再現性のための乱数シード
-seed: 42 
+seed: 42
+
+# 実験名の設定
+version: ${litmodule.meta.name}_${litdatamodule.dataset_type} 

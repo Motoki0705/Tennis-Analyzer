@@ -1,0 +1,21 @@
+# @package _global_.litmodule
+
+module:
+  _target_: src.player.lit_module.lit_rtdetr.LitRtdetr
+  
+  # モデル構成パラメータ
+  pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  num_labels: 1
+  
+  # 学習パラメータ
+  lr: 0.0001
+  lr_backbone: 0.00001
+  weight_decay: 0.0001
+  optim_t_max: 50
+  min_lr: 0.000001
+  num_freeze_epoch: 3
+
+# メタ情報
+meta:
+  name: rtdetr
+  output_type: "detection" 

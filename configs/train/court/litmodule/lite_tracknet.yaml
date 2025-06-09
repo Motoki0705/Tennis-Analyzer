@@ -1,0 +1,20 @@
+# @package _global_.litmodule
+
+module:
+  _target_: src.court.lit_module.lit_lite_tracknet.LitLiteTracknet
+  
+  # モデル構成パラメータ
+  in_channels: 3
+  out_channels: 15
+  
+  # 学習パラメータ
+  lr: 0.001
+  weight_decay: 0.0001
+  warmup_epochs: 1
+  max_epochs: 50
+  bce_weight: 0.7
+
+# メタ情報
+meta:
+  name: lite_tracknet
+  output_type: "heatmap" 
