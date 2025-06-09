@@ -3,7 +3,7 @@
 import queue
 import time
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Any
 
 import cv2
 import numpy as np
@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from .definitions import PreprocessTask
 from .video_utils import FrameLoader
+from .workers.base_worker import BaseWorker
 from .workers.ball_worker import BallWorker
 from .workers.court_worker import CourtWorker
 from .workers.pose_worker import PoseWorker

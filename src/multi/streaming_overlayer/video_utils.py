@@ -1,5 +1,6 @@
 # streaming_annotator/video_utils.py
-
+from typing import Optional, Tuple, Dict, Union
+import time
 import queue
 import threading
 from pathlib import Path
