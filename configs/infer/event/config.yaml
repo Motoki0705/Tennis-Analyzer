@@ -1,0 +1,50 @@
+# イベント検知推論用設定
+# @package _global_
+
+# 入力動画設定
+input_video: "samples/input_video.mp4"
+output_video: "outputs/event_detection_output.mp4"
+
+# イベント検知モデル設定
+event_predictor:
+  _target_: src.event.api.event_predictor.EventPredictor
+  checkpoint_path: "checkpoints/event/best_transformer_v2.ckpt"
+  device: "cpu"  # "cuda" if GPU available
+  confidence_threshold: 0.5
+  smoothing_window: 5
+  debug: true
+
+# 各タスクの処理間隔とバッチサイズ
+intervals:
+  ball: 1      # 全フレーム処理
+  court: 30    # 30フレームごと（1秒間隔 @ 30fps）
+  pose: 1      # 全フレーム処理  
+  event: 1     # 全フレーム処理（特徴量統合後）
+
+batch_sizes:
+  ball: 4
+  court: 1
+  pose: 2
+  event: 1
+
+# イベント検知用シーケンス長
+event_sequence_length: 16
+
+# デバッグモード
+debug: true
+
+# 各予測器の設定（実際のプロジェクトに合わせて調整）
+ball_predictor:
+  _target_: src.ball.api.ball_predictor.BallPredictor
+  checkpoint_path: "checkpoints/ball/best_model.ckpt"
+  device: "cpu"
+
+court_predictor:
+  _target_: src.court.api.court_predictor.CourtPredictor
+  checkpoint_path: "checkpoints/court/best_model.ckpt"
+  device: "cpu"
+
+pose_predictor:
+  _target_: src.pose.api.pose_predictor.PosePredictor
+  checkpoint_path: "checkpoints/pose/best_model.ckpt"
+  device: "cpu" 
