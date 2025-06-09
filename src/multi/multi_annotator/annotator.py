@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import List, Union, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import cv2
 
 from .definitions import PreprocessTask
 from .coco_utils import CocoManager
-from .file_utils import validate_paths, collect_and_group_images, load_frame
+from .file_utils import validate_paths, collect_and_group_images, load_frame, extract_ids_from_path
 from .workers.ball_worker import BallWorker
 from .workers.court_worker import CourtWorker
 from .workers.pose_worker import PoseWorker
@@ -96,9 +98,12 @@ class MultiFlowAnnotator:
         print("✅ 全てのワーカースレッドを停止しました。")
 
     def _prepare_image_metadata(
-        self, input_dir: Path, grouped_files: Dict[Tuple[int, int], List[Path]]
-    ) -> int:
-        """画像メタデータを準備し、COCOエントリを事前に作成します。
+    self, input_dir: Path, grouped_files: Dict[Tuple[int, int], List[Path]]
+) -> int:
+        """【高速化版】画像メタデータを並列処理で準備し、COCOエントリを作成します。
+
+        画像の読み込みとメタデータ生成をスレッドプールで並列化し、
+        処理時間を短縮します。画像の順序はクリップごと、フレーム番号順に維持されます。
 
         Args:
             input_dir (Path): 入力ディレクトリのパス。
@@ -107,32 +112,87 @@ class MultiFlowAnnotator:
         Returns:
             int: 処理対象の総画像数。
         """
-        total_images = sum(len(files) for files in grouped_files.values())
-        print(f"🖼️ 画像メタデータの生成を開始: 総数 {total_images}枚")
+        print("🖼️ 画像メタデータの生成を開始 (高速化バージョン)")
 
-        with tqdm(total=total_images, desc="メタデータ生成中") as pbar:
-            for group_key, file_list in grouped_files.items():
-                game_id, clip_id = group_key
-                self.grouped_entries[group_key] = []
-                for img_path in file_list:
-                    try:
-                        # サイズ取得のために一度画像を読み込む
-                        img = cv2.imread(str(img_path))
-                        if img is None: continue
-                        height, width = img.shape[:2]
-                        
-                        img_id = self.coco_manager.add_image_entry(
-                            img_path, height, width, game_id, clip_id, input_dir
-                        )
-                        self.image_id_map[img_path] = img_id
-                        self.grouped_entries[group_key].append((img_id, img_path))
-                    except Exception as e:
-                        print(f"メタデータ生成エラー: {img_path}, {e}")
-                    finally:
-                        pbar.update(1)
-        
-        return total_images
+        # 1. 処理順序を確定させた全画像パスのリストを作成
+        sorted_group_keys = sorted(grouped_files.keys())
+        ordered_paths = [path for key in sorted_group_keys for path in grouped_files[key]]
+        total_images = len(ordered_paths)
+        if total_images == 0:
+            return 0
 
+        # 2. 結果を格納するリストを事前に確保
+        self.coco_manager.coco_output['images'] = [None] * total_images
+        # 共有リソースを保護するためのロック
+        map_lock = threading.Lock()
+
+        def _process_single_image(path: Path, index: int):
+            """単一の画像を処理してCOCOエントリを生成するワーカー関数。"""
+            try:
+                # 画像を読み込み、高さと幅を取得
+                img = cv2.imread(str(path))
+                if img is None:
+                    print(f"警告: 画像読み込み失敗: {path}")
+                    return None
+                height, width = img.shape[:2]
+
+                # メタデータを抽出
+                game_id, clip_id = extract_ids_from_path(path)
+                image_id = index + 1  # 1-based index
+
+                # COCO画像エントリを作成
+                rel_path = str(path.relative_to(input_dir))
+                image_entry = {
+                    "id": image_id, "file_name": path.name,
+                    "original_path": rel_path, "height": height, "width": width,
+                    "license": 1, "game_id": game_id, "clip_id": clip_id,
+                }
+                return index, image_entry, path, image_id
+            except Exception as e:
+                print(f"メタデータ生成エラー ({path}): {e}")
+                return None
+
+        # 3. ThreadPoolExecutorで並列処理を実行
+        with ThreadPoolExecutor(max_workers=self.preprocess_workers) as executor:
+            # タスクをサブミット
+            futures = [
+                executor.submit(_process_single_image, path, i)
+                for i, path in enumerate(ordered_paths)
+            ]
+
+            with tqdm(total=total_images, desc="メタデータ並列生成中") as pbar:
+                for future in futures:
+                    result = future.result()
+                    if result:
+                        index, image_entry, path, image_id = result
+                        # 4. 事前に確保したリストの正しい位置に結果を格納
+                        self.coco_manager.coco_output['images'][index] = image_entry
+                        # 5. 共有マップをロックして更新
+                        with map_lock:
+                            self.image_id_map[path] = image_id
+                    pbar.update(1)
+
+        # Noneが残っている場合（エラーで処理できなかった画像）は除去
+        self.coco_manager.coco_output['images'] = [
+            entry for entry in self.coco_manager.coco_output['images'] if entry is not None
+        ]
+        # 次のIDが正しくなるようにカウンターを更新
+        self.coco_manager.image_id_counter = len(self.coco_manager.coco_output['images']) + 1
+
+        # 6. 最後にgrouped_entriesを構築
+        print("メタデータに基づき、処理グループを再構築中...")
+        for group_key in sorted_group_keys:
+            self.grouped_entries[group_key] = []
+            for path in grouped_files[group_key]:
+                if path in self.image_id_map:
+                    img_id = self.image_id_map[path]
+                    self.grouped_entries[group_key].append((img_id, path))
+
+        final_image_count = len(self.coco_manager.coco_output['images'])
+        print(f"✅ メタデータ生成完了。有効な画像数: {final_image_count} / {total_images}")
+
+        return final_image_count
+    
     def _preload_clip(self, id_path_pairs: List[Tuple[int, Path]]):
         """クリップ内の全フレームを並列で先読みします。"""
         frames, ids, paths = [], [], []
