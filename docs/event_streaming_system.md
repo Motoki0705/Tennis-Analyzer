@@ -12,11 +12,19 @@
    - 各タスクの特徴量を統合してイベント検知を実行
    - 時系列データのバッファリングと管理
 
-2. **EventPredictor** (`src/event/api/event_predictor.py`)
+2. **BallWorker** (`src/multi/streaming_overlayer/workers/ball_worker.py`)
+   - ボール検知の並列処理
+   - ボール位置と信頼度の検知
+
+3. **PoseWorker** (`src/multi/streaming_overlayer/workers/pose_worker.py`)
+   - プレイヤーポーズ検知の並列処理
+   - バウンディングボックスとキーポイントの検知
+
+4. **EventPredictor** (`src/event/api/event_predictor.py`)
    - LitTransformerV2を使用したイベント検知API
    - 信号波の描画とオーバーレイ機能
 
-3. **MultiEventPredictor** (`src/multi/streaming_overlayer/multi_event_predictor.py`)
+5. **MultiEventPredictor** (`src/multi/streaming_overlayer/multi_event_predictor.py`)
    - 複数タスクの並列実行と統合管理
    - ストリーミング処理のメインコントローラー
 
@@ -173,8 +181,11 @@ debug: true
 ## テスト
 
 ```bash
-# ユニットテスト
+# EventPredictorのテスト
 python -m pytest tests/infer_model_instantiate/test_event_predictor.py -v
+
+# Worker クラスのテスト
+python -m pytest tests/infer_model_instantiate/test_workers.py -v
 
 # 統合テスト
 python scripts/infer/infer_event_streaming.py --config-name=test_config
