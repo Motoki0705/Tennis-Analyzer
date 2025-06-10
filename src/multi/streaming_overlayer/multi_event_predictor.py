@@ -93,7 +93,7 @@ class MultiEventPredictor:
         worker_classes = {
             "ball": BallWorker,
             "court": CourtWorker,
-            "pose": PoseWorker,  # 実装が必要
+            "pose": PoseWorker,
             "event": EventWorker,
         }
         
