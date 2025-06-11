@@ -12,13 +12,13 @@ hydra:
     dir: hydra_outputs/infer/${mode}/${now:%Y-%m-%d_%H-%M-%S}
 
 # --- Top-level Parameters ---
-mode: "court" # ball, court, player, pose, event, multi, frames, image
+mode: "court" # ball, court, player, pose, event, multi, frames, image, streaming_overlayer, multi_event
 
 # --- Common Settings ---
 common:
-  device: "cpu"
-  use_half: false
-  batch_size: 1
+  device: "cuda"
+  use_half: true
+  batch_size: 32
 
 # --- Paths ---
 input_path: "datasets/test/video_input2.mp4" # Override this
@@ -49,7 +49,7 @@ predictors:
     _target_: src.court.predictor.CourtPredictor
     input_size: [360, 640]
     num_keypoints: 15 # This might be specific to the model's output head (e.g. FPN outputs 1 channel)
-    threshold: 0.9
+    threshold: 0.6
     visualize_mode: "overlay"
 
   player:
@@ -64,15 +64,6 @@ predictors:
     player_label_id: 0 # Label ID for 'person' in the detection model
     det_score_thresh: 0.7
     pose_score_thresh: 0.7
-
-  # イベント検出器の設定を追加
-  event:
-    _target_: src.event.predictor.EventPredictor
-    # model is passed by main.py
-    input_size: [360, 640]
-    sequence_length: 32
-    threshold: 0.5
-    visualize_mode: "overlay"
 
   multi:
     _target_: src.multi.multi_predictor.MultiPredictor
@@ -98,3 +89,20 @@ predictors:
     ball_vis_thresh: ${predictors.ball.threshold}
     court_vis_thresh: ${predictors.court.threshold}
     pose_vis_thresh: ${predictors.pose.pose_score_thresh}
+
+  # ストリーミングオーバレイ設定（新規追加）
+  streaming_overlayer:
+    _target_: src.multi.streaming_overlayer.video_predictor.VideoPredictor
+    # ball_predictor, court_predictor, pose_predictor は main.py で渡される
+    intervals: {"ball": 1, "court": 30, "pose": 5}
+    batch_sizes: {"ball": 16, "court": 16, "pose": 16}
+    debug: false
+
+  # マルチイベントオーバレイ設定（新規追加）
+  multi_event:
+    _target_: src.multi.streaming_overlayer.multi_event_predictor.MultiEventPredictor
+    # 各単体predictorは main.py で渡される
+    intervals: {"ball": 1, "court": 30, "pose": 5}
+    batch_sizes: {"ball": 16, "court": 16, "pose": 16}
+    event_sequence_length: 16
+    debug: false

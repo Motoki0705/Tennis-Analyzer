@@ -52,17 +52,22 @@ class BallPredictor:
 
     def preprocess(self, clips: List[List[np.ndarray]]) -> torch.Tensor:
         """
-        複数のクリップを前処理し、モデル入力用のテンソルを生成します。
+        StreamingOverlayer からも呼び出されるため、
+        引数 clips が *フレームリスト* の場合（= 1 ステップ API 用）と
+        *クリップのリスト* の場合の両方を許容する。
 
-        Args:
-            clips: 各クリップのリスト。各クリップは複数のフレーム（通常3つ）を含む。
-
-        Returns:
-            前処理済みのバッチテンソル
+        1. clips が ``List[np.ndarray]`` の場合は Streaming 用として扱い、
+           そのまま返して後段で処理する。（戻り値は `(data, meta)` のタプル）
+        2. clips が ``List[List[np.ndarray]]`` の場合は従来どおりバッチテンソルを返す。
         """
-        tensors = [self._preprocess_clip(clip) for clip in clips]
+        # StreamingOverlayer ではフレーム単位で渡される
+        if clips and isinstance(clips[0], np.ndarray):  # type: ignore[arg-type]
+            return clips, None  # type: ignore[return-value]
+
+        # 従来のクリップ単位
+        tensors = [self._preprocess_clip(clip) for clip in clips]  # type: ignore[arg-type]
         batch = torch.cat(tensors, dim=0)
-        return batch
+        return batch  # type: ignore[return-value]
 
     def _preprocess_clip(self, frames: List[np.ndarray]) -> torch.Tensor:
         """
@@ -82,23 +87,41 @@ class BallPredictor:
         clip = torch.cat(tens_list, dim=0)
         return clip.unsqueeze(0).to(self.device)
 
-    def inference(self, batch: torch.Tensor) -> torch.Tensor:
-        """
-        モデル推論を実行します。
+    def inference(self, tensor_data):  # type: ignore[override]
+        """StreamingOverlayer 互換: frames リスト / テンソル双方に対応"""
 
-        Args:
-            batch: 前処理済みのバッチテンソル
+        # 1) StreamingOverlayer からはフレームリストが渡される
+        if isinstance(tensor_data, list):
+            frames: List[np.ndarray] = tensor_data  # type: ignore[assignment]
+            clips: List[List[np.ndarray]] = []
 
-        Returns:
-            モデル出力テンソル
-        """
-        with torch.no_grad():
-            if self.use_half:
-                with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
-                    preds = self.model(batch)
-            else:
-                preds = self.model(batch)
-        return preds
+            # フレームを num_frames ごとに分割
+            for i in range(0, len(frames) - self.num_frames + 1, self.num_frames):
+                clip = frames[i : i + self.num_frames]
+                if len(clip) == self.num_frames:
+                    clips.append(clip)
+
+            # フレーム数が足りない場合は最後のフレームでパディングして 1 クリップ生成
+            if not clips and frames:
+                padded = frames + [frames[-1]] * (self.num_frames - len(frames))
+                clips.append(padded)
+
+            if not clips:
+                return []  # type: ignore[return-value]
+
+            return self.predict(clips)  # type: ignore[return-value]
+
+        # 2) 従来どおりテンソルが渡された場合は元のロジック
+        if isinstance(tensor_data, torch.Tensor):
+            with torch.no_grad():
+                if self.use_half:
+                    with torch.amp.autocast(device_type=self.device, dtype=torch.float16):
+                        preds = self.model(tensor_data)
+                else:
+                    preds = self.model(tensor_data)
+            return preds  # type: ignore[return-value]
+
+        raise TypeError("Unsupported tensor_data type for inference")
 
     def postprocess(self, preds: torch.Tensor, clips: List[List[np.ndarray]]) -> List[dict]:
         """

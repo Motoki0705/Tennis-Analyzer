@@ -198,3 +198,5 @@ all_code/
 
 # hydra output
 hydra_outputs/
+
+.tmp.driveupload/

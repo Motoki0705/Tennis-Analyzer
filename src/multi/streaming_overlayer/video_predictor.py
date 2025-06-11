@@ -52,18 +52,23 @@ class VideoPredictor:
             } for name in self.predictors
         }
         
-        # ここで各Workerクラスをインスタンス化
-        # 例: workers["court"] = CourtWorker(...)
-        # Ball, Court, Poseの各Workerを実装し、ここで初期化する必要があります
-        # (上記 `court_worker.py` の例を参照)
-        
-        # ダミーワーカーで代替
+        # 正しいワーカークラスを割り当て
+        worker_classes = {
+            "ball": BallWorker,
+            "court": CourtWorker,
+            "pose": PoseWorker,
+        }
+
         for name, pred in self.predictors.items():
-            # 実際のプロジェクトでは、BallWorker, CourtWorker, PoseWorkerを正しくインポートして使用
-            worker_class = CourtWorker # 仮にCourtWorkerで代用
+            worker_class = worker_classes.get(name, BaseWorker)
             workers[name] = worker_class(
-                 name, pred, queues[name]["preprocess"], queues[name]["inference"],
-                 queues[name]["postprocess"], self.results_queue, self.debug
+                name,
+                pred,
+                queues[name]["preprocess"],
+                queues[name]["inference"],
+                queues[name]["postprocess"],
+                self.results_queue,
+                self.debug,
             )
         return workers
 
@@ -83,7 +88,7 @@ class VideoPredictor:
         self._dispatch_frames(frame_loader, props["total_frames"])
 
         # 3. 結果の集約と描画
-        self._aggregate_and_write_results(writer, props["total_frames"])
+        self._aggregate_and_write_results(writer, input_path, props["total_frames"])
         
         # 4. クリーンアップ
         for worker in self.workers.values():
@@ -123,13 +128,13 @@ class VideoPredictor:
                 task = PreprocessTask(f"{name}_final", buffers[name], meta_buffers[name])
                 self.workers[name].preprocess_queue.put(task)
 
-    def _aggregate_and_write_results(self, writer: cv2.VideoWriter, total_frames: int):
+    def _aggregate_and_write_results(self, writer: cv2.VideoWriter, input_path: Path, total_frames: int):
         """結果キューから推論結果を集約し、描画して動画ファイルに書き込みます。"""
         cached_preds = {name: None for name in self.predictors}
         results_by_frame: Dict[int, Dict[str, Any]] = {}
         
         # VideoCaptureをもう一度開いて描画用のフレームを取得
-        cap = cv2.VideoCapture(str(writer.get_filename()))
+        cap = cv2.VideoCapture(str(input_path))
 
         print("✍️ 結果の集約と動画書き込みを開始...")
         with tqdm(total=total_frames, desc="動画書き込み中") as pbar:
@@ -155,8 +160,13 @@ class VideoPredictor:
                 annotated_frame = frame.copy()
                 for name, pred in cached_preds.items():
                     if pred is not None:
-                        # 各predictorのoverlayメソッドを呼び出す
-                        annotated_frame = self.predictors[name].overlay(annotated_frame, pred)
+                        # Ball など list が返る場合は 1 フレーム分を想定して 0 番目を使用
+                        to_draw = pred[0] if isinstance(pred, list) else pred
+                        try:
+                            annotated_frame = self.predictors[name].overlay(annotated_frame, to_draw)
+                        except Exception:
+                            # overlay 失敗時は描画をスキップ
+                            pass
 
                 writer.write(annotated_frame)
                 pbar.update(1)

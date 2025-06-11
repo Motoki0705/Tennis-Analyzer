@@ -9,9 +9,11 @@ Hydra-driven Inference System for Tennis Analyzer
 - player : プレーヤー検出
 - pose   : 検出器＋ViT-Pose による姿勢推定
 - event  : ボール、プレイヤー、コートの特徴からイベント（ヒット、バウンド）検出
+- streaming_overlayer : マルチタスク推論を並列実行しストリーミングにオーバレイ
 - multi  : ball + court + pose を同時にオーバレイ
 - frames : 各フレームを推論し JSONL へ書き出し
 - image  : 画像ディレクトリ内の画像に対して推論し、JSONのみ出力
+- multi_event : ball + court + pose + event を並列実行しオーバレイ
 """
 from __future__ import annotations
 
@@ -224,10 +226,7 @@ def get_predictor(
         )
         
     if mode == "event":
-        cache.setdefault("event", instantiate_model(cfg, "event").to(device))
-        return instantiate(
-            cfg.predictors.event, model=cache["event"], device=device, use_half=use_half
-        )
+        return instantiate(cfg.event)
 
     raise ValueError(f"Unsupported mode: {mode}")
 
@@ -320,6 +319,48 @@ def main(cfg: DictConfig):
         else:
             predictor.run(inp, out_path, batch_size=batch)
             
+        logger.info("Finished.")
+        return
+
+    # ─── ストリーミングオーバーレイ ───────────────────────
+    if mode == "streaming_overlayer":
+        # 既存の複合モードと同様にPredictorを準備
+        ball_pred, court_pred, pose_pred = setup_composite_predictors(cfg)
+
+        streaming_pred = instantiate(
+            cfg.predictors.streaming_overlayer,
+            ball_predictor=ball_pred,
+            court_predictor=court_pred,
+            pose_predictor=pose_pred,
+        )
+
+        if not out_path:
+            out_path = inp.with_name(f"{inp.stem}_streaming.mp4")
+        logger.info(f"[streaming_overlayer] → {out_path}")
+        streaming_pred.run(inp, out_path)
+        logger.info("Finished.")
+        return
+
+    # ─── マルチイベントオーバーレイ ───────────────────────
+    if mode == "multi_event":
+        # Ball / Court / Pose predictors
+        ball_pred, court_pred, pose_pred = setup_composite_predictors(cfg)
+
+        # Event predictor（モデル+前後処理込み）
+        event_pred = get_predictor(cfg, "event")
+
+        multi_event_pred = instantiate(
+            cfg.predictors.multi_event,
+            ball_predictor=ball_pred,
+            court_predictor=court_pred,
+            pose_predictor=pose_pred,
+            event_predictor=event_pred,
+        )
+
+        if not out_path:
+            out_path = inp.with_name(f"{inp.stem}_multi_event.mp4")
+        logger.info(f"[multi_event] → {out_path}")
+        multi_event_pred.run(inp, out_path)
         logger.info("Finished.")
         return
 
