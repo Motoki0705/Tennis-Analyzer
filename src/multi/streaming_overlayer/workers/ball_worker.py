@@ -15,6 +15,14 @@ class BallWorker(BaseWorker):
     
     ボール位置と信頼度を検知し、結果をキューに送信します。
     """
+    
+    def __init__(self, name, predictor, queue_set, results_q, debug=False):
+        # QueueManagerから基本キューを取得
+        preprocess_q = queue_set.get_queue("preprocess")
+        inference_q = queue_set.get_queue("inference")
+        postprocess_q = queue_set.get_queue("postprocess")
+        
+        super().__init__(name, predictor, preprocess_q, inference_q, postprocess_q, results_q, debug)
 
     def _process_preprocess_task(self, task):
         """
