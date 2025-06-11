@@ -25,7 +25,12 @@ class BallWorker(BaseWorker):
         """
         try:
             # 予測器の前処理メソッドを呼び出し
-            processed_data, meta_info = self.predictor.preprocess(task.frames)
+            preproc_out = self.predictor.preprocess(task.frames)
+            # preprocess が (data, meta_info) を返す実装と data だけ返す実装の両方を許容
+            if isinstance(preproc_out, tuple) and len(preproc_out) == 2:
+                processed_data, meta_info = preproc_out
+            else:
+                processed_data, meta_info = preproc_out, None
             
             # 推論タスクをキューに送信
             self.inference_queue.put(InferenceTask(task.task_id, processed_data, task.meta_data))
@@ -74,8 +79,12 @@ class BallWorker(BaseWorker):
             # メタデータからオリジナルフレームの形状情報を復元
             original_shapes = [(meta[1], meta[2]) for meta in task.meta_data] if task.meta_data else None
             
-            # 予測器の後処理メソッドを呼び出し
-            ball_results = self.predictor.postprocess(task.inference_output, original_shapes)
+            # BallPredictor には Streaming 用の簡易インターフェースが無い場合がある。
+            # 後処理が不要な（既に最終結果になっている）場合はそのまま使用。
+            if hasattr(self.predictor, "postprocess") and original_shapes is not None:
+                ball_results = self.predictor.postprocess(task.inference_output, original_shapes)
+            else:
+                ball_results = task.inference_output
             
             # 結果をフレームごとに分解し、フレームインデックスを付けて結果キューに追加
             if isinstance(ball_results, (list, tuple)):
