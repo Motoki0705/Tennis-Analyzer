@@ -16,6 +16,13 @@ from .workers.ball_worker import BallWorker
 from .workers.court_worker import CourtWorker
 from .workers.pose_worker import PoseWorker
 from .queue_manager import QueueManager, create_queue_manager_for_video_predictor
+from .config_utils import (
+    create_queue_configs_from_hydra_config,
+    get_worker_extended_queue_names,
+    apply_performance_settings,
+    validate_queue_config,
+    log_queue_configuration
+)
 
 class VideoPredictor:
     """動画に対して複数のモデル推論を並列実行し、結果を描画するクラス。"""
@@ -25,7 +32,8 @@ class VideoPredictor:
         ball_predictor, court_predictor, pose_predictor,
         intervals: Dict[str, int], batch_sizes: Dict[str, int],
         debug: bool = False,
-        custom_queue_configs: Optional[Dict[str, Dict[str, Any]]] = None
+        custom_queue_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        hydra_queue_config: Optional[Any] = None
     ):
         self.predictors = {
             "ball": ball_predictor,
@@ -38,13 +46,83 @@ class VideoPredictor:
 
         # 拡張可能なキューシステムを初期化
         worker_names = list(self.predictors.keys())
-        self.queue_manager = create_queue_manager_for_video_predictor(
-            worker_names, 
-            custom_queue_configs
-        )
+        
+        # Hydra設定からキューコンフィグを作成
+        if hydra_queue_config is not None:
+            try:
+                # 設定検証
+                if validate_queue_config(hydra_queue_config):
+                    log_queue_configuration(hydra_queue_config)
+                    
+                    # Hydra設定をQueueManager形式に変換
+                    queue_configs_from_hydra = create_queue_configs_from_hydra_config(hydra_queue_config)
+                    
+                    # カスタム設定とマージ
+                    final_queue_configs = queue_configs_from_hydra.copy()
+                    if custom_queue_configs:
+                        final_queue_configs.update(custom_queue_configs)
+                    
+                    self.queue_manager = create_queue_manager_for_video_predictor(
+                        worker_names, 
+                        final_queue_configs
+                    )
+                    
+                    # パフォーマンス設定を適用
+                    performance_settings = apply_performance_settings(hydra_queue_config)
+                    self._apply_performance_settings(performance_settings)
+                    
+                else:
+                    raise ValueError("Hydra キュー設定の検証に失敗しました")
+                    
+            except Exception as e:
+                print(f"⚠️ Hydra設定の読み込みに失敗: {e}")
+                print("🔄 デフォルト設定にフォールバック")
+                self.queue_manager = create_queue_manager_for_video_predictor(
+                    worker_names, 
+                    custom_queue_configs
+                )
+        else:
+            self.queue_manager = create_queue_manager_for_video_predictor(
+                worker_names, 
+                custom_queue_configs
+            )
 
         # パイプラインワーカーの初期化
         self.workers = self._initialize_workers()
+        
+        # パフォーマンス監視設定
+        self.performance_settings = {}
+        
+        # パフォーマンス設定をここで初期化（デフォルト値）
+        self.performance_settings = {"enable_monitoring": True}
+    
+    def _apply_performance_settings(self, settings: Dict[str, Any]):
+        """パフォーマンス設定を適用"""
+        self.performance_settings.update(settings)
+        
+        if settings.get('enable_monitoring', False):
+            print("📊 キュー監視機能が有効化されました")
+        
+        if settings.get('log_queue_status', False):
+            print("📝 キュー状態ログ出力が有効化されました")
+        
+        if settings.get('gpu_optimization', False):
+            print("🚀 GPU最適化モードが有効化されました")
+    
+    def get_queue_status_with_settings(self) -> Dict[str, Any]:
+        """設定に基づいてキュー状態を取得"""
+        if not self.performance_settings.get('enable_monitoring', True):
+            return {"monitoring": "disabled"}
+        
+        status = self.queue_manager.get_queue_status()
+        
+        if self.performance_settings.get('log_queue_status', False):
+            print("📊 Queue Status:")
+            print(f"  Results queue: {status['results_queue_size']} items")
+            for worker, info in status['workers'].items():
+                print(f"  {worker}: {sum(info['base_queues'].values())} base + {sum(info['extended_queues'].values())} extended")
+        
+        return status
 
     def _initialize_workers(self) -> Dict[str, "BaseWorker"]:
         """各モデルに対応するワーカーを初期化します。"""

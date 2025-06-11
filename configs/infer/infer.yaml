@@ -5,6 +5,7 @@ defaults:
   - player: rt_detr          # rt_detr
   - pose: vitpose       # vitpose
   - event: transformer   # 追加: イベント検出モデル
+  - queue: default      # default, high_performance, low_memory, custom_example
 
 
 hydra:
@@ -97,6 +98,8 @@ predictors:
     intervals: {"ball": 1, "court": 30, "pose": 5}
     batch_sizes: {"ball": 16, "court": 16, "pose": 16}
     debug: false
+    # キューシステム設定（自動的にqueue設定から読み込まれる）
+    custom_queue_configs: null  # カスタム設定がある場合はここで指定
 
   # マルチイベントオーバレイ設定（新規追加）
   multi_event:

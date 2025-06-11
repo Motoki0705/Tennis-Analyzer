@@ -1,0 +1,47 @@
+# 高性能キューシステム設定
+# GPU使用率最大化とスループット重視の設定
+
+defaults:
+  - default
+
+# 高性能用キューサイズ設定（大容量）
+base_queue_sizes:
+  preprocess: 32
+  inference: 64
+  postprocess: 32
+  results: 200
+
+# ワーカー別拡張キュー設定（高スループット）
+worker_extended_queues:
+  ball:
+    ball_inference: 128
+  
+  court:
+    court_inference: 128
+  
+  pose:
+    detection_inference: 128
+    detection_postprocess: 64
+    pose_inference: 128
+    pose_postprocess: 64
+
+# 優先度キュー活用
+queue_types:
+  preprocess: "Queue"
+  inference: "PriorityQueue"  # 推論優先度制御
+  postprocess: "Queue"
+  results: "PriorityQueue"
+  detection_inference: "PriorityQueue"  # Detection優先度制御
+  detection_postprocess: "Queue"
+  pose_inference: "PriorityQueue"  # Pose優先度制御
+  pose_postprocess: "Queue"
+  ball_inference: "PriorityQueue"
+  court_inference: "PriorityQueue"
+
+# 高性能設定
+performance:
+  enable_monitoring: true
+  log_queue_status: true  # パフォーマンス監視有効
+  auto_clear_on_shutdown: true
+  gpu_optimization: true
+  batch_processing: true 
