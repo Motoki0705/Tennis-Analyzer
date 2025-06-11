@@ -23,16 +23,24 @@ class PreprocessTask:
 
 class InferenceTask:
     """推論タスクを表すクラス。"""
-    def __init__(self, task_id: TaskId, tensor_data: Any, meta_data: List[Any]):
+    def __init__(self, task_id: TaskId, tensor_data: Any, meta_data: List[Any], **kwargs):
         self.task_id = task_id
         self.tensor_data = tensor_data
         self.meta_data = meta_data
         self.timestamp = time.time()
+        
+        # 追加属性を動的に設定
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 class PostprocessTask:
     """後処理タスクを表すクラス。"""
-    def __init__(self, task_id: TaskId, inference_output: Any, meta_data: List[Any]):
+    def __init__(self, task_id: TaskId, inference_output: Any, meta_data: List[Any], **kwargs):
         self.task_id = task_id
         self.inference_output = inference_output
         self.meta_data = meta_data
         self.timestamp = time.time()
+        
+        # 追加属性を動的に設定
+        for key, value in kwargs.items():
+            setattr(self, key, value)

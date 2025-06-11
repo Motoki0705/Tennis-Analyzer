@@ -3,7 +3,7 @@
 import queue
 import time
 from pathlib import Path
-from typing import Dict, List, Union, Any
+from typing import Dict, List, Union, Any, Optional
 
 import cv2
 import numpy as np
@@ -15,6 +15,7 @@ from .workers.base_worker import BaseWorker
 from .workers.ball_worker import BallWorker
 from .workers.court_worker import CourtWorker
 from .workers.pose_worker import PoseWorker
+from .queue_manager import QueueManager, create_queue_manager_for_video_predictor
 
 class VideoPredictor:
     """動画に対して複数のモデル推論を並列実行し、結果を描画するクラス。"""
@@ -23,7 +24,8 @@ class VideoPredictor:
         self,
         ball_predictor, court_predictor, pose_predictor,
         intervals: Dict[str, int], batch_sizes: Dict[str, int],
-        debug: bool = False
+        debug: bool = False,
+        custom_queue_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ):
         self.predictors = {
             "ball": ball_predictor,
@@ -34,8 +36,12 @@ class VideoPredictor:
         self.batch_sizes = batch_sizes
         self.debug = debug
 
-        # 結果をフレームインデックス順に集約するための優先度付きキュー
-        self.results_queue = queue.PriorityQueue()
+        # 拡張可能なキューシステムを初期化
+        worker_names = list(self.predictors.keys())
+        self.queue_manager = create_queue_manager_for_video_predictor(
+            worker_names, 
+            custom_queue_configs
+        )
 
         # パイプラインワーカーの初期化
         self.workers = self._initialize_workers()
@@ -43,14 +49,6 @@ class VideoPredictor:
     def _initialize_workers(self) -> Dict[str, "BaseWorker"]:
         """各モデルに対応するワーカーを初期化します。"""
         workers = {}
-        # 各ワーカーに共通の結果キューを渡す
-        queues = {
-            name: {
-                "preprocess": queue.Queue(maxsize=16),
-                "inference": queue.Queue(maxsize=16),
-                "postprocess": queue.Queue(maxsize=16),
-            } for name in self.predictors
-        }
         
         # 正しいワーカークラスを割り当て
         worker_classes = {
@@ -61,13 +59,17 @@ class VideoPredictor:
 
         for name, pred in self.predictors.items():
             worker_class = worker_classes.get(name, BaseWorker)
+            
+            # QueueManagerからキューセットを取得
+            queue_set = self.queue_manager.get_worker_queue_set(name)
+            if not queue_set:
+                raise ValueError(f"Queue set for worker '{name}' not found")
+            
             workers[name] = worker_class(
                 name,
                 pred,
-                queues[name]["preprocess"],
-                queues[name]["inference"],
-                queues[name]["postprocess"],
-                self.results_queue,
+                queue_set,  # キューセット全体を渡す
+                self.queue_manager.get_results_queue(),
                 self.debug,
             )
         return workers
@@ -117,7 +119,8 @@ class VideoPredictor:
                 
                     if len(buffers[name]) >= self.batch_sizes[name]:
                         task = PreprocessTask(f"{name}_{frame_idx}", buffers[name], meta_buffers[name])
-                        self.workers[name].preprocess_queue.put(task)
+                        preprocess_queue = self.queue_manager.get_queue(name, "preprocess")
+                        preprocess_queue.put(task)
                         buffers[name].clear()
                         meta_buffers[name].clear()
                 pbar.update(1)
@@ -126,7 +129,8 @@ class VideoPredictor:
         for name in self.predictors:
             if buffers[name]:
                 task = PreprocessTask(f"{name}_final", buffers[name], meta_buffers[name])
-                self.workers[name].preprocess_queue.put(task)
+                preprocess_queue = self.queue_manager.get_queue(name, "preprocess")
+                preprocess_queue.put(task)
 
     def _aggregate_and_write_results(self, writer: cv2.VideoWriter, input_path: Path, total_frames: int):
         """結果キューから推論結果を集約し、描画して動画ファイルに書き込みます。"""
@@ -140,8 +144,9 @@ class VideoPredictor:
         with tqdm(total=total_frames, desc="動画書き込み中") as pbar:
             for frame_idx in range(total_frames):
                 # このフレームインデックスまでの結果をすべてキューから取り出す
-                while not self.results_queue.empty() and self.results_queue.queue[0][0] <= frame_idx:
-                    res_idx, name, result = self.results_queue.get()
+                results_queue = self.queue_manager.get_results_queue()
+                while not results_queue.empty() and results_queue.queue[0][0] <= frame_idx:
+                    res_idx, name, result = results_queue.get()
                     if res_idx not in results_by_frame:
                         results_by_frame[res_idx] = {}
                     results_by_frame[res_idx][name] = result
