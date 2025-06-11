@@ -1,0 +1,74 @@
+# カスタムキューシステム設定例
+# プロジェクト固有のニーズに合わせた設定例
+
+defaults:
+  - default
+
+# プロジェクト固有のキューサイズ設定
+base_queue_sizes:
+  preprocess: 24
+  inference: 48
+  postprocess: 24
+  results: 150
+
+# 特殊用途キューの追加
+custom_queues:
+  emergency_processing:
+    maxsize: 8
+    queue_type: "LifoQueue"
+    description: "緊急処理用LIFO キュー"
+  
+  batch_accumulator:
+    maxsize: 64
+    queue_type: "Queue"
+    description: "バッチ処理用蓄積キュー"
+  
+  priority_inference:
+    maxsize: 128
+    queue_type: "PriorityQueue"
+    description: "高優先度推論専用キュー"
+
+# ワーカー別拡張キュー設定（カスタム）
+worker_extended_queues:
+  ball:
+    ball_inference: 40
+    priority_inference: 128  # カスタムキュー使用
+  
+  court:
+    court_inference: 40
+    batch_accumulator: 64  # カスタムキュー使用
+  
+  pose:
+    detection_inference: 40
+    detection_postprocess: 20
+    pose_inference: 40
+    pose_postprocess: 20
+    emergency_processing: 8  # カスタムキュー使用
+
+# 混合キュータイプ設定
+queue_types:
+  preprocess: "Queue"
+  inference: "PriorityQueue"
+  postprocess: "Queue"
+  results: "PriorityQueue"
+  detection_inference: "PriorityQueue"
+  detection_postprocess: "Queue"
+  pose_inference: "PriorityQueue"
+  pose_postprocess: "Queue"
+  ball_inference: "Queue"
+  court_inference: "Queue"
+  # カスタムキューのタイプは custom_queues で定義
+
+# カスタム設定
+performance:
+  enable_monitoring: true
+  log_queue_status: true
+  auto_clear_on_shutdown: true
+  custom_optimization: true
+  adaptive_sizing: true  # 動的サイズ調整
+  
+# 特殊処理設定
+special_processing:
+  enable_emergency_queue: true
+  enable_batch_processing: true
+  enable_priority_control: true 
