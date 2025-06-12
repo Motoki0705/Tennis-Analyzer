@@ -15,7 +15,7 @@ from src.utils.logging_utils import setup_logger
 class BallPredictor:
     def __init__(
         self,
-        model: Callable,
+        litmodule,
         input_size: Tuple[int, int],
         heatmap_size: Tuple[int, int],
         num_frames: int,
@@ -39,7 +39,7 @@ class BallPredictor:
         self.use_half = use_half  # ★ 追加
 
         # ────────── モデル ──────────
-        self.model = model.eval()
+        self.model = litmodule.eval()
 
         # ────────── 前処理定義 ──────────
         self.transform = A.Compose(

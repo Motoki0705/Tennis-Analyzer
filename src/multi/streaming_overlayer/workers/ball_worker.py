@@ -2,6 +2,10 @@
 
 import torch
 import logging
+import threading
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Any, Dict, Optional
 
 from .base_worker import BaseWorker
 from ..definitions import InferenceTask, PostprocessTask
@@ -11,9 +15,10 @@ logger = logging.getLogger(__name__)
 
 class BallWorker(BaseWorker):
     """
-    ボール検知のためのパイプラインワーカー。
+    ボール検知のためのマルチフローパイプラインワーカー。
     
-    ボール位置と信頼度を検知し、結果をキューに送信します。
+    前処理→推論→後処理の3段階を完全に分離し、
+    スライディングウィンドウベースの時系列処理を実装します。
     """
     
     def __init__(self, name, predictor, queue_set, results_q, debug=False):
@@ -23,34 +28,121 @@ class BallWorker(BaseWorker):
         postprocess_q = queue_set.get_queue("postprocess")
         
         super().__init__(name, predictor, preprocess_q, inference_q, postprocess_q, results_q, debug)
+        
+        # スライディングウィンドウ
+        self.sliding_window: List[np.ndarray] = []
+        self.sliding_window_lock = threading.Lock()
+        
+        # スレッドプール（前処理・後処理用）
+        self.preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_preprocess")
+        self.postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_postprocess")
+        
+        # パフォーマンス監視
+        self.preprocess_count = 0
+        self.inference_count = 0
+        self.postprocess_count = 0
+        
+    def stop(self):
+        """ワーカーとスレッドプールを停止します。"""
+        # スレッドプールをシャットダウン
+        if hasattr(self, 'preprocess_pool'):
+            self.preprocess_pool.shutdown(wait=False)
+        if hasattr(self, 'postprocess_pool'):
+            self.postprocess_pool.shutdown(wait=False)
+        
+        # ベースクラスの停止処理
+        super().stop()
 
     def _process_preprocess_task(self, task):
         """
         前処理タスクを処理します。
         
+        スライディングウィンドウを考慮した前処理を並列実行します。
+        
         Args:
             task: PreprocessTask - フレームデータとメタデータを含む
         """
         try:
-            # 予測器の前処理メソッドを呼び出し
-            preproc_out = self.predictor.preprocess(task.frames)
-            # preprocess が (data, meta_info) を返す実装と data だけ返す実装の両方を許容
-            if isinstance(preproc_out, tuple) and len(preproc_out) == 2:
-                processed_data, meta_info = preproc_out
-            else:
-                processed_data, meta_info = preproc_out, None
+            # 前処理をスレッドプールで並列実行
+            future = self.preprocess_pool.submit(self._execute_preprocess, task)
             
-            # 推論タスクをキューに送信
-            self.inference_queue.put(InferenceTask(task.task_id, processed_data, task.meta_data))
-            
-            if self.debug:
-                logger.debug(f"BallWorker前処理完了: {task.task_id}, frames={len(task.frames)}")
+            # 結果を取得（ノンブロッキング）
+            try:
+                processed_data, clips = future.result(timeout=5.0)  # 5秒でタイムアウト
                 
+                if clips:
+                    # 推論タスクをキューに送信
+                    inference_task = InferenceTask(
+                        task.task_id, 
+                        processed_data, 
+                        task.meta_data,
+                        original_clips=clips
+                    )
+                    self.inference_queue.put(inference_task)
+                    
+                    self.preprocess_count += 1
+                    
+                    if self.debug:
+                        logger.debug(f"BallWorker前処理完了: {task.task_id}, clips={len(clips)}")
+                else:
+                    if self.debug:
+                        logger.debug(f"BallWorker前処理スキップ: {task.task_id} (スライディングウィンドウ不足)")
+                        
+            except TimeoutError:
+                logger.error(f"BallWorker前処理タイムアウト: {task.task_id}")
+            except Exception as e:
+                logger.error(f"BallWorker前処理実行エラー: {task.task_id}, {e}")
+                if self.debug:
+                    import traceback
+                    traceback.print_exc()
+                    
         except Exception as e:
             logger.error(f"BallWorker前処理エラー: {e}")
             if self.debug:
                 import traceback
                 traceback.print_exc()
+
+    def _execute_preprocess(self, task) -> tuple:
+        """
+        実際の前処理を実行します。
+        
+        Args:
+            task: PreprocessTask
+            
+        Returns:
+            (processed_data, clips) のタプル
+        """
+        clips = []
+        
+        try:
+            with self.sliding_window_lock:
+                # スライディングウィンドウを考慮した前処理
+                for frame in task.frames:
+                    # スライディングウィンドウに追加
+                    self.sliding_window.append(frame.copy())
+                    
+                    # ウィンドウサイズを制限
+                    if len(self.sliding_window) > self.predictor.num_frames:
+                        self.sliding_window.pop(0)
+                    
+                    # ウィンドウが十分な長さになったらクリップを作成
+                    if len(self.sliding_window) == self.predictor.num_frames:
+                        clips.append(list(self.sliding_window))
+            
+            if not clips:
+                return None, []
+            
+            # BallPredictorの前処理を実行
+            processed_data = self.predictor.preprocess(clips)
+            
+            return processed_data, clips
+            
+        except Exception as e:
+            logger.error(f"BallWorker前処理実行中にエラー: {e}")
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            return None, []
 
     def _process_inference_task(self, task):
         """
@@ -60,12 +152,20 @@ class BallWorker(BaseWorker):
             task: InferenceTask - 前処理済みデータを含む
         """
         try:
+            # GPU推論を実行
             with torch.no_grad():
-                # 予測器の推論メソッドを呼び出し
-                preds = self.predictor.inference(task.tensor_data)
+                ball_predictions = self.predictor.inference(task.tensor_data)
             
             # 後処理タスクをキューに送信
-            self.postprocess_queue.put(PostprocessTask(task.task_id, preds, task.meta_data))
+            postprocess_task = PostprocessTask(
+                task.task_id,
+                ball_predictions,
+                task.meta_data,
+                original_clips=getattr(task, 'original_clips', None)
+            )
+            self.postprocess_queue.put(postprocess_task)
+            
+            self.inference_count += 1
             
             if self.debug:
                 logger.debug(f"BallWorker推論完了: {task.task_id}")
@@ -84,37 +184,82 @@ class BallWorker(BaseWorker):
             task: PostprocessTask - 推論結果とメタデータを含む
         """
         try:
-            # メタデータからオリジナルフレームの形状情報を復元
-            original_shapes = [(meta[1], meta[2]) for meta in task.meta_data] if task.meta_data else None
+            # 後処理をスレッドプールで並列実行
+            future = self.postprocess_pool.submit(self._execute_postprocess, task)
             
-            # BallPredictor には Streaming 用の簡易インターフェースが無い場合がある。
-            # 後処理が不要な（既に最終結果になっている）場合はそのまま使用。
-            if hasattr(self.predictor, "postprocess") and original_shapes is not None:
-                ball_results = self.predictor.postprocess(task.inference_output, original_shapes)
-            else:
-                ball_results = task.inference_output
-            
-            # 結果をフレームごとに分解し、フレームインデックスを付けて結果キューに追加
-            if isinstance(ball_results, (list, tuple)):
-                # バッチ処理の場合
-                for i, ball_result_per_frame in enumerate(ball_results):
-                    if task.meta_data and i < len(task.meta_data):
-                        frame_idx = task.meta_data[i][0]
-                    else:
-                        frame_idx = i
-                    
-                    # (フレームインデックス, "タスク名", 結果) のタプルを格納
-                    self.results_queue.put((frame_idx, "ball", ball_result_per_frame))
-            else:
-                # 単一フレームの場合
-                frame_idx = task.meta_data[0][0] if task.meta_data else 0
-                self.results_queue.put((frame_idx, "ball", ball_results))
-            
-            if self.debug:
-                logger.debug(f"BallWorker後処理完了: {task.task_id}")
+            # 結果を取得（ノンブロッキング）
+            try:
+                results = future.result(timeout=3.0)  # 3秒でタイムアウト
                 
+                if results:
+                    # 結果をフレームごとに分解し、結果キューに送信
+                    for i, result in enumerate(results):
+                        if task.meta_data and i < len(task.meta_data):
+                            frame_idx = task.meta_data[i][0]
+                        else:
+                            frame_idx = i
+                        
+                        # (フレームインデックス, "タスク名", 結果) のタプルを格納
+                        self.results_queue.put((frame_idx, "ball", result))
+                    
+                    self.postprocess_count += 1
+                    
+                    if self.debug:
+                        logger.debug(f"BallWorker後処理完了: {task.task_id}, results={len(results)}")
+                else:
+                    if self.debug:
+                        logger.debug(f"BallWorker後処理結果なし: {task.task_id}")
+                        
+            except TimeoutError:
+                logger.error(f"BallWorker後処理タイムアウト: {task.task_id}")
+            except Exception as e:
+                logger.error(f"BallWorker後処理実行エラー: {task.task_id}, {e}")
+                if self.debug:
+                    import traceback
+                    traceback.print_exc()
+                    
         except Exception as e:
             logger.error(f"BallWorker後処理エラー: {e}")
             if self.debug:
                 import traceback
                 traceback.print_exc()
+
+    def _execute_postprocess(self, task) -> Optional[List[Dict[str, Any]]]:
+        """
+        実際の後処理を実行します。
+        
+        Args:
+            task: PostprocessTask
+            
+        Returns:
+            処理結果のリスト
+        """
+        try:
+            # BallPredictorの後処理を実行
+            original_clips = getattr(task, 'original_clips', None)
+            
+            if original_clips is not None:
+                results = self.predictor.postprocess(task.inference_output, original_clips)
+            else:
+                # フォールバック処理
+                results = task.inference_output
+                if not isinstance(results, list):
+                    results = [results]
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"BallWorker後処理実行中にエラー: {e}")
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            return None
+    
+    def get_performance_stats(self) -> Dict[str, int]:
+        """パフォーマンス統計を取得します。"""
+        return {
+            "preprocess_count": self.preprocess_count,
+            "inference_count": self.inference_count,
+            "postprocess_count": self.postprocess_count,
+            "sliding_window_size": len(self.sliding_window)
+        }

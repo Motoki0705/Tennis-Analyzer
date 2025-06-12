@@ -1,7 +1,3 @@
 # EventDetectionLitModule model configuration
-_target_: src.event.api.event_predictor.EventPredictor
-checkpoint_path: "checkpoints/event/transformer_v2/epoch=18-step=532.ckpt"
-device: "cuda"
-confidence_threshold: 0.5
-smoothing_window: 5
-debug: false
+_target_: src.event.lit_module.lit_transformer_v2.LitTransformerV2
+ckpt_path: "checkpoints/event/transformer_v2/epoch=18-step=532.ckpt"

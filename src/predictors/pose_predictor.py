@@ -35,9 +35,9 @@ COCO_SKELETON = [
 class PosePredictor:
     def __init__(
         self,
-        det_model: torch.nn.Module,
+        det_litmodule,
         det_processor,
-        pose_model: torch.nn.Module,
+        pose_litmodule,
         pose_processor,
         device: Union[str, torch.device] = "cpu",
         player_label_id: int = 0,
@@ -49,9 +49,9 @@ class PosePredictor:
         self.logger = setup_logger(self.__class__)
 
         self.device = device
-        self.det_model = det_model.to(self.device).eval()
+        self.det_model = det_litmodule.to(self.device).eval()
         self.det_processor = det_processor
-        self.pose_model = pose_model.to(self.device).eval()
+        self.pose_model = pose_litmodule.to(self.device).eval()
         self.pose_processor = pose_processor
 
         self.player_label_id = player_label_id

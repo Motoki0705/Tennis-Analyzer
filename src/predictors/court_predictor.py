@@ -22,7 +22,7 @@ class CourtPredictor:
 
     def __init__(
         self,
-        model: torch.nn.Module,
+        litmodule,
         device: str = "cpu",
         input_size: Tuple[int, int] = (256, 256),
         num_keypoints: int = 15,
@@ -45,7 +45,7 @@ class CourtPredictor:
         self.input_size = input_size
 
         # モデル
-        self.model = model.to(self.device).eval()
+        self.model = litmodule.to(self.device).eval()
 
         # 変換パイプライン
         self.transform = A.Compose(

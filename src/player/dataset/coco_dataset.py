@@ -39,27 +39,41 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         self.ids = self.split_ids(split=split)
 
     def __getitem__(self, idx):
-        if self.use_original_path:
-            img, target = self.getitem_from_original_path(idx)
-        else:
-            img, target = super().__getitem__(idx)
+        """
+        データセットから1つのサンプルを取得する。
+        
+        Args:
+            idx: インデックス
+            
+        Returns:
+            tuple: (image, target) または None（処理に失敗した場合）
+        """
+        try:
+            if self.use_original_path:
+                img, target = self.getitem_from_original_path(idx)
+            else:
+                img, target = super().__getitem__(idx)
 
-        img = np.array(img)
+            img = np.array(img)
 
-        # category_id=1（ボール）を除去、カテゴリマップ適用
-        target = [
-            {
-                **ann,
-                "category_id": self.cat_id_map.get(
-                    ann["category_id"], ann["category_id"]
-                ),
-            }
-            for ann in target
-            if ann["category_id"] != 1
-        ]
+            # category_id=1（ボール）を除去、カテゴリマップ適用
+            target = [
+                {
+                    **ann,
+                    "category_id": self.cat_id_map.get(
+                        ann["category_id"], ann["category_id"]
+                    ),
+                }
+                for ann in target
+                if ann["category_id"] != 1 and self._is_valid_bbox(ann.get("bbox"))
+            ]
 
-        if len(target) == 0:
-            print("target has no item")
+            if len(target) == 0:
+                print(f"target has no valid item for idx {idx}")
+                return None
+                
+        except Exception as e:
+            print(f"Error loading sample {idx}: {e}")
             return None
 
         if self.transform is not None:
@@ -69,8 +83,21 @@ class CocoDetection(torchvision.datasets.CocoDetection):
                 return None
 
             new_annotations = []
+            img_height, img_width = img.shape[:2]
+            
             for box, lab in zip(bboxes, labels, strict=False):
                 x, y, w, h = box
+                
+                # bbox の座標を正規化して範囲チェック・修正
+                x = max(0, min(x, img_width - 1))
+                y = max(0, min(y, img_height - 1))
+                w = max(1, min(w, img_width - x))
+                h = max(1, min(h, img_height - y))
+                
+                # 面積が最小値未満の場合はスキップ
+                if w * h < 1:
+                    continue
+                    
                 new_annotations.append(
                     {
                         "image_id": target[0].get("image_id", -1),
@@ -80,6 +107,11 @@ class CocoDetection(torchvision.datasets.CocoDetection):
                         "iscrowd": 0,
                     }
                 )
+                
+            if len(new_annotations) == 0:
+                print("All bboxes were filtered out")
+                return None
+                
             target = new_annotations
 
         target_for_proc = {
@@ -89,16 +121,72 @@ class CocoDetection(torchvision.datasets.CocoDetection):
 
         return img, target_for_proc
 
+    def _is_valid_bbox(self, bbox):
+        """
+        bbox が有効かどうかをチェックする。
+        
+        Args:
+            bbox: [x, y, width, height] 形式の bbox
+            
+        Returns:
+            bool: bbox が有効な場合 True
+        """
+        if bbox is None or len(bbox) != 4:
+            return False
+            
+        x, y, w, h = bbox
+        
+        # 座標と大きさが正の値であることを確認
+        if x < 0 or y < 0 or w <= 0 or h <= 0:
+            return False
+            
+        # 面積が最小値以上であることを確認
+        if w * h < 4:  # 最小面積 2x2 ピクセル
+            return False
+            
+        return True
+
     def apply_transform(self, img, target):
-        bboxes_for_transform = [ann["bbox"] for ann in target]
-        labels_for_transform = [ann["category_id"] for ann in target]
-        argumented = self.transform(
-            image=img, bboxes=bboxes_for_transform, category_id=labels_for_transform
-        )
-        img = argumented["image"]
-        bboxes = argumented["bboxes"]
-        labels = argumented["category_id"]
-        return img, bboxes, labels
+        """
+        albumentations transform を適用する。
+        COCO 形式の bbox を適切に処理する。
+        
+        Args:
+            img: PIL Image または numpy array
+            target: アノテーションリスト
+            
+        Returns:
+            tuple: (transformed_img, transformed_bboxes, transformed_labels)
+        """
+        # 画像を numpy array に変換
+        if hasattr(img, 'size'):  # PIL Image の場合
+            img_array = np.array(img)
+        else:
+            img_array = img
+            
+        try:
+            bboxes_for_transform = [ann["bbox"] for ann in target]
+            labels_for_transform = [ann["category_id"] for ann in target]
+            
+            # albumentations transform を適用
+            argumented = self.transform(
+                image=img_array, 
+                bboxes=bboxes_for_transform, 
+                category_id=labels_for_transform
+            )
+            
+            img_transformed = argumented["image"]
+            bboxes_transformed = argumented["bboxes"]
+            labels_transformed = argumented["category_id"]
+            
+            return img_transformed, bboxes_transformed, labels_transformed
+            
+        except Exception as e:
+            print(f"Transform failed: {e}")
+            print(f"Image shape: {img_array.shape}")
+            print(f"Bboxes: {bboxes_for_transform}")
+            # transform に失敗した場合は元の値を返す
+            return img_array, [ann["bbox"] for ann in target], [ann["category_id"] for ann in target]
 
     def split_ids(self, split="train") -> List[int]:
         """
