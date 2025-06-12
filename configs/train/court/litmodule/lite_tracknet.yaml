@@ -5,7 +5,7 @@ module:
   
   # モデル構成パラメータ
   in_channels: 3
-  out_channels: 15
+  out_channels: 1
   
   # 学習パラメータ
   lr: 0.001

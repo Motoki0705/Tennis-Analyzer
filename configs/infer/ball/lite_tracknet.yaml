@@ -1,7 +1,2 @@
-_target_: src.ball.models.lite_tracknet.LiteTrackNet
-# Constructor arguments for LiteBallTracker if any (e.g., in_channels, heatmap_channels)
-# in_channels: 9 # Example, if your LiteBallTracker takes it
-# heatmap_channels: 1 # Example
-in_channels: 9
-out_channels: 1
+_target_: src.ball.lit_module.lit_lite_tracknet.LitLiteTrackNet
 ckpt_path: "checkpoints/ball/lite_tracknet/lite_tracknet-epoch=46-val_loss=0.0000.ckpt"

@@ -1,6 +1,2 @@
-_target_: transformers.RTDetrV2ForObjectDetection.from_pretrained
-pretrained_model_name_or_path: PekingU/rtdetr_v2_r18vd
-num_labels: 1
-ignore_mismatched_sizes: True
-
+_target_: src.player.lit_module.lit_rtdetr.LitRTDETR
 ckpt_path: checkpoints/player/rt_detr_tracking/best-epoch=05-val_loss_total=2.2782.ckpt

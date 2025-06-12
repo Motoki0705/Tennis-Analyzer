@@ -13,7 +13,7 @@ from src.utils.logging_utils import setup_logger
 class PlayerPredictor:
     def __init__(
         self,
-        model: torch.nn.Module,
+        litmodule,
         processor,
         label_map: Dict[int, str],
         device: Union[str, torch.device] = "cpu",
@@ -25,16 +25,16 @@ class PlayerPredictor:
 
         # ─── モデル・設定 ───
         self.device = device
-        self.model = self._prepare_model(model)
+        self.model = self._prepare_model(litmodule)
         self.processor = processor
         self.label_map = label_map
         self.threshold = threshold
         self.use_half = use_half
 
-    def _prepare_model(self, model: torch.nn.Module) -> torch.nn.Module:
+    def _prepare_model(self, litmodule) -> torch.nn.Module:
         """モデルをデバイスに送って eval モードに設定"""
         self.logger.info("Preparing model (to device, eval mode)")
-        model = model.to(self.device)
+        model = litmodule.to(self.device)
         model.eval()
         return model
 

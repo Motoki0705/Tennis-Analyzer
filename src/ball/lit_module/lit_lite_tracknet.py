@@ -74,7 +74,7 @@ class LitLiteTracknet(pl.LightningModule):
 
     def _common_step(self, batch, stage: str):
         """共通処理ステップ"""
-        frames, heatmaps, _ = batch
+        frames, heatmaps, _, _ = batch
         logits = self(frames)
         
         # heatmapsが3次元の場合は4次元に変換 [B, H, W] -> [B, 1, H, W]

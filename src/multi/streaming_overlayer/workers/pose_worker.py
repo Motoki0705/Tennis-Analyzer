@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Tuple, Optional
 from PIL import Image
 
@@ -52,6 +53,12 @@ class PoseWorker(BaseWorker):
         
         # 追加スレッドのリスト
         self.additional_threads = []
+        
+        # スレッドプール（前処理・後処理用）
+        self.detection_preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_det_preprocess")
+        self.detection_postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_det_postprocess")
+        self.pose_preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_pose_preprocess")
+        self.pose_postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_pose_postprocess")
         
         # パフォーマンス監視メトリクス
         self.metrics = {
@@ -118,6 +125,20 @@ class PoseWorker(BaseWorker):
             return
             
         self.running = False
+        
+        # スレッドプールをシャットダウン
+        pools = [
+            ('detection_preprocess_pool', self.detection_preprocess_pool),
+            ('detection_postprocess_pool', self.detection_postprocess_pool),
+            ('pose_preprocess_pool', self.pose_preprocess_pool),
+            ('pose_postprocess_pool', self.pose_postprocess_pool)
+        ]
+        for name, pool in pools:
+            if hasattr(self, name):
+                try:
+                    pool.shutdown(wait=False)
+                except Exception as e:
+                    logger.warning(f"Error shutting down {name}: {e}")
         
         # 基本スレッドの停止
         for thread in self.threads:

@@ -6,7 +6,7 @@ from typing import Dict, List, Any, Tuple, Optional, Union
 from pathlib import Path
 import logging
 
-from ..lit_module.lit_transformer_v2 import LitTransformerV2
+# from ..event.lit_module.lit_transformer_v2 import LitTransformerV2
 
 logger = logging.getLogger(__name__)
 
@@ -15,63 +15,40 @@ class EventPredictor:
     """
     イベント検知（バウンド・ショット）のための予測器クラス。
     
-    LitTransformerV2を使用してテニスの試合におけるバウンドとショットイベントを検知します。
+    提供されたモデルインスタンスを使用してテニスの試合におけるバウンドとショットイベントを検知します。
     """
 
     def __init__(
         self,
-        checkpoint_path: Union[str, Path],
+        litmodule,
         device: str = "cpu",
         confidence_threshold: float = 0.5,
         smoothing_window: int = 5,
-        debug: bool = False
+        debug: bool = False,
+        use_half: bool = False
     ):
         """
         Args:
-            checkpoint_path: 学習済みモデルのチェックポイントパス
+            litmodule: 初期化済みのモデルインスタンス（例: LitTransformerV2）
             device: 推論デバイス ("cpu" or "cuda")
             confidence_threshold: イベント検知の閾値
             smoothing_window: 信号平滑化のウィンドウサイズ
             debug: デバッグモード
+            use_half: 推論に半精度(FP16)を使用するかどうか
         """
         self.device = torch.device(device)
         self.confidence_threshold = confidence_threshold
         self.smoothing_window = smoothing_window
         self.debug = debug
+        self.use_half = use_half
         
         # モデルの読み込み
-        self.model = self._load_model(checkpoint_path)
+        self.model = litmodule.to(self.device)
         self.model.eval()
         
         # 信号履歴を保持するバッファ
         self.signal_history: List[Tuple[float, float]] = []  # (hit_prob, bounce_prob)
         self.max_history_length = 60  # 約2秒分の履歴（30fps想定）
-
-    def _load_model(self, checkpoint_path: Union[str, Path]) -> LitTransformerV2:
-        """
-        チェックポイントからモデルを読み込みます。
-        
-        Args:
-            checkpoint_path: チェックポイントファイルのパス
-            
-        Returns:
-            LitTransformerV2: 読み込んだモデル
-        """
-        try:
-            checkpoint_path = Path(checkpoint_path)
-            if not checkpoint_path.exists():
-                raise FileNotFoundError(f"チェックポイントファイルが見つかりません: {checkpoint_path}")
-                
-            # Lightning checkpointからモデルをロード
-            model = LitTransformerV2.load_from_checkpoint(str(checkpoint_path))
-            model.to(self.device)
-            
-            logger.info(f"イベント検知モデルをロードしました: {checkpoint_path}")
-            return model
-            
-        except Exception as e:
-            logger.error(f"モデル読み込みエラー: {e}")
-            raise
 
     def preprocess(self, combined_features: Dict[str, Any]) -> Tuple[Dict[str, torch.Tensor], Any]:
         """
@@ -115,18 +92,33 @@ class EventPredictor:
         """
         try:
             with torch.no_grad():
-                ball_features = tensor_data['ball_features']
-                player_bbox_features = tensor_data['player_bbox_features']
-                player_pose_features = tensor_data['player_pose_features']
-                court_features = tensor_data['court_features']
-                
-                # モデルの forward メソッドを呼び出し
-                logits = self.model(
-                    ball_features=ball_features,
-                    player_bbox_features=player_bbox_features,
-                    player_pose_features=player_pose_features,
-                    court_features=court_features
-                )
+                if self.use_half and self.device.type == 'cuda':
+                    with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+                        ball_features = tensor_data['ball_features']
+                        player_bbox_features = tensor_data['player_bbox_features']
+                        player_pose_features = tensor_data['player_pose_features']
+                        court_features = tensor_data['court_features']
+                        
+                        # モデルの forward メソッドを呼び出し
+                        logits = self.model(
+                            ball_features=ball_features,
+                            player_bbox_features=player_bbox_features,
+                            player_pose_features=player_pose_features,
+                            court_features=court_features
+                        )
+                else:
+                    ball_features = tensor_data['ball_features']
+                    player_bbox_features = tensor_data['player_bbox_features']
+                    player_pose_features = tensor_data['player_pose_features']
+                    court_features = tensor_data['court_features']
+                    
+                    # モデルの forward メソッドを呼び出し
+                    logits = self.model(
+                        ball_features=ball_features,
+                        player_bbox_features=player_bbox_features,
+                        player_pose_features=player_pose_features,
+                        court_features=court_features
+                    )
                 
                 if self.debug:
                     logger.debug(f"推論結果 logits shape: {logits.shape}")
@@ -334,15 +326,15 @@ class EventPredictor:
 
 
 # ユーティリティ関数
-def create_event_predictor(checkpoint_path: str, **kwargs) -> EventPredictor:
+def create_event_predictor(litmodule, **kwargs) -> EventPredictor:
     """
     EventPredictorのファクトリ関数。
     
     Args:
-        checkpoint_path: チェックポイントパス
-        **kwargs: その他のパラメータ
+        litmodule: 初期化済みのモデルインスタンス（例: LitTransformerV2）
+        **kwargs: その他のパラメータ（device, confidence_threshold, smoothing_window, debug, use_half など）
         
     Returns:
         EventPredictor: 初期化されたEventPredictor
     """
-    return EventPredictor(checkpoint_path=checkpoint_path, **kwargs) 
+    return EventPredictor(litmodule=litmodule, **kwargs) 

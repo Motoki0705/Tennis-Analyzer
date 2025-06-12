@@ -2,8 +2,10 @@
 
 import queue
 import time
+import threading
 from pathlib import Path
 from typing import Dict, List, Union, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -25,7 +27,12 @@ from .config_utils import (
 )
 
 class VideoPredictor:
-    """動画に対して複数のモデル推論を並列実行し、結果を描画するクラス。"""
+    """
+    動画に対して複数のモデル推論を並列実行し、結果を描画するクラス。
+    
+    multi_flow_annotatorを参考に、前処理・推論・後処理のマルチフローアーキテクチャを実装し、
+    GPU使用効率とスループットを最大化します。
+    """
 
     def __init__(
         self,
@@ -33,7 +40,9 @@ class VideoPredictor:
         intervals: Dict[str, int], batch_sizes: Dict[str, int],
         debug: bool = False,
         custom_queue_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        hydra_queue_config: Optional[Any] = None
+        hydra_queue_config: Optional[Any] = None,
+        max_preload_frames: int = 64,  # フレーム先読み数
+        enable_performance_monitoring: bool = True  # パフォーマンス監視
     ):
         self.predictors = {
             "ball": ball_predictor,
@@ -43,6 +52,8 @@ class VideoPredictor:
         self.intervals = intervals
         self.batch_sizes = batch_sizes
         self.debug = debug
+        self.max_preload_frames = max_preload_frames
+        self.enable_performance_monitoring = enable_performance_monitoring
 
         # 拡張可能なキューシステムを初期化
         worker_names = list(self.predictors.keys())
@@ -90,11 +101,29 @@ class VideoPredictor:
         # パイプラインワーカーの初期化
         self.workers = self._initialize_workers()
         
-        # パフォーマンス監視設定
-        self.performance_settings = {}
+        # フレーム処理用スレッドプール
+        self.frame_processing_pool = ThreadPoolExecutor(
+            max_workers=4, 
+            thread_name_prefix="frame_processor"
+        )
         
         # パフォーマンス設定をここで初期化（デフォルト値）
         self.performance_settings = {"enable_monitoring": True}
+        
+        # パフォーマンス監視メトリクス
+        self.performance_metrics = {
+            "total_frames_processed": 0,
+            "total_processing_time": 0.0,
+            "frames_per_second": 0.0,
+            "queue_throughput": {},
+            "worker_performance": {},
+            "start_time": None,
+            "end_time": None
+        }
+        
+        # スライディングウィンドウ管理（ボール用）
+        self.sliding_windows = {}
+        self.sliding_window_lock = threading.Lock()
     
     def _apply_performance_settings(self, settings: Dict[str, Any]):
         """パフォーマンス設定を適用"""
@@ -156,29 +185,154 @@ class VideoPredictor:
         """動画処理のメインフローを実行します。"""
         input_path, output_path = Path(input_path), Path(output_path)
 
-        # 1. I/Oとワーカーのセットアップ
-        frame_loader = FrameLoader(input_path).start()
-        props = frame_loader.get_properties()
-        writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), props["fps"], (props["width"], props["height"]))
-        
-        for worker in self.workers.values():
-            worker.start()
+        # パフォーマンス監視開始
+        self.performance_metrics["start_time"] = time.time()
 
-        # 2. フレーム投入 (Dispatcher)
-        self._dispatch_frames(frame_loader, props["total_frames"])
+        try:
+            # 1. I/Oとワーカーのセットアップ
+            frame_loader = FrameLoader(input_path).start()
+            props = frame_loader.get_properties()
+            writer = cv2.VideoWriter(
+                str(output_path), 
+                cv2.VideoWriter_fourcc(*"mp4v"), 
+                props["fps"], 
+                (props["width"], props["height"])
+            )
+            
+            for worker in self.workers.values():
+                worker.start()
 
-        # 3. 結果の集約と描画
-        self._aggregate_and_write_results(writer, input_path, props["total_frames"])
+            # 2. フレーム投入 (Dispatcher) - 並列化
+            self._dispatch_frames_parallel(frame_loader, props["total_frames"])
+
+            # 3. 結果の集約と描画
+            self._aggregate_and_write_results(writer, input_path, props["total_frames"])
+            
+            # 4. クリーンアップ
+            for worker in self.workers.values():
+                worker.stop()
+            frame_loader.release()
+            writer.release()
+            
+            # パフォーマンス監視終了
+            self.performance_metrics["end_time"] = time.time()
+            self._finalize_performance_metrics()
+            
+            print(f"✅ 処理完了 → 出力動画: {output_path}")
+            
+            if self.enable_performance_monitoring:
+                self._print_performance_summary()
+                
+        except Exception as e:
+            print(f"❌ 動画処理中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # クリーンアップ
+            for worker in self.workers.values():
+                worker.stop()
+            if 'frame_loader' in locals():
+                frame_loader.release()
+            if 'writer' in locals():
+                writer.release()
+        finally:
+            # スレッドプールの終了
+            self.frame_processing_pool.shutdown(wait=True)
+
+    def _dispatch_frames_parallel(self, frame_loader: FrameLoader, total_frames: int):
+        """フレームを並列で読み込み、適切な間隔で各ワーカーにタスクを投入します。"""
+        buffers = {name: [] for name in self.predictors}
+        meta_buffers = {name: [] for name in self.predictors}
         
-        # 4. クリーンアップ
-        for worker in self.workers.values():
-            worker.stop()
-        frame_loader.release()
-        writer.release()
-        print(f"✅ 処理完了 → 出力動画: {output_path}")
+        # フレーム先読みバッファ
+        preload_buffer = []
+        
+        print("🚀 並列フレーム投入を開始...")
+        with tqdm(total=total_frames, desc="フレーム投入中") as pbar:
+            frame_count = 0
+            
+            while frame_count < total_frames:
+                # フレームの先読み
+                frames_to_read = min(self.max_preload_frames, total_frames - frame_count)
+                
+                # 並列でフレーム読み込み
+                future_frames = []
+                for _ in range(frames_to_read):
+                    data = frame_loader.read()
+                    if data is None:
+                        break
+                    future_frames.append(data)
+                    frame_count += 1
+                
+                if not future_frames:
+                    break
+                
+                # フレーム処理を並列実行
+                processing_futures = []
+                for frame_idx, frame in future_frames:
+                    future = self.frame_processing_pool.submit(
+                        self._process_single_frame, 
+                        frame_idx, frame, buffers.copy(), meta_buffers.copy()
+                    )
+                    processing_futures.append((frame_idx, future))
+                
+                # 処理結果を収集
+                for frame_idx, future in processing_futures:
+                    try:
+                        frame_buffers, frame_meta_buffers = future.result(timeout=1.0)
+                        
+                        # バッファを更新
+                        for name in self.predictors:
+                            if frame_buffers[name]:
+                                buffers[name].extend(frame_buffers[name])
+                                meta_buffers[name].extend(frame_meta_buffers[name])
+                            
+                            # バッチサイズに達したらタスクを投入
+                            if len(buffers[name]) >= self.batch_sizes[name]:
+                                self._create_and_submit_task(
+                                    name, frame_idx, buffers[name], meta_buffers[name]
+                                )
+                                buffers[name].clear()
+                                meta_buffers[name].clear()
+                                
+                    except Exception as e:
+                        print(f"⚠️ フレーム処理エラー: {frame_idx}, {e}")
+                        if self.debug:
+                            import traceback
+                            traceback.print_exc()
+                
+                pbar.update(len(future_frames))
+
+        # ループ終了後、バッファに残っているフレームを処理
+        for name in self.predictors:
+            if buffers[name]:
+                self._create_and_submit_task(
+                    name, frame_count, buffers[name], meta_buffers[name]
+                )
+
+    def _process_single_frame(self, frame_idx: int, frame: np.ndarray, buffers: Dict, meta_buffers: Dict) -> tuple:
+        """単一フレームを処理し、適切なバッファに追加します。"""
+        frame_buffers = {name: [] for name in self.predictors}
+        frame_meta_buffers = {name: [] for name in self.predictors}
+        
+        for name, interval in self.intervals.items():
+            if frame_idx % interval == 0:
+                frame_buffers[name].append(frame)
+                frame_meta_buffers[name].append((frame_idx, frame.shape[0], frame.shape[1]))
+        
+        return frame_buffers, frame_meta_buffers
+    
+    def _create_and_submit_task(self, name: str, frame_idx: int, frames: List, meta_data: List):
+        """タスクを作成してキューに投入します。"""
+        task = PreprocessTask(f"{name}_{frame_idx}", frames.copy(), meta_data.copy())
+        preprocess_queue = self.queue_manager.get_queue(name, "preprocess")
+        preprocess_queue.put(task)
+        
+        if self.debug:
+            print(f"📋 タスク投入: {name}, frames={len(frames)}")
 
     def _dispatch_frames(self, frame_loader: FrameLoader, total_frames: int):
-        """フレームを読み込み、適切な間隔で各ワーカーにタスクを投入します。"""
+        """フレームを読み込み、適切な間隔で各ワーカーにタスクを投入します。（既存メソッド）"""
         buffers = {name: [] for name in self.predictors}
         meta_buffers = {name: [] for name in self.predictors}
         
@@ -223,11 +377,25 @@ class VideoPredictor:
             for frame_idx in range(total_frames):
                 # このフレームインデックスまでの結果をすべてキューから取り出す
                 results_queue = self.queue_manager.get_results_queue()
-                while not results_queue.empty() and results_queue.queue[0][0] <= frame_idx:
-                    res_idx, name, result = results_queue.get()
-                    if res_idx not in results_by_frame:
-                        results_by_frame[res_idx] = {}
-                    results_by_frame[res_idx][name] = result
+                timeout_count = 0
+                max_timeout = 10  # 最大タイムアウト回数
+                
+                while timeout_count < max_timeout:
+                    try:
+                        # タイムアウト付きでキューから取得
+                        if not results_queue.empty() and results_queue.queue[0][0] <= frame_idx:
+                            res_idx, name, result = results_queue.get(timeout=0.1)
+                            if res_idx not in results_by_frame:
+                                results_by_frame[res_idx] = {}
+                            results_by_frame[res_idx][name] = result
+                        else:
+                            break
+                    except queue.Empty:
+                        timeout_count += 1
+                        if timeout_count >= max_timeout:
+                            if self.debug:
+                                print(f"⚠️ フレーム {frame_idx}: 結果取得タイムアウト")
+                            break
 
                 # 描画用の生フレームを取得
                 ret, frame = cap.read()
@@ -253,5 +421,54 @@ class VideoPredictor:
 
                 writer.write(annotated_frame)
                 pbar.update(1)
+                
+                # パフォーマンス監視
+                self.performance_metrics["total_frames_processed"] += 1
         
         cap.release()
+    
+    def _finalize_performance_metrics(self):
+        """パフォーマンスメトリクスを最終化します。"""
+        if self.performance_metrics["start_time"] and self.performance_metrics["end_time"]:
+            total_time = self.performance_metrics["end_time"] - self.performance_metrics["start_time"]
+            self.performance_metrics["total_processing_time"] = total_time
+            
+            if total_time > 0:
+                self.performance_metrics["frames_per_second"] = (
+                    self.performance_metrics["total_frames_processed"] / total_time
+                )
+        
+        # ワーカーのパフォーマンス統計を収集
+        for name, worker in self.workers.items():
+            if hasattr(worker, 'get_performance_stats'):
+                self.performance_metrics["worker_performance"][name] = worker.get_performance_stats()
+    
+    def _print_performance_summary(self):
+        """パフォーマンス概要を出力します。"""
+        metrics = self.performance_metrics
+        
+        print("\n" + "="*50)
+        print("📊 パフォーマンス監視レポート")
+        print("="*50)
+        print(f"総処理フレーム数: {metrics['total_frames_processed']}")
+        print(f"総処理時間: {metrics['total_processing_time']:.2f} 秒")
+        print(f"平均FPS: {metrics['frames_per_second']:.2f}")
+        
+        if metrics["worker_performance"]:
+            print("\n🔧 ワーカー別パフォーマンス:")
+            for worker_name, stats in metrics["worker_performance"].items():
+                print(f"  {worker_name}:")
+                for key, value in stats.items():
+                    print(f"    {key}: {value}")
+        
+        # キュー状態を表示
+        queue_status = self.get_queue_status_with_settings()
+        if queue_status.get("monitoring") != "disabled":
+            print(f"\n📋 最終キュー状態:")
+            print(f"  結果キュー: {queue_status.get('results_queue_size', 'N/A')} items")
+        
+        print("="*50 + "\n")
+
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """パフォーマンスメトリクスを取得します。"""
+        return self.performance_metrics.copy()
