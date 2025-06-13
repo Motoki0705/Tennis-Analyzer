@@ -16,7 +16,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, Learning
 # ロガーの設定
 log = logging.getLogger(__name__)
 
-
 @hydra.main(config_path="../../../configs/train/ball", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
@@ -72,11 +71,6 @@ def main(cfg: DictConfig) -> None:
     # トレーニングの実行
     log.info("トレーニング開始...")
     trainer.fit(lit_module, datamodule=datamodule)
-    
-    # テストの実行（必要な場合）
-    if hasattr(datamodule, "test_dataloader") and datamodule.test_dataloader is not None:
-        log.info("テスト開始...")
-        trainer.test(lit_module, datamodule=datamodule)
     
     # 最高性能のモデルチェックポイントのパスを取得
     best_model_path = None

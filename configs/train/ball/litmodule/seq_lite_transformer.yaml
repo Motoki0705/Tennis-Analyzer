@@ -1,0 +1,28 @@
+# VideoSwinTransformer用 LightningModule設定
+module:
+  _target_: src.ball.lit_module.lit_seq_lite_transformer.LitSeqLiteTransformer
+
+  # モデル構成パラメータ
+  img_size: [320, 640]  # [H, W]
+  in_channels: 3  # RGB入力
+  out_channels: 1
+  n_frames: ${litdatamodule.T}  # シーケンス長
+  window_size: 5
+  feature_dim: 256
+  transformer_blocks: 4
+  transformer_heads: 8
+
+  # 学習パラメータ
+  lr: 1e-4  # Transformerは通常低めの学習率
+  weight_decay: 1e-4
+  warmup_epochs: 2  # Transformerは長めのウォームアップ
+  max_epochs: ${trainer.max_epochs}
+  bce_weight: 0.7
+  
+  # 可視化パラメータ
+  num_log_images: 4
+
+meta:
+  name: seq_lite_transformer
+  output_type: "heatmap_sequence"  # シーケンス出力
+  description: "VideoSwinTransformer with spatio-temporal attention for ball tracking"

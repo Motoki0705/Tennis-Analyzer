@@ -45,7 +45,7 @@ class VideoPredictorWithEvent:
         hydra_queue_config: Optional[Any] = None,
         max_preload_frames: int = 64,
         enable_performance_monitoring: bool = True,
-        event_sequence_length: int = 16
+        event_sequence_length: int = 64
     ):
         # 基本予測器の設定
         self.predictors = {
