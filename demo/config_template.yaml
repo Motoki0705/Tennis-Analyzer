@@ -12,22 +12,22 @@ common:
 
 # --- Ball Model (例: LiteTrackNet) ---
 ball:
-  _target_: src.ball.lit_module.ball_litmodule.BallLitModule
+  _target_: src.ball.lit_module.lit_lite_tracknet.LitLiteTracknet
   ckpt_path: "checkpoints/ball/lit_lite_tracknet/epoch=021-val_loss=0.17419259.ckpt"
 
 # --- Court Model (例: LiteTrackNet) ---
 court:
-  _target_: src.court.lit_module.court_litmodule.CourtLitModule
+  _target_: src.court.lit_module.lit_lite_tracknet.LitLiteTracknet
   ckpt_path: "checkpoints/court/lit_lite_tracknet/epoch=010-val_loss=0.76632285.ckpt"  # TODO: 実際のパスに変更
 
 # --- Player Model (例: RT-DETR) ---
 player:
-  _target_: src.player.lit_module.player_litmodule.PlayerLitModule
+  _target_: src.player.lit_module.lit_rtdetr.LitRtdetr
   ckpt_path: "checkpoints/player/lit_rt_detr/epoch=002-val_loss_total=2.38540339.ckpt"  # TODO: 実際のパスに変更
 
 # --- Pose Model (Transformers使用) ---
 pose:
-  _target_: transformers.AutoModel.from_pretrained
+  _target_: transformers.VitPoseForPoseEstimation.from_pretrained
   pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
 
 # --- プロセッサ設定 ---
@@ -45,7 +45,7 @@ predictors:
     _target_: src.predictors.ball_predictor.BallPredictor
     input_size: [360, 640]
     heatmap_size: [360, 640]
-    num_frames: 3
+    num_frames: 1
     threshold: 0.7
     visualize_mode: "overlay"
   

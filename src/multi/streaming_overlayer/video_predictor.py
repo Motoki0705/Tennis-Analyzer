@@ -311,7 +311,7 @@ class VideoPredictor:
                 )
 
     def _process_single_frame(self, frame_idx: int, frame: np.ndarray, buffers: Dict, meta_buffers: Dict) -> tuple:
-        """単一フレームを処理し、適切なバッファに追加します。"""
+        """単一フレームを処理し、各予測器の間隔設定に基づいて適切なバッファに追加します。"""
         frame_buffers = {name: [] for name in self.predictors}
         frame_meta_buffers = {name: [] for name in self.predictors}
         
@@ -330,39 +330,6 @@ class VideoPredictor:
         
         if self.debug:
             print(f"📋 タスク投入: {name}, frames={len(frames)}")
-
-    def _dispatch_frames(self, frame_loader: FrameLoader, total_frames: int):
-        """フレームを読み込み、適切な間隔で各ワーカーにタスクを投入します。（既存メソッド）"""
-        buffers = {name: [] for name in self.predictors}
-        meta_buffers = {name: [] for name in self.predictors}
-        
-        print("🚀 フレームの投入を開始...")
-        with tqdm(total=total_frames, desc="フレーム投入中") as pbar:
-            while True:
-                data = frame_loader.read()
-                if data is None: break # 動画の終端
-                
-                frame_idx, frame = data
-                
-                for name, interval in self.intervals.items():
-                    if frame_idx % interval == 0:
-                        buffers[name].append(frame)
-                        meta_buffers[name].append((frame_idx, frame.shape[0], frame.shape[1])) # (idx, H, W)
-                
-                    if len(buffers[name]) >= self.batch_sizes[name]:
-                        task = PreprocessTask(f"{name}_{frame_idx}", buffers[name], meta_buffers[name])
-                        preprocess_queue = self.queue_manager.get_queue(name, "preprocess")
-                        preprocess_queue.put(task)
-                        buffers[name].clear()
-                        meta_buffers[name].clear()
-                pbar.update(1)
-
-        # ループ終了後、バッファに残っているフレームを処理
-        for name in self.predictors:
-            if buffers[name]:
-                task = PreprocessTask(f"{name}_final", buffers[name], meta_buffers[name])
-                preprocess_queue = self.queue_manager.get_queue(name, "preprocess")
-                preprocess_queue.put(task)
 
     def _aggregate_and_write_results(self, writer: cv2.VideoWriter, input_path: Path, total_frames: int):
         """結果キューから推論結果を集約し、描画して動画ファイルに書き込みます。"""
@@ -411,10 +378,8 @@ class VideoPredictor:
                 annotated_frame = frame.copy()
                 for name, pred in cached_preds.items():
                     if pred is not None:
-                        # Ball など list が返る場合は 1 フレーム分を想定して 0 番目を使用
-                        to_draw = pred[0] if isinstance(pred, list) else pred
                         try:
-                            annotated_frame = self.predictors[name].overlay(annotated_frame, to_draw)
+                            annotated_frame = self.predictors[name].overlay(annotated_frame, pred)
                         except Exception:
                             # overlay 失敗時は描画をスキップ
                             pass

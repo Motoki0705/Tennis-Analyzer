@@ -282,8 +282,3 @@ if __name__ == "__main__":
         transform=train_transform,
     )
 
-    result = dataset.__getitem__(0)
-    if result is not None:
-        img, target = result
-        print(target)
-        visualize_dataset(img, target)
