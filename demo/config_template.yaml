@@ -1,0 +1,86 @@
+# VideoPredictor Demo用 設定テンプレート
+# =============================================
+# 
+# このファイルは、demo/video_predictor_demo.py で使用する設定テンプレートです。
+# 実際の使用時は、チェックポイントパスを正しく設定してください。
+
+# --- 共通設定 ---
+common:
+  device: "cuda"  # cuda, cpu
+  use_half: true
+  batch_size: 32
+
+# --- Ball Model (例: LiteTrackNet) ---
+ball:
+  _target_: src.ball.lit_module.ball_litmodule.BallLitModule
+  ckpt_path: "checkpoints/ball/lit_lite_tracknet/epoch=021-val_loss=0.17419259.ckpt"
+
+# --- Court Model (例: LiteTrackNet) ---
+court:
+  _target_: src.court.lit_module.court_litmodule.CourtLitModule
+  ckpt_path: "checkpoints/court/lit_lite_tracknet/epoch=010-val_loss=0.76632285.ckpt"  # TODO: 実際のパスに変更
+
+# --- Player Model (例: RT-DETR) ---
+player:
+  _target_: src.player.lit_module.player_litmodule.PlayerLitModule
+  ckpt_path: "checkpoints/player/lit_rt_detr/epoch=002-val_loss_total=2.38540339.ckpt"  # TODO: 実際のパスに変更
+
+# --- Pose Model (Transformers使用) ---
+pose:
+  _target_: transformers.AutoModel.from_pretrained
+  pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+
+# --- プロセッサ設定 ---
+processors:
+  player:
+    _target_: transformers.AutoImageProcessor.from_pretrained
+    pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+  pose:
+    _target_: transformers.AutoImageProcessor.from_pretrained
+    pretrained_model_name_or_path: "usyd-community/vitpose-base-simple"
+
+# --- 予測器設定 ---
+predictors:
+  ball:
+    _target_: src.predictors.ball_predictor.BallPredictor
+    input_size: [360, 640]
+    heatmap_size: [360, 640]
+    num_frames: 3
+    threshold: 0.7
+    visualize_mode: "overlay"
+  
+  court:
+    _target_: src.predictors.court_predictor.CourtPredictor
+    input_size: [360, 640]
+    num_keypoints: 15
+    threshold: 0.6
+    visualize_mode: "overlay"
+
+  pose:
+    _target_: src.predictors.pose_predictor.PosePredictor
+    player_label_id: 0
+    det_score_thresh: 0.7
+    pose_score_thresh: 0.7
+
+  # --- StreamingOverlayer設定 ---
+  streaming_overlayer:
+    intervals: {"ball": 1, "court": 1, "pose": 1}
+    batch_sizes: {"ball": 32, "court": 32, "pose": 16}
+    debug: false
+    custom_queue_configs: null
+
+# --- キュー設定 (オプション) ---
+queue:
+  enable_monitoring: true
+  log_queue_status: false
+  gpu_optimization: true
+  
+  # キューサイズ設定
+  base_queue_sizes:
+    preprocess: 32
+    inference: 16
+    postprocess: 32
+    
+  extended_queue_sizes:
+    sliding_window: 16
+    batch_buffer: 8 
