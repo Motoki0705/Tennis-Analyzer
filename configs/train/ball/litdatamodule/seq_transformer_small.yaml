@@ -1,0 +1,30 @@
+# VideoSwinTransformer軽量版データモジュール設定
+_target_: src.ball.lit_datamodule.ball_data_module.TennisBallDataModule
+
+# データパス
+annotation_file: 'datasets/ball/coco_annotations_ball_pose_court.json'
+image_root: 'datasets/ball/images'
+
+# 入力設定 - 軽量版
+T: 4  # より少ないフレーム数
+batch_size: 4  # やや大きめのバッチ
+num_workers: 4
+skip_frames_range: [1, 2]
+input_type: "stack"
+output_type: "all"
+dataset_type: "heatmap"
+
+# 画像サイズ設定 - 軽量版に合わせて
+input_size: [320, 640]   # 小さい解像度
+heatmap_size: [320, 640]
+
+# 変換設定
+train_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: true
+
+val_test_transform:
+  _target_: src.ball.arguments.prepare_transform.prepare_transform
+  input_size: ${litdatamodule.input_size}
+  is_train: false
