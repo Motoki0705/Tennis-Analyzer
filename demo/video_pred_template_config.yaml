@@ -13,7 +13,7 @@ common:
 # --- Ball Model (例: LiteTrackNet) ---
 ball:
   _target_: src.ball.lit_module.lit_lite_tracknet.LitLiteTracknet
-  ckpt_path: "checkpoints/ball/lit_lite_tracknet/epoch=021-val_loss=0.17419259.ckpt"
+  ckpt_path: "checkpoints/ball/lit_lite_tracknet/epoch=003-val_loss=0.00001770.ckpt"
 
 # --- Court Model (例: LiteTrackNet) ---
 court:

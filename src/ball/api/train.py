@@ -16,7 +16,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, Learning
 # ロガーの設定
 log = logging.getLogger(__name__)
 
-@hydra.main(config_path="../../../configs/train/ball", config_name="config", version_base=None)
+@hydra.main(config_path="../../../configs/train/ball", config_name="lite_tracknet_focal", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
     ボール検出モデルのトレーニングを実行する

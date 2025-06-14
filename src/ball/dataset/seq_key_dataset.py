@@ -250,8 +250,8 @@ if __name__ == "__main__":
     )
 
     dataset = SequenceKeypointDataset(
-        annotation_file=r"data\ball\coco_annotations_globally_tracked.json",
-        image_root=r"data\ball\images",
+        annotation_file=r"datasets/ball/coco_annotations_ball_pose_court.json",
+        image_root=r"datasets/ball/images",
         T=3,
         input_size=input_size,
         heatmap_size=heatmap_size,
