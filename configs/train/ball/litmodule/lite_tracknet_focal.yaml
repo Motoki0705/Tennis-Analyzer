@@ -1,0 +1,24 @@
+# LiteTrackNet用 LightningModule設定 (Focal Loss版)
+module:
+  _target_: src.ball.lit_module.lit_lite_tracknet_focal.LitLiteTracknetFocalLoss
+
+  # モデル構成パラメータ
+  in_channels: ${litdatamodule.T}
+  out_channels: 1
+
+  # 学習パラメータ
+  lr: 1e-3
+  weight_decay: 1e-4
+  warmup_epochs: 1
+  max_epochs: ${trainer.max_epochs}
+  
+  # Focal Loss用パラメータ
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  
+  # 可視化パラメータ
+  num_log_images: 4
+
+meta:
+  name: "lite_tracknet_focal_loss"
+  output_type: "heatmap"

@@ -8,8 +8,8 @@ hydra:
 
 # デフォルト設定
 defaults:
-  - litmodule: lite_tracknet
-  - litdatamodule: ball_data
+  - litmodule: lite_tracknet_focal
+  - litdatamodule: 3_frames_cat_last
   - trainer: default
   - callbacks: default
   - _self_

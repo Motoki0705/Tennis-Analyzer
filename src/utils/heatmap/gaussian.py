@@ -91,7 +91,7 @@ def gaussian_radius(det_size, min_overlap=0.7):
 
 
 def generate_gaussian_heatmap(
-    raw_label, input_size, output_size, sigma=1.0
+    raw_label, input_size, output_size, sigma=3.0
 ):
     """
     キーポイント情報からガウスヒートマップを生成
