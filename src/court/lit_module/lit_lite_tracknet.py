@@ -74,7 +74,7 @@ class LitLiteTracknet(pl.LightningModule):
 
     def _common_step(self, batch, stage: str):
         """共通処理ステップ"""
-        frames, heatmaps, _ = batch
+        frames, heatmaps= batch
         logits = self(frames)
         
         loss = self.criterion(logits, heatmaps)

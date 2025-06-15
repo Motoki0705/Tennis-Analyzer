@@ -8,8 +8,7 @@ hydra:
 
 # デフォルト設定
 defaults:
-  - litmodule: seq_lite_transformer_focal
-  - litdatamodule: seq_transformer
+  - litmodule: video_swin_transformer_focal
   - trainer: default
   - callbacks: default
   - _self_
@@ -19,3 +18,5 @@ seed: 42
 
 # 実験名の設定
 version: ${litmodule.meta.name}_${litdatamodule.dataset_type} 
+
+checkpoint_dir: "checkpoints/ball/video_swin_transformer_focal"
