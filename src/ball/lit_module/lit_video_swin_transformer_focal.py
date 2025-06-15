@@ -11,10 +11,10 @@ import torch.nn as nn
 import torchvision
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
 
-from src.ball.models.seq_lite_transformer import VideoSwinTransformer
+from src.ball.models.video_swin_transformer import VideoSwinTransformer
 
 
-class LitSeqLiteTransformerFocalLoss(pl.LightningModule):
+class LitVideoSwinTransformerFocalLoss(pl.LightningModule):
     """
     VideoSwinTransformer用LightningModule (Focal Loss版)
     

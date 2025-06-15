@@ -12,11 +12,11 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
 from torchmetrics.classification import BinaryJaccardIndex
 import torchvision
 
-from src.ball.models.seq_lite_transformer import VideoSwinTransformer
+from src.ball.models.video_swin_transformer import VideoSwinTransformer
 
 
 
-class LitSeqLiteTransformer(pl.LightningModule):
+class LitVideoSwinTransformer(pl.LightningModule):
     """
     VideoSwinTransformer用LightningModule
     

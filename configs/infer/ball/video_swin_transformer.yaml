@@ -1,0 +1,2 @@
+_target_: src.ball.lit_module.lit_video_swin_transformer.LitVideoSwinTransformer
+ckpt_path: "checkpoints/ball/video_swin_transformer/best_model.ckpt"

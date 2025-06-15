@@ -2,7 +2,7 @@
 
 # VideoSwinTransformer用LightningModule設定 (Focal Loss版)
 module:
-  _target_: src.ball.lit_module.lit_seq_lite_transformer_focal.LitSeqLiteTransformerFocalLoss
+  _target_: src.ball.lit_module.lit_video_swin_transformer_focal.LitVideoSwinTransformerFocalLoss
 
   # モデル構成パラメータ
   img_size: [320, 640]  # データセットに合わせて調整
@@ -28,5 +28,5 @@ module:
   num_log_images: 4
 
 meta:
-  name: "seq_lite_transformer_focal"
+  name: "video_swin_transformer_focal"
   output_type: "heatmap_sequence"

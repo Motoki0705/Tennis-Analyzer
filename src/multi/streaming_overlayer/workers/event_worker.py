@@ -1,423 +1,512 @@
-import torch
-import logging
-import threading
-import numpy as np
-from collections import deque, defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from typing import List, Any, Dict, Optional, Tuple
-from queue import Queue, Empty
+"""
+高度拡張性を持つストリーミング処理パイプライン - EventWorker実装
 
-from .base_worker import BaseWorker
-from ..definitions import InferenceTask, PostprocessTask
+イベント検出処理を行うワーカー。
+新しいアーキテクチャに対応した実装。
+依存関係を持つ下流ワーカーとしてのバッチ処理を実装。
+"""
+
+import logging
+import queue
+import time
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import torch
+
+from .base_worker import BaseWorker, BatchTask
+from ..core.interfaces import ItemId, TopicName, TaskData, ResultData
 
 logger = logging.getLogger(__name__)
 
 
-class EventWorker(BaseWorker):
-    """
-    イベント検知のための統合ワーカー。
+class EventDetectionResult:
+    """イベント検出結果を格納するクラス"""
     
-    他のワーカー（ball, court, pose）からの結果を統合し、
-    時系列データを作成してevent推論を実行します。
-    """
-    
-    def __init__(self, name, predictor, queue_set, results_q, debug=False, 
-                 sequence_length: int = 16, max_players: int = 4):
-        # QueueManagerから基本キューを取得
-        preprocess_q = queue_set.get_queue("preprocess")
-        inference_q = queue_set.get_queue("inference")
-        postprocess_q = queue_set.get_queue("postprocess")
-        
-        super().__init__(name, predictor, preprocess_q, inference_q, postprocess_q, results_q, debug)
-        
-        # シーケンス管理
-        self.sequence_length = sequence_length
-        self.max_players = max_players
-        
-        # 各ワーカーからの結果を保持するバッファ
-        # frame_idx -> {worker_name: result}
-        self.result_buffer: Dict[int, Dict[str, Any]] = {}  
-        self.buffer_lock = threading.Lock()
-        
-        # 時系列シーケンス管理
-        self.sequence_frames: deque = deque(maxlen=sequence_length)
-        self.sequence_lock = threading.Lock()
-        
-        # スレッドプール
-        self.preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_preprocess")
-        self.postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_postprocess")
-        
-        # パフォーマンス監視
-        self.preprocess_count = 0
-        self.inference_count = 0
-        self.postprocess_count = 0
-        
-        # 外部結果統合用キュー（他のワーカーからの結果を受け取る）
-        self.external_results_queue = Queue()
-        self.integration_thread = None
-        self.integration_running = False
-        
-    def start(self):
-        """ワーカーと統合スレッドを開始します"""
-        super().start()
-        
-        # 外部結果統合スレッドを開始
-        self.integration_running = True
-        self.integration_thread = threading.Thread(
-            target=self._external_results_integration_loop, 
-            name=f"{self.name}_integration"
-        )
-        self.integration_thread.daemon = True
-        self.integration_thread.start()
-        
-        logger.info(f"EventWorker統合スレッドを開始: {self.name}")
-        
-    def stop(self):
-        """ワーカーとスレッドプールを停止します"""
-        # 統合スレッドを停止
-        self.integration_running = False
-        if self.integration_thread and self.integration_thread.is_alive():
-            self.integration_thread.join(timeout=1.0)
-        
-        # スレッドプールをシャットダウン
-        if hasattr(self, 'preprocess_pool'):
-            self.preprocess_pool.shutdown(wait=False)
-        if hasattr(self, 'postprocess_pool'):
-            self.postprocess_pool.shutdown(wait=False)
-        
-        # ベースクラスの停止処理
-        super().stop()
-
-    def add_external_result(self, frame_idx: int, worker_name: str, result: Any):
+    def __init__(self, event_type: Optional[str] = None,
+                 confidence: float = 0.0,
+                 timestamp: Optional[float] = None,
+                 ball_position: Optional[tuple] = None,
+                 court_region: Optional[str] = None,
+                 player_positions: Optional[List[tuple]] = None):
         """
-        外部ワーカーからの結果を追加します
+        Args:
+            event_type: 検出されたイベントタイプ（例: "serve", "hit", "bounce"）
+            confidence: 検出信頼度
+            timestamp: イベント発生時刻
+            ball_position: イベント時のボール位置
+            court_region: イベント発生コート領域
+            player_positions: イベント時のプレイヤー位置
+        """
+        self.event_type = event_type
+        self.confidence = confidence
+        self.timestamp = timestamp or time.time()
+        self.ball_position = ball_position
+        self.court_region = court_region
+        self.player_positions = player_positions or []
+        self.detection_timestamp = time.time()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式に変換"""
+        return {
+            "event_type": self.event_type,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp,
+            "ball_position": self.ball_position,
+            "court_region": self.court_region,
+            "player_positions": self.player_positions,
+            "detection_timestamp": self.detection_timestamp,
+            "has_event": self.event_type is not None
+        }
+
+
+class EventDetectionWorker(BaseWorker):
+    """
+    イベント検出処理を行うワーカー。
+    
+    下流ワーカーとして動作し、ボール検出、コート検出、
+    ポーズ検出の結果を統合してテニスイベントを検出します。
+    依存関係を持つ下流ワーカーとしてのバッチ処理を実装。
+    """
+    
+    def __init__(self, name: str, predictor: Any, results_queue: queue.Queue,
+                 max_concurrent_tasks: int = 3, debug: bool = False,
+                 batch_size: int = 2, batch_timeout: float = 0.2,
+                 task_queue_maxsize: int = 1000):
+        """
+        Args:
+            name: ワーカー名
+            predictor: イベント検出予測器
+            results_queue: 結果出力キュー
+            max_concurrent_tasks: 最大同時実行タスク数
+            debug: デバッグモード
+            batch_size: バッチサイズ（複雑な処理のため小さめ）
+            batch_timeout: バッチタイムアウト（長めに設定）
+            task_queue_maxsize: タスクキューの最大サイズ
+        """
+        super().__init__(name, results_queue, max_concurrent_tasks, debug,
+                        batch_size, batch_timeout, task_queue_maxsize)
+        
+        self.predictor = predictor
+        
+        # 処理統計の拡張
+        self.event_stats = {
+            "detections_made": 0,
+            "events_detected": 0,
+            "event_types": {},  # イベントタイプ別カウント
+            "average_confidence": 0.0,
+            "missing_dependencies": 0
+        }
+    
+    def get_published_topic(self) -> TopicName:
+        """このワーカーが出版するトピック名を返します"""
+        return "event_detection"
+    
+    def get_dependencies(self) -> List[TopicName]:
+        """このワーカーの依存関係を返します"""
+        return ["ball_detection", "court_detection", "pose_detection"]
+    
+    def process_batch(self, batch_tasks: List[BatchTask]) -> List[ResultData]:
+        """
+        バッチタスクの処理を実行します。
+        
+        依存関係を持つ下流ワーカーとしてのバッチ処理を実装。
         
         Args:
-            frame_idx: フレームインデックス
-            worker_name: ワーカー名 (ball, court, pose)
-            result: ワーカーの結果
-        """
-        try:
-            self.external_results_queue.put((frame_idx, worker_name, result), timeout=1.0)
-        except Exception as e:
-            logger.warning(f"外部結果の追加に失敗: {frame_idx}, {worker_name}, {e}")
-
-    def _external_results_integration_loop(self):
-        """外部結果統合ループ"""
-        while self.integration_running:
-            try:
-                frame_idx, worker_name, result = self.external_results_queue.get(timeout=0.1)
-                self._integrate_external_result(frame_idx, worker_name, result)
-                self.external_results_queue.task_done()
-            except Empty:
-                continue
-            except Exception as e:
-                logger.error(f"外部結果統合エラー: {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-
-    def _integrate_external_result(self, frame_idx: int, worker_name: str, result: Any):
-        """外部結果をバッファに統合し、シーケンスを更新"""
-        with self.buffer_lock:
-            if frame_idx not in self.result_buffer:
-                self.result_buffer[frame_idx] = {}
-            
-            self.result_buffer[frame_idx][worker_name] = result
-            
-            # 全ワーカーの結果が揃ったかチェック
-            required_workers = {"ball", "court", "pose"}
-            if set(self.result_buffer[frame_idx].keys()) >= required_workers:
-                self._update_sequence(frame_idx, self.result_buffer[frame_idx])
-                
-                # バッファをクリーンアップ（古いフレームを削除）
-                self._cleanup_buffer()
-
-    def _update_sequence(self, frame_idx: int, combined_results: Dict[str, Any]):
-        """シーケンスを更新し、必要に応じて推論タスクを生成"""
-        with self.sequence_lock:
-            # フレームデータを特徴量に変換
-            frame_features = self._convert_to_features(frame_idx, combined_results)
-            
-            # シーケンスに追加
-            self.sequence_frames.append((frame_idx, frame_features))
-            
-            # シーケンスが十分な長さになったら前処理タスクを生成
-            if len(self.sequence_frames) >= self.sequence_length:
-                sequence_data = list(self.sequence_frames)
-                
-                # 前処理タスクを作成
-                from ..definitions import PreprocessTask
-                task = PreprocessTask(
-                    task_id=f"event_{frame_idx}",
-                    frames=[],  # 既に特徴量化済み
-                    meta_data=[(idx, features) for idx, features in sequence_data]
-                )
-                
-                # 前処理キューに追加
-                try:
-                    self.preprocess_queue.put(task, timeout=1.0)
-                    if self.debug:
-                        logger.debug(f"EventWorker前処理タスク作成: {frame_idx}")
-                except Exception as e:
-                    logger.warning(f"前処理タスク追加失敗: {e}")
-
-    def _convert_to_features(self, frame_idx: int, combined_results: Dict[str, Any]) -> Dict[str, np.ndarray]:
-        """
-        各ワーカーの結果を統一された特徴量に変換
+            batch_tasks: バッチタスクのリスト
         
-        Args:
-            frame_idx: フレームインデックス
-            combined_results: {worker_name: result} の辞書
-            
         Returns:
-            Dict[str, np.ndarray]: 特徴量辞書
+            List[ResultData]: 処理結果のリスト（batch_tasksと同じ順序）
         """
-        features = {}
-        
         try:
-            # Ball特徴量 [3] (x, y, confidence)
-            ball_result = combined_results.get("ball", {})
-            if ball_result and 'x' in ball_result and 'y' in ball_result:
-                # 座標を正規化（ここでは仮の画像サイズを使用）
-                # 実際の実装では画像サイズを取得する必要があります
-                img_width, img_height = 1920, 1080  # 仮の値
-                features["ball"] = np.array([
-                    ball_result['x'] / img_width,
-                    ball_result['y'] / img_height,
-                    ball_result.get('confidence', 0.0)
-                ], dtype=np.float32)
-            else:
-                features["ball"] = np.zeros(3, dtype=np.float32)
+            # 依存関係の検証とバッチ準備
+            valid_batch_data = []
+            valid_tasks = []
             
-            # Court特徴量 [45] (15個のキーポイント × 3)
-            court_result = combined_results.get("court", [])
-            court_features = np.zeros(45, dtype=np.float32)
-            if court_result and isinstance(court_result, list):
-                # 上位15個のキーポイントを使用
-                for i, point in enumerate(court_result[:15]):
-                    if isinstance(point, dict) and 'x' in point and 'y' in point:
-                        court_features[i*3] = point['x'] / img_width
-                        court_features[i*3+1] = point['y'] / img_height
-                        court_features[i*3+2] = point.get('confidence', 0.0)
-            features["court"] = court_features
-            
-            # Player特徴量 [max_players, 5+51]
-            pose_result = combined_results.get("pose", [])
-            player_bbox_features = np.zeros((self.max_players, 5), dtype=np.float32)
-            player_pose_features = np.zeros((self.max_players, 51), dtype=np.float32)  # 17個のキーポイント × 3
-            
-            if pose_result and isinstance(pose_result, list):
-                for i, person in enumerate(pose_result[:self.max_players]):
-                    if isinstance(person, dict):
-                        # BBox特徴量
-                        bbox = person.get('bbox', [0, 0, 0, 0])
-                        if len(bbox) >= 4:
-                            player_bbox_features[i] = np.array([
-                                bbox[0] / img_width,      # x1
-                                bbox[1] / img_height,     # y1
-                                (bbox[0] + bbox[2]) / img_width,   # x2
-                                (bbox[1] + bbox[3]) / img_height,  # y2
-                                person.get('det_score', 0.0)       # confidence
-                            ], dtype=np.float32)
-                        
-                        # Pose特徴量
-                        keypoints = person.get('keypoints', [])
-                        scores = person.get('scores', [])
-                        if keypoints and len(keypoints) >= 17:
-                            for j, (x, y) in enumerate(keypoints[:17]):
-                                player_pose_features[i, j*3] = x / img_width
-                                player_pose_features[i, j*3+1] = y / img_height
-                                player_pose_features[i, j*3+2] = scores[j] if j < len(scores) else 0.0
-            
-            features["player_bbox"] = player_bbox_features
-            features["player_pose"] = player_pose_features
-            
-            return features
-            
-        except Exception as e:
-            logger.error(f"特徴量変換エラー {frame_idx}: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-            
-            # エラー時はゼロ特徴量を返す
-            return {
-                "ball": np.zeros(3, dtype=np.float32),
-                "court": np.zeros(45, dtype=np.float32),
-                "player_bbox": np.zeros((self.max_players, 5), dtype=np.float32),
-                "player_pose": np.zeros((self.max_players, 51), dtype=np.float32)
-            }
-
-    def _cleanup_buffer(self):
-        """古いフレームデータをバッファから削除"""
-        if len(self.result_buffer) > self.sequence_length * 2:
-            # 古いフレームを削除（最新のsequence_length * 2フレームのみ保持）
-            frame_indices = sorted(self.result_buffer.keys())
-            for frame_idx in frame_indices[:-self.sequence_length * 2]:
-                del self.result_buffer[frame_idx]
-
-    def _process_preprocess_task(self, task):
-        """前処理タスクを処理します"""
-        try:
-            future = self.preprocess_pool.submit(self._execute_preprocess, task)
-            
-            try:
-                processed_data = future.result(timeout=5.0)
+            for batch_task in batch_tasks:
+                # 依存関係の検証
+                if not self._validate_dependencies(batch_task.dependencies):
+                    logger.warning(f"Missing dependencies for item {batch_task.item_id}")
+                    with self.lock:
+                        self.event_stats["missing_dependencies"] += 1
+                    continue
                 
-                if processed_data is not None:
-                    # 推論タスクをキューに送信
-                    inference_task = InferenceTask(
-                        task.task_id, 
-                        processed_data, 
-                        task.meta_data
-                    )
-                    self.inference_queue.put(inference_task)
-                    
-                    self.preprocess_count += 1
-                    
-                    if self.debug:
-                        logger.debug(f"EventWorker前処理完了: {task.task_id}")
-                        
-            except Exception as e:
-                logger.error(f"EventWorker前処理実行エラー: {task.task_id}, {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-                    
-        except Exception as e:
-            logger.error(f"EventWorker前処理エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _execute_preprocess(self, task) -> Optional[Dict[str, torch.Tensor]]:
-        """実際の前処理を実行します"""
-        try:
-            if not task.meta_data or len(task.meta_data) < self.sequence_length:
-                return None
-            
-            # シーケンスデータからテンソルを構築
-            batch_size = 1
-            ball_sequence = []
-            court_sequence = []
-            player_bbox_sequence = []
-            player_pose_sequence = []
-            
-            # 最新のsequence_lengthフレームを使用
-            recent_frames = task.meta_data[-self.sequence_length:]
-            
-            for frame_idx, features in recent_frames:
-                ball_sequence.append(features["ball"])
-                court_sequence.append(features["court"])
-                player_bbox_sequence.append(features["player_bbox"])
-                player_pose_sequence.append(features["player_pose"])
-            
-            # テンソルに変換
-            processed_data = {
-                'ball_features': torch.tensor(np.array(ball_sequence), dtype=torch.float32).unsqueeze(0),  # [1, T, 3]
-                'court_features': torch.tensor(np.array(court_sequence), dtype=torch.float32).unsqueeze(0),  # [1, T, 45]
-                'player_bbox_features': torch.tensor(np.array(player_bbox_sequence), dtype=torch.float32).unsqueeze(0),  # [1, T, P, 5]
-                'player_pose_features': torch.tensor(np.array(player_pose_sequence), dtype=torch.float32).unsqueeze(0)   # [1, T, P, 51]
-            }
-            
-            return processed_data
-            
-        except Exception as e:
-            logger.error(f"EventWorker前処理実行中にエラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-            return None
-
-    def _process_inference_task(self, task):
-        """推論タスクを処理します"""
-        try:
-            # GPU推論を実行
-            with torch.no_grad():
-                event_predictions = self.predictor.inference(task.tensor_data)
-            
-            # 後処理タスクをキューに送信
-            postprocess_task = PostprocessTask(
-                task.task_id,
-                event_predictions,
-                task.meta_data
-            )
-            self.postprocess_queue.put(postprocess_task)
-            
-            self.inference_count += 1
-            
-            if self.debug:
-                logger.debug(f"EventWorker推論完了: {task.task_id}")
+                # フレーム画像の検証
+                if batch_task.task_data is None or not isinstance(batch_task.task_data, np.ndarray):
+                    logger.warning(f"Invalid task data for item {batch_task.item_id}")
+                    continue
                 
-        except Exception as e:
-            logger.error(f"EventWorker推論エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _process_postprocess_task(self, task):
-        """後処理タスクを処理します"""
-        try:
-            future = self.postprocess_pool.submit(self._execute_postprocess, task)
+                # バッチデータの準備
+                batch_data = self._prepare_batch_data(batch_task)
+                if batch_data is not None:
+                    valid_batch_data.append(batch_data)
+                    valid_tasks.append(batch_task)
             
-            try:
-                results = future.result(timeout=3.0)
+            if not valid_batch_data:
+                # 有効なタスクがない場合はダミー結果を返す
+                return [EventDetectionResult(confidence=0.0) for _ in batch_tasks]
+            
+            # バッチ推論の実行
+            batch_predictions = self._run_batch_inference(valid_batch_data)
+            
+            # 結果の処理
+            results = []
+            valid_idx = 0
+            
+            for batch_task in batch_tasks:
+                if valid_idx < len(valid_tasks) and batch_task == valid_tasks[valid_idx]:
+                    # 有効なタスクの場合
+                    prediction = batch_predictions[valid_idx] if valid_idx < len(batch_predictions) else None
+                    result = self._postprocess_prediction(prediction, batch_task)
+                    valid_idx += 1
+                else:
+                    # 無効なタスクの場合はダミー結果
+                    result = EventDetectionResult(confidence=0.0)
                 
-                if results:
-                    # 最新フレームの結果を結果キューに送信
-                    if task.meta_data:
-                        latest_frame_idx = task.meta_data[-1][0]  # 最新フレームのインデックス
-                        
-                        result_item = {
-                            "frame_idx": latest_frame_idx,
-                            "worker_name": self.name,
-                            "prediction": results
-                        }
-                        
-                        self.results_queue.put(result_item)
-                        
-                        self.postprocess_count += 1
-                        
-                        if self.debug:
-                            logger.debug(f"EventWorker後処理完了: {task.task_id}, frame: {latest_frame_idx}")
-                            
-            except Exception as e:
-                logger.error(f"EventWorker後処理実行エラー: {task.task_id}, {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-                    
-        except Exception as e:
-            logger.error(f"EventWorker後処理エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _execute_postprocess(self, task) -> Optional[Dict[str, Any]]:
-        """実際の後処理を実行します"""
-        try:
-            # EventPredictorの後処理を呼び出し
-            results = self.predictor.postprocess(task.tensor_data)
-            
-            if self.debug:
-                logger.debug(f"EventWorker後処理結果: {results}")
+                # 統計更新
+                self._update_event_stats(result)
+                results.append(result)
             
             return results
-            
+        
         except Exception as e:
-            logger.error(f"EventWorker後処理実行中にエラー: {e}")
+            logger.error(f"Event detection batch processing error: {e}")
             if self.debug:
                 import traceback
                 traceback.print_exc()
+            
+            # エラー時はダミー結果を返す
+            return [EventDetectionResult(confidence=0.0) for _ in batch_tasks]
+    
+    def _validate_dependencies(self, dependencies: Dict[TopicName, ResultData]) -> bool:
+        """
+        依存関係の検証を行います。
+        
+        Args:
+            dependencies: 依存するトピックの結果辞書
+        
+        Returns:
+            bool: 依存関係が満たされているかどうか
+        """
+        required_topics = self.get_dependencies()
+        
+        for topic in required_topics:
+            if topic not in dependencies:
+                logger.debug(f"Missing dependency: {topic}")
+                return False
+            
+            # 結果の有効性をチェック
+            result = dependencies[topic]
+            if result is None:
+                logger.debug(f"Null result for dependency: {topic}")
+                return False
+            
+            # エラー結果のチェック
+            if isinstance(result, dict) and result.get("error", False):
+                logger.debug(f"Error result for dependency: {topic}")
+                return False
+        
+        return True
+    
+    def _prepare_batch_data(self, batch_task: BatchTask) -> Optional[Dict[str, Any]]:
+        """
+        バッチ処理用のデータを準備します。
+        
+        Args:
+            batch_task: バッチタスク
+        
+        Returns:
+            準備されたバッチデータ（無効な場合はNone）
+        """
+        try:
+            # フレーム画像
+            frame = batch_task.task_data
+            
+            # 依存関係の結果を取得
+            ball_result = batch_task.dependencies.get("ball_detection")
+            court_result = batch_task.dependencies.get("court_detection")
+            pose_result = batch_task.dependencies.get("pose_detection")
+            
+            # バッチデータの構築
+            batch_data = {
+                "item_id": batch_task.item_id,
+                "frame": frame,
+                "ball_detection": self._extract_ball_features(ball_result),
+                "court_detection": self._extract_court_features(court_result),
+                "pose_detection": self._extract_pose_features(pose_result),
+                "timestamp": batch_task.submit_time
+            }
+            
+            return batch_data
+        
+        except Exception as e:
+            logger.error(f"Error preparing batch data for item {batch_task.item_id}: {e}")
             return None
-
-    def get_performance_stats(self) -> Dict[str, int]:
-        """パフォーマンス統計を取得します"""
-        return {
-            "preprocess_count": self.preprocess_count,
-            "inference_count": self.inference_count,
-            "postprocess_count": self.postprocess_count,
-            "sequence_length": len(self.sequence_frames),
-            "buffer_size": len(self.result_buffer)
-        } 
+    
+    def _extract_ball_features(self, ball_result: Any) -> Dict[str, Any]:
+        """ボール検出結果から特徴を抽出します"""
+        try:
+            if hasattr(ball_result, 'position'):
+                return {
+                    "position": ball_result.position,
+                    "confidence": getattr(ball_result, 'confidence', 0.0),
+                    "visibility": getattr(ball_result, 'visibility', False)
+                }
+            elif isinstance(ball_result, dict):
+                return {
+                    "position": ball_result.get('position'),
+                    "confidence": ball_result.get('confidence', 0.0),
+                    "visibility": ball_result.get('visibility', False)
+                }
+            else:
+                return {"position": None, "confidence": 0.0, "visibility": False}
+        except Exception as e:
+            logger.warning(f"Error extracting ball features: {e}")
+            return {"position": None, "confidence": 0.0, "visibility": False}
+    
+    def _extract_court_features(self, court_result: Any) -> Dict[str, Any]:
+        """コート検出結果から特徴を抽出します"""
+        try:
+            if hasattr(court_result, 'keypoints'):
+                return {
+                    "keypoints": court_result.keypoints,
+                    "lines": getattr(court_result, 'lines', []),
+                    "confidence": getattr(court_result, 'confidence', 0.0)
+                }
+            elif isinstance(court_result, dict):
+                return {
+                    "keypoints": court_result.get('keypoints', []),
+                    "lines": court_result.get('lines', []),
+                    "confidence": court_result.get('confidence', 0.0)
+                }
+            else:
+                return {"keypoints": [], "lines": [], "confidence": 0.0}
+        except Exception as e:
+            logger.warning(f"Error extracting court features: {e}")
+            return {"keypoints": [], "lines": [], "confidence": 0.0}
+    
+    def _extract_pose_features(self, pose_result: Any) -> Dict[str, Any]:
+        """ポーズ検出結果から特徴を抽出します"""
+        try:
+            # ポーズ検出結果の形式に応じて調整
+            if hasattr(pose_result, 'keypoints'):
+                return {
+                    "keypoints": pose_result.keypoints,
+                    "confidence": getattr(pose_result, 'confidence', 0.0),
+                    "player_count": getattr(pose_result, 'player_count', 0)
+                }
+            elif isinstance(pose_result, dict):
+                return {
+                    "keypoints": pose_result.get('keypoints', []),
+                    "confidence": pose_result.get('confidence', 0.0),
+                    "player_count": pose_result.get('player_count', 0)
+                }
+            else:
+                return {"keypoints": [], "confidence": 0.0, "player_count": 0}
+        except Exception as e:
+            logger.warning(f"Error extracting pose features: {e}")
+            return {"keypoints": [], "confidence": 0.0, "player_count": 0}
+    
+    def _run_batch_inference(self, batch_data: List[Dict[str, Any]]) -> List[Any]:
+        """
+        バッチ推論を実行します。
+        
+        Args:
+            batch_data: バッチデータのリスト
+        
+        Returns:
+            推論結果のリスト
+        """
+        try:
+            # 前処理
+            processed_batch = self._preprocess_batch_data(batch_data)
+            
+            # バッチ推論
+            with torch.no_grad():
+                if hasattr(self.predictor, 'inference_batch'):
+                    # バッチ推論専用メソッドがある場合
+                    predictions = self.predictor.inference_batch(processed_batch)
+                elif hasattr(self.predictor, 'inference'):
+                    # 通常の推論メソッドを使用
+                    predictions = self.predictor.inference(processed_batch)
+                else:
+                    raise AttributeError("Predictor has no inference method")
+            
+            # 予測結果がリストでない場合はリストに変換
+            if not isinstance(predictions, list):
+                predictions = [predictions]
+            
+            return predictions
+        
+        except Exception as e:
+            logger.error(f"Batch inference error: {e}")
+            raise
+    
+    def _preprocess_batch_data(self, batch_data: List[Dict[str, Any]]) -> Any:
+        """
+        バッチデータの前処理を行います。
+        
+        Args:
+            batch_data: バッチデータのリスト
+        
+        Returns:
+            前処理済みデータ
+        """
+        try:
+            # predictorの前処理メソッドを呼び出し
+            if hasattr(self.predictor, 'preprocess_batch'):
+                return self.predictor.preprocess_batch(batch_data)
+            elif hasattr(self.predictor, 'preprocess'):
+                return self.predictor.preprocess(batch_data)
+            else:
+                # フォールバック: 基本的な前処理
+                return self._basic_preprocess_batch(batch_data)
+        
+        except Exception as e:
+            logger.error(f"Batch preprocessing error: {e}")
+            raise
+    
+    def _basic_preprocess_batch(self, batch_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """基本的なバッチ前処理を行います"""
+        # フォールバック実装: そのまま返す
+        return batch_data
+    
+    def _postprocess_prediction(self, prediction: Any, batch_task: BatchTask) -> EventDetectionResult:
+        """
+        推論結果の後処理を行います。
+        
+        Args:
+            prediction: 推論結果
+            batch_task: 元のバッチタスク
+        
+        Returns:
+            EventDetectionResult: 処理済みの検出結果
+        """
+        try:
+            if prediction is None:
+                return EventDetectionResult(confidence=0.0)
+            
+            # predictorの後処理メソッドを呼び出し
+            if hasattr(self.predictor, 'postprocess'):
+                processed_result = self.predictor.postprocess(prediction)
+                
+                # 結果をEventDetectionResultに変換
+                return self._convert_to_detection_result(processed_result, batch_task)
+            else:
+                # フォールバック: 基本的な後処理
+                return self._basic_postprocess(prediction, batch_task)
+        
+        except Exception as e:
+            logger.error(f"Postprocessing error: {e}")
+            return EventDetectionResult(confidence=0.0)
+    
+    def _convert_to_detection_result(self, processed_result: Any, batch_task: BatchTask) -> EventDetectionResult:
+        """予測器の結果をEventDetectionResultに変換します"""
+        try:
+            # 依存関係から追加情報を取得
+            ball_result = batch_task.dependencies.get("ball_detection")
+            court_result = batch_task.dependencies.get("court_detection")
+            pose_result = batch_task.dependencies.get("pose_detection")
+            
+            # ボール位置の取得
+            ball_position = None
+            if hasattr(ball_result, 'position'):
+                ball_position = ball_result.position
+            elif isinstance(ball_result, dict):
+                ball_position = ball_result.get('position')
+            
+            # プレイヤー位置の取得
+            player_positions = []
+            if hasattr(pose_result, 'keypoints'):
+                # ポーズキーポイントからプレイヤー位置を推定
+                player_positions = self._extract_player_positions(pose_result.keypoints)
+            elif isinstance(pose_result, dict):
+                keypoints = pose_result.get('keypoints', [])
+                player_positions = self._extract_player_positions(keypoints)
+            
+            # 結果の形式に応じて変換
+            if isinstance(processed_result, dict):
+                return EventDetectionResult(
+                    event_type=processed_result.get('event_type'),
+                    confidence=processed_result.get('confidence', 0.0),
+                    timestamp=processed_result.get('timestamp', batch_task.submit_time),
+                    ball_position=ball_position,
+                    court_region=processed_result.get('court_region'),
+                    player_positions=player_positions
+                )
+            elif hasattr(processed_result, 'event_type'):
+                # オブジェクト形式の場合
+                return EventDetectionResult(
+                    event_type=getattr(processed_result, 'event_type', None),
+                    confidence=getattr(processed_result, 'confidence', 0.0),
+                    timestamp=getattr(processed_result, 'timestamp', batch_task.submit_time),
+                    ball_position=ball_position,
+                    court_region=getattr(processed_result, 'court_region', None),
+                    player_positions=player_positions
+                )
+            else:
+                # その他の形式の場合はダミー結果
+                return EventDetectionResult(confidence=0.0)
+        
+        except Exception as e:
+            logger.warning(f"Error converting prediction result: {e}")
+            return EventDetectionResult(confidence=0.0)
+    
+    def _extract_player_positions(self, keypoints: List[Any]) -> List[tuple]:
+        """キーポイントからプレイヤー位置を抽出します"""
+        try:
+            positions = []
+            # キーポイントの形式に応じて調整
+            # 例: 各プレイヤーの重心位置を計算
+            if keypoints:
+                # 簡単な実装例
+                for kp in keypoints:
+                    if isinstance(kp, (list, tuple)) and len(kp) >= 2:
+                        positions.append((kp[0], kp[1]))
+            return positions
+        except Exception as e:
+            logger.warning(f"Error extracting player positions: {e}")
+            return []
+    
+    def _basic_postprocess(self, prediction: Any, batch_task: BatchTask) -> EventDetectionResult:
+        """基本的な後処理を行います"""
+        # フォールバック実装
+        return EventDetectionResult(confidence=0.0)
+    
+    def _update_event_stats(self, result: EventDetectionResult) -> None:
+        """イベント検出統計を更新します"""
+        with self.lock:
+            self.event_stats["detections_made"] += 1
+            
+            if result.event_type and result.confidence > 0.5:  # 閾値は調整可能
+                self.event_stats["events_detected"] += 1
+                
+                # イベントタイプ別カウント
+                event_type = result.event_type
+                if event_type not in self.event_stats["event_types"]:
+                    self.event_stats["event_types"][event_type] = 0
+                self.event_stats["event_types"][event_type] += 1
+            
+            # 平均信頼度の更新
+            total = self.event_stats["detections_made"]
+            current_avg = self.event_stats["average_confidence"]
+            self.event_stats["average_confidence"] = \
+                (current_avg * (total - 1) + result.confidence) / total
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """統計情報を返します（基底クラスの統計に追加）"""
+        base_stats = super().get_stats()
+        
+        with self.lock:
+            base_stats.update({
+                "event_detections_made": self.event_stats["detections_made"],
+                "events_detected": self.event_stats["events_detected"],
+                "event_types": self.event_stats["event_types"].copy(),
+                "average_confidence": self.event_stats["average_confidence"],
+                "missing_dependencies": self.event_stats["missing_dependencies"],
+                "detection_rate": (
+                    self.event_stats["events_detected"] / max(1, self.event_stats["detections_made"])
+                )
+            })
+        
+        return base_stats 

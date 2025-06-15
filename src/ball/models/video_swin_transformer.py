@@ -4,9 +4,6 @@ import math
 import torch.nn.functional as F
 
 # --- ユーザー提供の既存ブロック ---
-# SE, DSConv, make_dsconv_block, PixelShuffleBlock
-# (これらの定義はここにあると仮定します)
-# (もしなければ、前回の回答からコピーしてください)
 class SE(nn.Module):
     """
     Squeeze-and-Excitation block
@@ -74,7 +71,6 @@ class PixelShuffleBlock(nn.Module):
         x = self.bn(x)
         x = self.act(x)
         return x
-# --- ここまで既存ブロック ---
 
 def window_partition(x, window_size):
     """
@@ -126,7 +122,16 @@ class WindowAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         
+        # 初期化の改良 - より小さな標準偏差を使用
         nn.init.trunc_normal_(self.relative_position_bias_table, std=.02)
+        # Linearレイヤーの初期化を追加
+        nn.init.trunc_normal_(self.qkv.weight, std=.02)
+        nn.init.trunc_normal_(self.proj.weight, std=.02)
+        if self.qkv.bias is not None:
+            nn.init.zeros_(self.qkv.bias)
+        if self.proj.bias is not None:
+            nn.init.zeros_(self.proj.bias)
+            
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, mask=None):
@@ -151,6 +156,8 @@ class WindowAttention(nn.Module):
         else:
             attn = self.softmax(attn)
 
+        # アテンションの安定化
+        attn = torch.clamp(attn, min=1e-8)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
@@ -172,15 +179,29 @@ class SwinTransformerBlock(nn.Module):
             self.shift_size = 0
             self.window_size = min(self.input_resolution)
 
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = nn.LayerNorm(dim, eps=1e-6)  # epsを明示的に設定
         self.attn = WindowAttention(
             dim, window_size=(self.window_size, self.window_size), n_heads=n_heads, qkv_bias=qkv_bias,
             attn_drop=attn_drop, proj_drop=drop)
 
         self.drop_path = nn.Identity() # DropPathは省略
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim, eps=1e-6)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(nn.Linear(dim, mlp_hidden_dim), nn.GELU(), nn.Linear(mlp_hidden_dim, dim), nn.Dropout(drop))
+        # MLPの初期化も改良
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_hidden_dim), 
+            nn.GELU(), 
+            nn.Dropout(drop),  # Dropoutを追加
+            nn.Linear(mlp_hidden_dim, dim), 
+            nn.Dropout(drop)
+        )
+
+        # MLP用の重みも初期化
+        for layer in self.mlp:
+            if isinstance(layer, nn.Linear):
+                nn.init.trunc_normal_(layer.weight, std=.02)
+                if layer.bias is not None:
+                    nn.init.zeros_(layer.bias)
 
         if self.shift_size > 0:
             H, W = self.input_resolution
@@ -215,14 +236,12 @@ class SwinTransformerBlock(nn.Module):
         x = self.norm1(x)
         x = x.view(B, H, W, C)
 
-        # --- パディング処理を追加 ---
-        # H, Wをwindow_sizeの倍数にパディング
+        # パディング処理
         pad_l = pad_t = 0
         pad_r = (self.window_size - W % self.window_size) % self.window_size
         pad_b = (self.window_size - H % self.window_size) % self.window_size
         x = F.pad(x, (0, 0, pad_l, pad_r, pad_t, pad_b))
         _, H_pad, W_pad, _ = x.shape
-        # --- パディング処理ここまで ---
 
         # Cyclic Shift
         if self.shift_size > 0:
@@ -239,7 +258,7 @@ class SwinTransformerBlock(nn.Module):
 
         # Merge windows
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
-        shifted_x = window_reverse(attn_windows, self.window_size, H_pad, W_pad) # H_pad, W_pad を使用
+        shifted_x = window_reverse(attn_windows, self.window_size, H_pad, W_pad)
 
         # Reverse Cyclic Shift
         if self.shift_size > 0:
@@ -247,10 +266,9 @@ class SwinTransformerBlock(nn.Module):
         else:
             x = shifted_x
 
-        # --- パディング解除処理を追加 ---
+        # パディング解除処理
         if pad_r > 0 or pad_b > 0:
             x = x[:, :H, :W, :].contiguous()
-        # --- パディング解除処理ここまで ---
         
         x = x.view(B, H * W, C)
         x = shortcut + self.drop_path(x)
@@ -258,58 +276,40 @@ class SwinTransformerBlock(nn.Module):
 
         return x
 
-
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-    def forward(self, x):
-        x = x + self.pe[:x.size(0)]
-        return self.dropout(x)
-
-
 class SpatioTemporalSwinBlock(nn.Module):
     """
-    Swin Transformerによる空間アテンションと、標準的な時間アテンションを組み合わせたブロック。
+    Swin Transformerによる空間アテンションと標準的な時間アテンションを組み合わせたブロック。
     """
     def __init__(self, dim, input_resolution, n_heads, window_size=7, mlp_ratio=4., qkv_bias=True, drop=0., attn_drop=0.):
         super().__init__()
 
-        # --- 1. 空間アテンション: Swin Transformer Blockを2つ重ねる ---
-        # 1つ目: 通常のウィンドウ (W-MSA)
+        # 空間アテンション: Swin Transformer Blockを2つ重ねる
         self.spatial_block_1 = SwinTransformerBlock(
             dim=dim,
             input_resolution=input_resolution,
             n_heads=n_heads,
             window_size=window_size,
-            shift_size=0, # シフトしない
+            shift_size=0,
             mlp_ratio=mlp_ratio,
             qkv_bias=qkv_bias,
             drop=drop,
             attn_drop=attn_drop
         )
 
-        # 2つ目: シフト化ウィンドウ (SW-MSA)
         self.spatial_block_2 = SwinTransformerBlock(
             dim=dim,
             input_resolution=input_resolution,
             n_heads=n_heads,
             window_size=window_size,
-            shift_size=window_size // 2, # ウィンドウサイズの半分だけシフトする
+            shift_size=window_size // 2,
             mlp_ratio=mlp_ratio,
             qkv_bias=qkv_bias,
             drop=drop,
             attn_drop=attn_drop
         )
         
-        # --- 2. 時間アテンション: 既存のMultiheadAttentionを流用 ---
-        self.norm_temporal = nn.LayerNorm(dim)
+        # 時間アテンション
+        self.norm_temporal = nn.LayerNorm(dim, eps=1e-6)
         self.attn_temporal = nn.MultiheadAttention(
             embed_dim=dim,
             num_heads=n_heads,
@@ -317,10 +317,8 @@ class SpatioTemporalSwinBlock(nn.Module):
             batch_first=True
         )
         
-        # --- 3. 最終的なMLP ---
-        # SwinTransformerBlock内にMLPは含まれているため、ここでは時間アテンション後の処理のみを考慮
-        # FFNを時間アテンションの後にも追加することで、より表現力が高まる
-        self.norm_final = nn.LayerNorm(dim)
+        # 最終FFN
+        self.norm_final = nn.LayerNorm(dim, eps=1e-6)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.ffn_final = nn.Sequential(
             nn.Linear(dim, mlp_hidden_dim),
@@ -329,6 +327,13 @@ class SpatioTemporalSwinBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, dim),
             nn.Dropout(drop)
         )
+        
+        # FFN重みの初期化
+        for layer in self.ffn_final:
+            if isinstance(layer, nn.Linear):
+                nn.init.trunc_normal_(layer.weight, std=.02)
+                if layer.bias is not None:
+                    nn.init.zeros_(layer.bias)
 
     def forward(self, x):
         """
@@ -336,33 +341,27 @@ class SpatioTemporalSwinBlock(nn.Module):
         """
         B, N, T, D = x.shape
         
-        # === 1. Spatial Attention ===
-        # (B, N, T, D) -> (B*N, T, D)
-        # 各フレームを独立したバッチとして扱う
+        # 空間アテンション
         residual = x
-
-        # 空間アテンションの実行
         x_spatial = x.view(B * N, T, D)
         x_spatial = self.spatial_block_1(x_spatial)
         x_spatial = self.spatial_block_2(x_spatial)
         x_spatial = x_spatial.view(B, N, T, D)
         x = residual + x_spatial
         
-        # === 2. Temporal Attention ===
-        # (B, N, T, D) -> (B, T, N, D) -> (B*T, N, D)
-        # 各トークン位置を独立したバッチとして扱う
+        # 時間アテンション
         residual = x
         x_temporal = x.permute(0, 2, 1, 3).contiguous().view(B * T, N, D)
         
         # Temporal self-attention
-        x_temporal, _ = self.attn_temporal(self.norm_temporal(x_temporal), self.norm_temporal(x_temporal), self.norm_temporal(x_temporal))
+        x_norm = self.norm_temporal(x_temporal)
+        x_temporal, _ = self.attn_temporal(x_norm, x_norm, x_norm)
 
-        # (B*T, N, D) -> (B, T, N, D) -> (B, N, T, D)
         x_temporal = x_temporal.view(B, T, N, D).permute(0, 2, 1, 3).contiguous()
         x = residual + x_temporal
         
-        # === 3. Feed Forward ===
-        x = x + self.ffn_final(x)
+        # Feed Forward
+        x = x + self.ffn_final(self.norm_final(x))
         
         return x
 
@@ -377,27 +376,25 @@ class VideoSwinTransformer(nn.Module):
                  n_frames: int = 10,
                  window_size: int = 7,
                  feature_dim: int = 256,
-                 transformer_blocks: int = 2, # SpatioTemporalSwinBlockの繰り返し数
+                 transformer_blocks: int = 2,
                  transformer_heads: int = 8):
         super().__init__()
         
-        # === 1. CNN Encoder (5段階に深化) ===
-        self.enc1 = make_dsconv_block(in_channels, 16, stride=2) # H/2
-        self.enc2 = make_dsconv_block(16, 32, stride=2)         # H/4
-        self.enc3 = make_dsconv_block(32, 64, stride=2)         # H/8
-        self.enc4 = make_dsconv_block(64, 128, stride=2)        # H/16
-        self.enc5 = make_dsconv_block(128, 256, stride=2)       # H/32
+        # CNN Encoder (5段階に深化)
+        self.enc1 = make_dsconv_block(in_channels, 16, stride=2)
+        self.enc2 = make_dsconv_block(16, 32, stride=2)
+        self.enc3 = make_dsconv_block(32, 64, stride=2)
+        self.enc4 = make_dsconv_block(64, 128, stride=2)
+        self.enc5 = make_dsconv_block(128, 256, stride=2)
 
-        # === 2. Feature Embedding & Positional Encoding ===
+        # Feature Embedding & Positional Encoding
         self.feat_proj = nn.Conv2d(256, feature_dim, kernel_size=1)
         
-        # --- 修正点: 空間の絶対位置エンベディングは不要に ---
-        # 空間の相対位置はSwinTransformerBlock内で処理されるため、絶対位置は削除。
-        # 時間方向の絶対位置エンベディングは、時間アテンションのために維持。
-        self.pos_embed_temporal = nn.Parameter(torch.randn(1, n_frames, 1, feature_dim))
+        # 時間方向の位置エンコーディングを改良
+        self.pos_embed_temporal = nn.Parameter(torch.zeros(1, n_frames, 1, feature_dim))
+        nn.init.trunc_normal_(self.pos_embed_temporal, std=.02)
 
-        # === 3. Spatio-Temporal Swin Transformer ===
-        # Swin Blockに渡す特徴マップの解像度を計算 (5回ダウンサンプル)
+        # Spatio-Temporal Swin Transformer
         final_resolution = (img_size[0] // 32, img_size[1] // 32)
 
         self.transformer_blocks = nn.Sequential(
@@ -405,11 +402,13 @@ class VideoSwinTransformer(nn.Module):
                 dim=feature_dim,
                 input_resolution=final_resolution,
                 n_heads=transformer_heads,
-                window_size=window_size
+                window_size=window_size,
+                drop=0.1,  # Dropoutを追加
+                attn_drop=0.1
               ) for _ in range(transformer_blocks)]
         )
 
-        # === 4. CNN Decoder (変更なし) ===
+        # CNN Decoder
         self.dec4_up = PixelShuffleBlock(feature_dim, 128, upscale_factor=2)
         self.dec4_conv = make_dsconv_block(128 + 128, 128, stride=1)
         self.dec3_up = PixelShuffleBlock(128, 64, upscale_factor=2)
@@ -420,63 +419,82 @@ class VideoSwinTransformer(nn.Module):
         self.dec1_conv = make_dsconv_block(16 + 16, 16, stride=1)
         self.dec0_up = PixelShuffleBlock(16, 16, upscale_factor=2)
         self.dec0_conv = make_dsconv_block(16 + in_channels, 16, stride=1)
-        self.head = nn.Conv2d(16, out_channels, kernel_size=1)
+        
+        # 出力レイヤーの改良
+        self.head = nn.Sequential(
+            nn.Conv2d(16, 8, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, out_channels, kernel_size=1)
+        )
+        
+        # 重みの初期化
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x, debug=False):
         # x: (B, N, C, H, W)
         B, N, C, H, W = x.shape
         
         # 元の入力画像をデコーダの最終段でのskip connection用に保持
-        # (B, N, C, H, W) -> (B*N, C, H, W)
         x_orig = x.view(B*N, C, H, W)
         if debug: print(f"Input: {x_orig.shape}")
         
-        # === 1. CNN Encoder ===
-        s1 = self.enc1(x_orig) # 解像度: H/2
-        s2 = self.enc2(s1)   # 解像度: H/4
-        s3 = self.enc3(s2)   # 解像度: H/8
-        s4 = self.enc4(s3)   # 解像度: H/16
-        s5 = self.enc5(s4)   # 解像度: H/32
+        # CNN Encoder
+        s1 = self.enc1(x_orig)
+        s2 = self.enc2(s1)
+        s3 = self.enc3(s2)
+        s4 = self.enc4(s3)
+        s5 = self.enc5(s4)
         if debug: print(f"CNN s5 out: {s5.shape}")
         
-        # === 2. Feature Projection & Embedding ===
-        x_feat = self.feat_proj(s5) # (B*N, D, h_feat, w_feat)
+        # Feature Projection & Embedding
+        x_feat = self.feat_proj(s5)
         
         D, h_feat, w_feat = x_feat.shape[1], x_feat.shape[2], x_feat.shape[3]
         
-        # (B*N, D, h_feat, w_feat) -> (B*N, D, T) -> (B*N, T, D) -> (B, N, T, D)
+        # Transformerの入力形状に変換
         x_feat = x_feat.flatten(2).permute(0, 2, 1)
         x_feat = x_feat.view(B, N, -1, D)
         T = x_feat.shape[2]
         if debug: print(f"Reshaped for Transformer: {x_feat.shape}")
 
-        # 時間の絶対位置エンベディングを加算
+        # 時間の位置エンベディングを加算
         x_feat = x_feat + self.pos_embed_temporal[:, :N, :, :]
 
-        # === 3. Spatio-Temporal Swin Transformer ===
+        # 勾配クリッピング付きのTransformer
         x_transformed = self.transformer_blocks(x_feat)
+        
+        # 勾配の安定化
+        if self.training:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+            
         if debug: print(f"Transformer out: {x_transformed.shape}")
 
-        # === 4. CNN Decoder ===
-        # Transformerの出力をデコーダで使える2Dの形状に戻す
-        # (B, N, T, D) -> (B, N, D, T) -> (B*N, D, h_feat, w_feat)
+        # CNN Decoder
         t_out = x_transformed.permute(0, 1, 3, 2).contiguous().view(B * N, D, h_feat, w_feat)
         if debug: print(f"Reshaped for Decoder: {t_out.shape}")
         
-        # Level 5 -> 4
+        # Decoder
         d4 = self.dec4_up(t_out); d4 = torch.cat([d4, s4], dim=1); d4 = self.dec4_conv(d4)
-        # Level 4 -> 3
         d3 = self.dec3_up(d4);    d3 = torch.cat([d3, s3], dim=1); d3 = self.dec3_conv(d3)
-        # Level 3 -> 2
         d2 = self.dec2_up(d3);    d2 = torch.cat([d2, s2], dim=1); d2 = self.dec2_conv(d2)
-        # Level 2 -> 1
         d1 = self.dec1_up(d2);    d1 = torch.cat([d1, s1], dim=1); d1 = self.dec1_conv(d1)
-        # Level 1 -> 0 (Full Resolution)
         d0 = self.dec0_up(d1);    d0 = torch.cat([d0, x_orig], dim=1); d0 = self.dec0_conv(d0)
         
         if debug: print(f"Final Decoder out: {d0.shape}")
 
-        # === 5. Head ===
+        # Head
         out = self.head(d0)
         
         # 最終的な出力形状を (B, N, C_out, H, W) に戻す
@@ -492,11 +510,16 @@ if __name__ == '__main__':
     in_channels = 3
     h, w = 320, 640
 
-    model = VideoSwinTransformer(img_size=(h, w), window_size=5).to("cuda")
+    model = VideoSwinTransformer(
+        img_size=(h, w), 
+        window_size=5,
+        feature_dim=128,  # より小さな特徴次元
+        transformer_blocks=1,  # ブロック数を減らす
+        transformer_heads=4   # ヘッド数を減らす
+    ).to("cuda")
 
     x = torch.randn(batch_size, n_frames, in_channels, h, w).to("cuda")
     
-    # debug=True を指定して実行
     print("<<<<< Running with debug=True >>>>>")
     with torch.no_grad():
         y = model(x, debug=True)
