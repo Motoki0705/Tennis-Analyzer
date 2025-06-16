@@ -9,6 +9,7 @@ hydra:
 # デフォルト設定
 defaults:
   - litmodule: video_swin_transformer_focal
+  - litdatamodule: video_swin_transformer
   - trainer: default
   - callbacks: default
   - _self_

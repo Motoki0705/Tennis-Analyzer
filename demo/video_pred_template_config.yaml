@@ -12,13 +12,13 @@ common:
 
 # --- Ball Model (例: LiteTrackNet) ---
 ball:
-  _target_: src.ball.lit_module.lit_lite_tracknet.LitLiteTracknet
-  ckpt_path: "checkpoints/ball/lit_lite_tracknet/epoch=003-val_loss=0.00001770.ckpt"
+  _target_: src.ball.lit_module.lit_lite_tracknet_focal.LitLiteTracknetFocal
+  ckpt_path: "checkpoints/ball/lit_lite_tracknet/best_model.ckpt"
 
 # --- Court Model (例: LiteTrackNet) ---
 court:
-  _target_: src.court.lit_module.lit_lite_tracknet.LitLiteTracknet
-  ckpt_path: "checkpoints/court/lit_lite_tracknet/epoch=010-val_loss=0.76632285.ckpt"  # TODO: 実際のパスに変更
+  _target_: src.court.lit_module.lit_lite_tracknet_focal.LitLiteTracknetFocal
+  ckpt_path: "checkpoints/court/lit_lite_tracknet_focal/best_model.ckpt"  # TODO: 実際のパスに変更
 
 # --- Player Model (例: RT-DETR) ---
 player:
@@ -61,26 +61,3 @@ predictors:
     player_label_id: 0
     det_score_thresh: 0.7
     pose_score_thresh: 0.7
-
-  # --- StreamingOverlayer設定 ---
-  streaming_overlayer:
-    intervals: {"ball": 1, "court": 1, "pose": 1}
-    batch_sizes: {"ball": 32, "court": 32, "pose": 16}
-    debug: false
-    custom_queue_configs: null
-
-# --- キュー設定 (オプション) ---
-queue:
-  enable_monitoring: true
-  log_queue_status: false
-  gpu_optimization: true
-  
-  # キューサイズ設定
-  base_queue_sizes:
-    preprocess: 32
-    inference: 16
-    postprocess: 32
-    
-  extended_queue_sizes:
-    sliding_window: 16
-    batch_buffer: 8 

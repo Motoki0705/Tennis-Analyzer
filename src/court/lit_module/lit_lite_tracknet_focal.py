@@ -1,20 +1,58 @@
 """
-LiteTrackNet用LightningModule
+LiteTrackNet用LightningModule with Focal Loss
 """
 from typing import Dict, Any
 
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
 from torchmetrics.classification import BinaryJaccardIndex
 
 from src.court.models.lite_tracknet import LiteTrackNet
 
 
-class LitLiteTracknet(pl.LightningModule):
+class FocalLoss(nn.Module):
     """
-    LiteTrackNet用LightningModule
+    Focal Loss for binary classification
+    
+    Args:
+        alpha: Weighting factor for rare class (default: 1.0)
+        gamma: Focusing parameter (default: 2.0)
+        reduction: Specifies the reduction to apply to the output
+    """
+    def __init__(self, alpha: float = 1.0, gamma: float = 2.0, reduction: str = 'mean'):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # BCELossを計算
+        bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        
+        # probabilities を計算
+        p_t = torch.sigmoid(inputs)
+        p_t = torch.where(targets == 1, p_t, 1 - p_t)
+        
+        # Focal weight を計算
+        focal_weight = self.alpha * (1 - p_t) ** self.gamma
+        
+        # Focal loss を計算
+        focal_loss = focal_weight * bce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
+class LitLiteTracknetFocal(pl.LightningModule):
+    """
+    LiteTrackNet用LightningModule with Focal Loss
     
     入力: Frames [B, C, H, W]
     出力: Heatmaps [B, out_channels, H, W]
@@ -31,7 +69,10 @@ class LitLiteTracknet(pl.LightningModule):
         weight_decay: float = 1e-4,
         warmup_epochs: int = 1,
         max_epochs: int = 50,
-        bce_weight: float = 0.7,
+        
+        # Focal Loss パラメータ
+        focal_alpha: float = 1.0,
+        focal_gamma: float = 2.0,
     ):
         super().__init__()
         
@@ -46,10 +87,11 @@ class LitLiteTracknet(pl.LightningModule):
         self.weight_decay = weight_decay
         self.warmup_epochs = warmup_epochs
         self.max_epochs = max_epochs
-        self.bce_weight = bce_weight
+        self.focal_alpha = focal_alpha
+        self.focal_gamma = focal_gamma
         
         # 損失関数と評価指標
-        self.criterion = nn.MSELoss()
+        self.criterion = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
         self.train_iou = BinaryJaccardIndex()
         self.val_iou = BinaryJaccardIndex()
 
@@ -74,9 +116,10 @@ class LitLiteTracknet(pl.LightningModule):
 
     def _common_step(self, batch, stage: str):
         """共通処理ステップ"""
-        frames, heatmaps= batch
+        frames, heatmaps = batch
         logits = self(frames)
         
+        # Focal Lossで損失を計算
         loss = self.criterion(logits, heatmaps)
 
         # preds: sigmoidして0-1スケールに変換
@@ -158,4 +201,4 @@ class LitLiteTracknet(pl.LightningModule):
                 "interval": "epoch",
                 "frequency": 1,
             },
-        } 
+        }
