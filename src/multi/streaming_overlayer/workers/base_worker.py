@@ -96,31 +96,6 @@ class BaseWorker(ABC):
         """
         pass
     
-    def process_task(self, item_id: ItemId, task_data: TaskData, 
-                    dependencies: Dict[TopicName, ResultData]) -> ResultData:
-        """
-        単一タスクの処理（後方互換性のため残す）。
-        
-        デフォルトではprocess_batchを呼び出します。
-        特殊な処理が必要な場合はオーバーライドしてください。
-        
-        Args:
-            item_id: アイテムの一意識別子
-            task_data: 処理対象のデータ
-            dependencies: 依存するトピックの結果辞書
-        
-        Returns:
-            ResultData: 処理結果
-        """
-        # 単一タスクをバッチとして処理
-        batch_tasks = [BatchTask(item_id, task_data, dependencies, time.time())]
-        batch_results = self.process_batch(batch_tasks)
-        
-        if batch_results and len(batch_results) > 0:
-            return batch_results[0]
-        else:
-            raise RuntimeError(f"No result returned from process_batch for item {item_id}")
-    
     @abstractmethod
     def process_batch(self, batch_tasks: List[BatchTask]) -> List[ResultData]:
         """

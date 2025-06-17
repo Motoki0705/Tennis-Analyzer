@@ -1,570 +1,262 @@
-import torch
+# streaming_annotator/workers/pose_worker.py
+
 import logging
 import queue
-import threading
 import time
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any, Tuple, Optional
-from PIL import Image
+from typing import Any, Dict, List, Optional
 
-from .base_worker import BaseWorker
-from ..definitions import InferenceTask, PostprocessTask
+import numpy as np
+import torch
+
+from .base_worker import BaseWorker, BatchTask
+from ..core.interfaces import ItemId, TopicName, TaskData, ResultData
 
 logger = logging.getLogger(__name__)
 
 
-class PoseWorker(BaseWorker):
-    """
-    プレイヤーポーズ検知のためのパイプラインワーカー。
+class PoseData:
+    """単一の人物のポーズデータを格納するクラス"""
+    def __init__(self, bbox: List[float], det_score: float, 
+                 keypoints: List[tuple], scores: List[float]):
+        self.bbox = bbox
+        self.det_score = det_score
+        self.keypoints = keypoints
+        self.scores = scores
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "bbox": self.bbox,
+            "det_score": self.det_score,
+            "keypoints": self.keypoints,
+            "scores": self.scores
+        }
+
+
+class PoseDetectionResult:
+    """ポーズ検出結果を格納するクラス"""
     
-    Detection と Pose の処理を分離し、GPU使用率を最大化する設計：
-    1. Detection pipeline: preprocess → inference → postprocess
-    2. Pose pipeline: preprocess → inference → postprocess
-    3. 各段階は独立したスレッドで並列実行
-    4. GPU inference は専用キューで効率的に処理
+    def __init__(self, poses: Optional[List[PoseData]] = None, 
+                 player_count: int = 0,
+                 confidence: float = 0.0):
+        """
+        Args:
+            poses: 検出されたポーズのリスト
+            player_count: 検出されたプレイヤー数
+            confidence: 検出の全体的な信頼度（例: 平均スコア）
+        """
+        self.poses = poses or []
+        self.player_count = player_count
+        self.confidence = confidence
+        self.timestamp = time.time()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式に変換"""
+        return {
+            "poses": [p.to_dict() for p in self.poses],
+            "player_count": self.player_count,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp,
+        }
+
+
+class PoseDetectionWorker(BaseWorker):
     """
-
-    def __init__(self, name, predictor, queue_set, results_q, debug=False):
-        # QueueManagerから基本キューを取得
-        preprocess_q = queue_set.get_queue("preprocess")
-        inference_q = queue_set.get_queue("inference")
-        postprocess_q = queue_set.get_queue("postprocess")
+    ポーズ検出処理を行うワーカー。
+    
+    新しいBaseWorkerアーキテクチャに準拠した実装。
+    内部で「Detection -> Pose」の2段階処理を実行します。
+    """
+    
+    def __init__(self, name: str, predictor: Any, results_queue: queue.Queue,
+                 max_concurrent_tasks: int = 2, debug: bool = False,
+                 batch_size: int = 4, batch_timeout: float = 0.1,
+                 task_queue_maxsize: int = 1000):
+        """
+        Args:
+            name: ワーカー名
+            predictor: ポーズ検出予測器 (detectionとposeのメソッドを持つ)
+            results_queue: 結果出力キュー
+            max_concurrent_tasks: 最大同時実行タスク数
+            debug: デバッグモード
+            batch_size: バッチサイズ
+            batch_timeout: バッチタイムアウト
+            task_queue_maxsize: タスクキューの最大サイズ
+        """
+        super().__init__(name, results_queue, max_concurrent_tasks, debug,
+                        batch_size, batch_timeout, task_queue_maxsize)
         
-        super().__init__(name, predictor, preprocess_q, inference_q, postprocess_q, results_q, debug)
+        self.predictor = predictor
         
-        # 拡張キューをQueueManagerから取得
-        self.detection_inference_queue = queue_set.get_queue("detection_inference")
-        self.detection_postprocess_queue = queue_set.get_queue("detection_postprocess")
-        self.pose_inference_queue = queue_set.get_queue("pose_inference")
-        self.pose_postprocess_queue = queue_set.get_queue("pose_postprocess")
-        
-        # キューの存在確認
-        required_queues = [
-            ("detection_inference", self.detection_inference_queue),
-            ("detection_postprocess", self.detection_postprocess_queue),
-            ("pose_inference", self.pose_inference_queue),
-            ("pose_postprocess", self.pose_postprocess_queue)
-        ]
-        
-        for queue_name, q in required_queues:
-            if q is None:
-                raise ValueError(f"Required extended queue '{queue_name}' not found for {name} worker")
-        
-        # 追加スレッドのリスト
-        self.additional_threads = []
-        
-        # スレッドプール（前処理・後処理用）
-        self.detection_preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_det_preprocess")
-        self.detection_postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_det_postprocess")
-        self.pose_preprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_pose_preprocess")
-        self.pose_postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"{name}_pose_postprocess")
-        
-        # パフォーマンス監視メトリクス
-        self.metrics = {
-            "detection_preprocess_count": 0,
-            "detection_inference_count": 0,
-            "detection_postprocess_count": 0,
-            "pose_inference_count": 0,
-            "pose_postprocess_count": 0,
-            "total_frames_processed": 0,
+        # 処理統計の拡張
+        self.pose_stats = {
+            "detections_made": 0,
             "total_players_detected": 0,
-            "detection_inference_time": [],
-            "pose_inference_time": [],
-            "queue_sizes": {
-                "detection_inference": [],
-                "detection_postprocess": [],
-                "pose_inference": [],
-                "pose_postprocess": []
-            }
+            "average_players_per_frame": 0.0,
         }
+    
+    def get_published_topic(self) -> TopicName:
+        """このワーカーが出版するトピック名を返します"""
+        return "pose_detection"
+    
+    def get_dependencies(self) -> List[TopicName]:
+        """このワーカーの依存関係を返します（上流ワーカーなので空リスト）"""
+        return []
 
-    def start(self):
+    def process_batch(self, batch_tasks: List[BatchTask]) -> List[ResultData]:
         """
-        ワーカーを開始し、detection と pose の独立したパイプラインを構築します。
-        """
-        if self.running:
-            logger.warning(f"{self.name} worker is already running")
-            return
-            
-        self.running = True
+        バッチタスクの処理を実行します。
         
-        # 基本的な3つのスレッド（継承元のBaseWorkerで管理）
-        base_threads = [
-            threading.Thread(target=self._preprocess_loop, name=f"{self.name}_preprocess"),
-            threading.Thread(target=self._inference_loop, name=f"{self.name}_inference"),
-            threading.Thread(target=self._postprocess_loop, name=f"{self.name}_postprocess"),
-        ]
-        
-        # Detection専用パイプライン
-        detection_threads = [
-            threading.Thread(target=self._detection_inference_loop, name=f"{self.name}_detection_inference"),
-            threading.Thread(target=self._detection_postprocess_loop, name=f"{self.name}_detection_postprocess"),
-        ]
-        
-        # Pose専用パイプライン
-        pose_threads = [
-            threading.Thread(target=self._pose_inference_loop, name=f"{self.name}_pose_inference"),
-            threading.Thread(target=self._pose_postprocess_loop, name=f"{self.name}_pose_postprocess"),
-        ]
-        
-        # 全スレッドを開始
-        all_threads = base_threads + detection_threads + pose_threads
-        for thread in all_threads:
-            thread.daemon = True
-            thread.start()
-            
-        self.threads = base_threads
-        self.additional_threads = detection_threads + pose_threads
-            
-        logger.info(f"Started {self.name} worker with optimized pipeline ({len(all_threads)} threads)")
-
-    def stop(self):
-        """ワーカーを停止し、すべてのスレッドを終了します。"""
-        if not self.running:
-            return
-            
-        self.running = False
-        
-        # スレッドプールをシャットダウン
-        pools = [
-            ('detection_preprocess_pool', self.detection_preprocess_pool),
-            ('detection_postprocess_pool', self.detection_postprocess_pool),
-            ('pose_preprocess_pool', self.pose_preprocess_pool),
-            ('pose_postprocess_pool', self.pose_postprocess_pool)
-        ]
-        for name, pool in pools:
-            if hasattr(self, name):
-                try:
-                    pool.shutdown(wait=False)
-                except Exception as e:
-                    logger.warning(f"Error shutting down {name}: {e}")
-        
-        # 基本スレッドの停止
-        for thread in self.threads:
-            if thread.is_alive():
-                thread.join(timeout=1.0)
-                
-        # 追加スレッドの停止
-        for thread in self.additional_threads:
-            if thread.is_alive():
-                thread.join(timeout=1.0)
-                
-        self.threads.clear()
-        self.additional_threads.clear()
-        logger.info(f"Stopped {self.name} worker")
-
-    def _process_preprocess_task(self, task):
-        """
-        前処理タスクを処理し、Detection の前処理を実行します。
+        1. バッチ内の全フレームに対してDetection推論を実行。
+        2. 検出された人物領域を収集。
+        3. 収集した人物領域に対してPose推論をバッチで実行。
+        4. 結果を元のフレームにマッピングして返す。
         
         Args:
-            task: PreprocessTask - フレームデータとメタデータを含む
-        """
-        try:
-            # Detection の前処理を実行
-            det_inputs = self.predictor.preprocess_detection(task.frames)
-            
-            # Detection 推論キューに送信
-            detection_task = InferenceTask(
-                task.task_id + "_detection", 
-                det_inputs, 
-                task.meta_data,
-                original_frames=task.frames
-            )
-            self.detection_inference_queue.put(detection_task)
-            
-            if self.debug:
-                logger.debug(f"PoseWorker Detection前処理完了: {task.task_id}, frames={len(task.frames)}")
-                
-        except Exception as e:
-            logger.error(f"PoseWorker Detection前処理エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _process_inference_task(self, task):
-        """
-        基本の推論タスクは使用しません（Detection/Pose専用キューを使用）。
-        """
-        pass
-
-    def _process_postprocess_task(self, task):
-        """
-        基本の後処理タスクは使用しません（Detection/Pose専用キューを使用）。
-        """
-        pass
-
-    def _detection_inference_loop(self):
-        """Detection推論ループ - GPU使用率最大化のため専用スレッド"""
-        while self.running:
-            try:
-                task = self.detection_inference_queue.get(timeout=0.1)
-                self._process_detection_inference(task)
-                self.detection_inference_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"{self.name} detection inference error: {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-
-    def _detection_postprocess_loop(self):
-        """Detection後処理ループ - 独立したスレッドで並列実行"""
-        while self.running:
-            try:
-                task = self.detection_postprocess_queue.get(timeout=0.1)
-                self._process_detection_postprocess(task)
-                self.detection_postprocess_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"{self.name} detection postprocess error: {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-
-    def _pose_inference_loop(self):
-        """Pose推論ループ - GPU使用率最大化のため専用スレッド"""
-        while self.running:
-            try:
-                task = self.pose_inference_queue.get(timeout=0.1)
-                self._process_pose_inference(task)
-                self.pose_inference_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"{self.name} pose inference error: {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-
-    def _pose_postprocess_loop(self):
-        """Pose後処理ループ - 独立したスレッドで並列実行"""
-        while self.running:
-            try:
-                task = self.pose_postprocess_queue.get(timeout=0.1)
-                self._process_pose_postprocess(task)
-                self.pose_postprocess_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"{self.name} pose postprocess error: {e}")
-                if self.debug:
-                    import traceback
-                    traceback.print_exc()
-
-    def _process_detection_inference(self, task):
-        """
-        Detection 推論を実行します。
+            batch_tasks: バッチタスクのリスト
         
-        Args:
-            task: InferenceTask - Detection用前処理済みデータを含む
-        """
-        try:
-            start_time = time.time()
-            
-            with torch.no_grad():
-                # Detection 推論を実行
-                det_outputs = self.predictor.inference_detection(task.tensor_data)
-            
-            # パフォーマンスメトリクス更新
-            inference_time = time.time() - start_time
-            self.metrics["detection_inference_count"] += 1
-            self.metrics["detection_inference_time"].append(inference_time)
-            
-            # Detection 後処理キューに送信
-            detection_post_task = PostprocessTask(
-                task.task_id,
-                det_outputs,
-                task.meta_data,
-                original_frames=task.original_frames
-            )
-            self.detection_postprocess_queue.put(detection_post_task)
-            
-            if self.debug:
-                logger.debug(f"PoseWorker Detection推論完了: {task.task_id}, time={inference_time:.3f}s")
-                
-        except Exception as e:
-            logger.error(f"PoseWorker Detection推論エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _process_detection_postprocess(self, task):
-        """
-        Detection 後処理を実行し、Pose 前処理を開始します。
-        
-        Args:
-            task: PostprocessTask - Detection推論結果を含む
-        """
-        try:
-            # Detection 後処理を実行
-            det_outputs = task.inference_output
-            batch_boxes, batch_scores, batch_valid, images_for_pose = self.predictor.postprocess_detection(
-                det_outputs, task.original_frames
-            )
-            
-            if not images_for_pose:
-                # プレーヤー検出なしの場合、空結果を返す
-                self._send_empty_results(task.meta_data)
-                return
-            
-            # Pose 前処理を実行
-            pose_inputs = self.predictor.preprocess_pose(images_for_pose, batch_boxes)
-            
-            # Pose 推論キューに送信
-            pose_task = InferenceTask(
-                task.task_id.replace("_detection", "_pose"),
-                pose_inputs,
-                task.meta_data,
-                batch_boxes=batch_boxes,
-                batch_scores=batch_scores,
-                batch_valid=batch_valid,
-                original_frames=task.original_frames
-            )
-            self.pose_inference_queue.put(pose_task)
-            
-            if self.debug:
-                logger.debug(f"PoseWorker Detection後処理完了: {task.task_id}, detected_players={len(images_for_pose)}")
-                
-        except Exception as e:
-            logger.error(f"PoseWorker Detection後処理エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _process_pose_inference(self, task):
-        """
-        Pose 推論を実行します。
-        
-        Args:
-            task: InferenceTask - Pose用前処理済みデータを含む
-        """
-        try:
-            start_time = time.time()
-            
-            with torch.no_grad():
-                # Pose 推論を実行
-                pose_outputs = self.predictor.inference_pose(task.tensor_data)
-            
-            # パフォーマンスメトリクス更新
-            inference_time = time.time() - start_time
-            self.metrics["pose_inference_count"] += 1
-            self.metrics["pose_inference_time"].append(inference_time)
-            
-            # Pose 後処理キューに送信
-            pose_post_task = PostprocessTask(
-                task.task_id,
-                pose_outputs,
-                task.meta_data,
-                batch_boxes=task.batch_boxes,
-                batch_scores=task.batch_scores,
-                batch_valid=task.batch_valid,
-                original_frames=task.original_frames
-            )
-            self.pose_postprocess_queue.put(pose_post_task)
-            
-            if self.debug:
-                logger.debug(f"PoseWorker Pose推論完了: {task.task_id}, time={inference_time:.3f}s")
-                
-        except Exception as e:
-            logger.error(f"PoseWorker Pose推論エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _process_pose_postprocess(self, task):
-        """
-        Pose 後処理を実行し、最終結果を出力します。
-        
-        Args:
-            task: PostprocessTask - Pose推論結果を含む
-        """
-        try:
-            # Pose 後処理を実行
-            pose_outputs = task.inference_output
-            pose_results = self.predictor.postprocess_pose(
-                pose_outputs,
-                task.batch_boxes,
-                task.batch_scores,
-                task.batch_valid,
-                len(task.original_frames)
-            )
-            
-            # 結果を検証して結果キューに送信
-            self._send_pose_results(pose_results, task.meta_data)
-            
-            if self.debug:
-                total_detections = sum(len(frame_poses) for frame_poses in pose_results)
-                logger.debug(f"PoseWorker Pose後処理完了: {task.task_id}, total_detections={total_detections}")
-                
-        except Exception as e:
-            logger.error(f"PoseWorker Pose後処理エラー: {e}")
-            if self.debug:
-                import traceback
-                traceback.print_exc()
-
-    def _send_empty_results(self, meta_data):
-        """プレーヤー検出なしの場合の空結果を送信"""
-        if not meta_data:
-            return
-            
-        for i, meta in enumerate(meta_data):
-            if isinstance(meta, (list, tuple)) and len(meta) >= 1:
-                frame_idx = meta[0]
-            else:
-                frame_idx = i
-            
-            self.results_queue.put((frame_idx, "pose", []))
-
-    def _send_pose_results(self, pose_results, meta_data):
-        """検証済みのポーズ結果を送信"""
-        total_players_in_batch = 0
-        
-        for frame_idx, pose_result_per_frame in enumerate(pose_results):
-            # メタデータからフレームインデックスを取得
-            if meta_data and frame_idx < len(meta_data):
-                if isinstance(meta_data[frame_idx], (list, tuple)) and len(meta_data[frame_idx]) >= 1:
-                    actual_frame_idx = meta_data[frame_idx][0]
-                else:
-                    actual_frame_idx = frame_idx
-            else:
-                actual_frame_idx = frame_idx
-            
-            # 結果の妥当性チェック
-            validated_results = self._validate_pose_results(pose_result_per_frame)
-            player_count = len(validated_results) if validated_results else 0
-            total_players_in_batch += player_count
-            
-            # 結果をキューに追加
-            self.results_queue.put((actual_frame_idx, "pose", validated_results))
-            
-            if self.debug:
-                logger.debug(f"PoseWorker: フレーム{actual_frame_idx}でプレイヤー{player_count}人検出")
-        
-        # パフォーマンスメトリクス更新
-        self.metrics["total_frames_processed"] += len(pose_results)
-        self.metrics["total_players_detected"] += total_players_in_batch
-
-    def _validate_pose_results(self, pose_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        ポーズ検出結果の妥当性をチェックし、不正な値を修正します。
-        
-        Args:
-            pose_results: フレーム内のプレイヤー検出結果のリスト
-            
         Returns:
-            検証済みの検出結果のリスト
+            List[ResultData]: 処理結果のリスト（batch_tasksと同じ順序）
         """
-        if not pose_results:
+        if not batch_tasks:
             return []
-        
-        validated_results = []
-        
-        for player_data in pose_results:
-            try:
-                if not isinstance(player_data, dict):
-                    logger.warning(f"PoseWorker: 不正なプレイヤーデータ形式: {type(player_data)}")
-                    continue
-                
-                # 必須フィールドの存在確認
-                required_fields = ["bbox", "keypoints", "scores"]
-                if not all(field in player_data for field in required_fields):
-                    logger.warning(f"PoseWorker: 必須フィールドが不足: {list(player_data.keys())}")
-                    continue
-                
-                # バウンディングボックスの妥当性チェック
-                bbox = player_data.get("bbox", [])
-                if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-                    logger.warning(f"PoseWorker: 不正なbbox形式: {bbox}")
-                    continue
-                
-                # キーポイントの妥当性チェック
-                keypoints = player_data.get("keypoints", [])
-                scores = player_data.get("scores", [])
-                
-                if len(keypoints) != len(scores):
-                    logger.warning(f"PoseWorker: キーポイントとスコア数不一致: {len(keypoints)} vs {len(scores)}")
-                    # より短い方に合わせる
-                    min_len = min(len(keypoints), len(scores))
-                    keypoints = keypoints[:min_len]
-                    scores = scores[:min_len]
-                
-                # 検証済みデータを作成
-                validated_data = {
-                    "bbox": [int(x) for x in bbox],  # 整数に変換
-                    "det_score": float(player_data.get("det_score", 0.0)),
-                    "keypoints": [(int(x), int(y)) for x, y in keypoints],  # 整数タプルに変換
-                    "scores": [float(s) for s in scores],  # float型に変換
-                }
-                
-                validated_results.append(validated_data)
-                
-            except Exception as e:
-                logger.warning(f"PoseWorker: プレイヤーデータ検証エラー: {e}")
-                continue
-        
-        return validated_results
 
-    def get_performance_metrics(self) -> Dict[str, Any]:
-        """
-        パフォーマンスメトリクスを取得します。
-        
-        Returns:
-            現在のパフォーマンス統計
-        """
-        current_queue_sizes = {
-            "detection_inference": self.detection_inference_queue.qsize(),
-            "detection_postprocess": self.detection_postprocess_queue.qsize(),
-            "pose_inference": self.pose_inference_queue.qsize(),
-            "pose_postprocess": self.pose_postprocess_queue.qsize(),
-            "preprocess": self.preprocess_queue.qsize(),
-            "inference": self.inference_queue.qsize(),
-            "postprocess": self.postprocess_queue.qsize(),
-            "results": self.results_queue.qsize()
-        }
-        
-        metrics_copy = self.metrics.copy()
-        metrics_copy["current_queue_sizes"] = current_queue_sizes
-        
-        # 平均処理時間を計算
-        if self.metrics["detection_inference_time"]:
-            metrics_copy["avg_detection_inference_time"] = np.mean(self.metrics["detection_inference_time"])
-        else:
-            metrics_copy["avg_detection_inference_time"] = 0.0
+        try:
+            frames_batch = [task.task_data for task in batch_tasks]
             
-        if self.metrics["pose_inference_time"]:
-            metrics_copy["avg_pose_inference_time"] = np.mean(self.metrics["pose_inference_time"])
-        else:
-            metrics_copy["avg_pose_inference_time"] = 0.0
-        
-        # スループット計算
-        total_processed = self.metrics["total_frames_processed"]
-        if total_processed > 0:
-            metrics_copy["avg_players_per_frame"] = self.metrics["total_players_detected"] / total_processed
-        else:
-            metrics_copy["avg_players_per_frame"] = 0.0
-        
-        return metrics_copy
+            # --- 1. Detection Stage ---
+            all_boxes, all_scores, all_valid, images_for_pose, frame_indices_for_pose = self._run_detection_stage(frames_batch)
 
-    def reset_metrics(self):
-        """パフォーマンスメトリクスをリセットします。"""
-        self.metrics = {
-            "detection_preprocess_count": 0,
-            "detection_inference_count": 0,
-            "detection_postprocess_count": 0,
-            "pose_inference_count": 0,
-            "pose_postprocess_count": 0,
-            "total_frames_processed": 0,
-            "total_players_detected": 0,
-            "detection_inference_time": [],
-            "pose_inference_time": [],
-            "queue_sizes": {
-                "detection_inference": [],
-                "detection_postprocess": [],
-                "pose_inference": [],
-                "pose_postprocess": []
-            }
-        }
+            # --- 2. Pose Stage ---
+            if images_for_pose:
+                pose_results_flat = self._run_pose_stage(images_for_pose, all_boxes, all_scores, all_valid)
+            else:
+                pose_results_flat = []
+
+            # --- 3. Map results back to original frames ---
+            final_results = self._map_poses_to_frames(pose_results_flat, frame_indices_for_pose, len(frames_batch))
+
+            # 統計更新
+            self._update_pose_stats(final_results)
+
+            return final_results
+
+        except Exception as e:
+            logger.error(f"{self.name} batch processing error: {e}")
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            # エラー時はダミー結果を返す
+            return [PoseDetectionResult() for _ in batch_tasks]
+
+    def _run_detection_stage(self, frames_batch: List[np.ndarray]) -> tuple:
+        """Detection推論のステージを実行"""
+        with torch.no_grad():
+            # Preprocess
+            det_inputs = self.predictor.preprocess_detection(frames_batch)
+            # Inference
+            det_outputs = self.predictor.inference_detection(det_inputs)
+            # Postprocess
+            # この後処理は、Pose推論に必要な情報を抽出する
+            batch_boxes, batch_scores, batch_valid, images_for_pose, frame_indices_for_pose = \
+                self.predictor.postprocess_detection(det_outputs, frames_batch)
+        
+        return batch_boxes, batch_scores, batch_valid, images_for_pose, frame_indices_for_pose
+
+    def _run_pose_stage(self, images_for_pose: List, all_boxes: List, all_scores: List, all_valid: List) -> List:
+        """Pose推論のステージを実行"""
+        with torch.no_grad():
+            # Preprocess
+            pose_inputs = self.predictor.preprocess_pose(images_for_pose, all_boxes)
+            # Inference
+            pose_outputs = self.predictor.inference_pose(pose_inputs)
+            # Postprocess
+            # この後処理は、最終的なポーズデータを生成する
+            pose_results_flat = self.predictor.postprocess_pose(
+                pose_outputs, all_boxes, all_scores, all_valid
+            )
+        
+        return pose_results_flat
+
+    def _map_poses_to_frames(self, pose_results_flat: List, frame_indices_for_pose: List, batch_size: int) -> List[PoseDetectionResult]:
+        """検出されたポーズを元のフレームにマッピングし、PoseDetectionResultを作成する"""
+        
+        # 結果を格納するリストを初期化
+        final_results_by_frame = [[] for _ in range(batch_size)]
+        
+        # 検出された各ポーズを対応するフレームに割り当てる
+        for pose_data, original_frame_idx in zip(pose_results_flat, frame_indices_for_pose):
+            if original_frame_idx < batch_size:
+                final_results_by_frame[original_frame_idx].append(pose_data)
+        
+        # PoseDetectionResultオブジェクトのリストを作成
+        output_results = []
+        for frame_poses in final_results_by_frame:
+            validated_poses = self._validate_and_convert_poses(frame_poses)
+            player_count = len(validated_poses)
+            
+            # 平均信頼度を計算 (簡易版)
+            avg_confidence = 0.0
+            if player_count > 0:
+                total_score = sum(p.det_score for p in validated_poses)
+                avg_confidence = total_score / player_count
+
+            output_results.append(
+                PoseDetectionResult(
+                    poses=validated_poses,
+                    player_count=player_count,
+                    confidence=avg_confidence
+                )
+            )
+            
+        return output_results
+
+    def _validate_and_convert_poses(self, poses: List[Dict]) -> List[PoseData]:
+        """Predictorからの辞書リストをPoseDataオブジェクトのリストに変換・検証する"""
+        validated_list = []
+        for pose_dict in poses:
+            try:
+                # 辞書の形式を検証
+                if not all(k in pose_dict for k in ["bbox", "keypoints", "scores", "det_score"]):
+                    logger.warning(f"Skipping invalid pose dict: {pose_dict}")
+                    continue
+                
+                # PoseDataオブジェクトを作成
+                pose_data_obj = PoseData(
+                    bbox=pose_dict["bbox"],
+                    det_score=float(pose_dict["det_score"]),
+                    keypoints=pose_dict["keypoints"],
+                    scores=pose_dict["scores"]
+                )
+                validated_list.append(pose_data_obj)
+
+            except (TypeError, KeyError) as e:
+                logger.warning(f"Error converting pose dict to object: {e}")
+                continue
+        return validated_list
+
+    def _update_pose_stats(self, results: List[PoseDetectionResult]) -> None:
+        """ポーズ検出統計を更新します"""
+        with self.lock:
+            num_frames = len(results)
+            players_in_batch = sum(res.player_count for res in results)
+            
+            total_processed = self.pose_stats["detections_made"]
+            total_players = self.pose_stats["total_players_detected"]
+            
+            self.pose_stats["detections_made"] += num_frames
+            self.pose_stats["total_players_detected"] += players_in_batch
+            
+            # 平均プレイヤー数を更新
+            new_total_processed = total_processed + num_frames
+            if new_total_processed > 0:
+                self.pose_stats["average_players_per_frame"] = \
+                    (total_players + players_in_batch) / new_total_processed
+
+    def get_stats(self) -> Dict[str, Any]:
+        """統計情報を返します（基底クラスの統計に追加）"""
+        base_stats = super().get_stats()
+        
+        with self.lock:
+            base_stats.update(self.pose_stats)
+        
+        return base_stats

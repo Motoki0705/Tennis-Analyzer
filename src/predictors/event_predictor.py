@@ -6,8 +6,6 @@ from typing import Dict, List, Any, Tuple, Optional, Union
 from pathlib import Path
 import logging
 
-# from ..event.lit_module.lit_transformer_v2 import LitTransformerV2
-
 logger = logging.getLogger(__name__)
 
 
@@ -323,18 +321,3 @@ class EventPredictor:
         """信号履歴をリセットします。"""
         self.signal_history.clear()
         logger.info("イベント検知の信号履歴をリセットしました")
-
-
-# ユーティリティ関数
-def create_event_predictor(litmodule, **kwargs) -> EventPredictor:
-    """
-    EventPredictorのファクトリ関数。
-    
-    Args:
-        litmodule: 初期化済みのモデルインスタンス（例: LitTransformerV2）
-        **kwargs: その他のパラメータ（device, confidence_threshold, smoothing_window, debug, use_half など）
-        
-    Returns:
-        EventPredictor: 初期化されたEventPredictor
-    """
-    return EventPredictor(litmodule=litmodule, **kwargs) 
