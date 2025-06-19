@@ -39,7 +39,7 @@ class CourtDataModule(pl.LightningDataModule):
         heatmap_size: Tuple[int, int] = (224, 224),
         default_keypoints: int = 15,
         is_each_keypoint: bool = True,
-        sigma: float = 2.0,
+        sigma: float = 3.0,
         train_transform: Optional[Callable] = None,
         val_test_transform: Optional[Callable] = None,
     ):

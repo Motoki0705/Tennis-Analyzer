@@ -1,2 +1,0 @@
-_target_: src.ball.lit_module.lit_lite_tracknet.LitLiteTrackNet
-ckpt_path: "checkpoints/ball/lite_tracknet/lite_tracknet-epoch=46-val_loss=0.0000.ckpt"

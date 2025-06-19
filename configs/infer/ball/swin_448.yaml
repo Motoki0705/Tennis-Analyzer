@@ -1,2 +1,0 @@
-_target_: src.ball.lit_module.lit_swin.LitSwin
-ckpt_path: "checkpoints/ball/swin_448/best_model-v4.ckpt"

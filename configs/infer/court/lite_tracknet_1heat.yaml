@@ -1,2 +1,0 @@
-_target_: src.court.lit_module.lit_lite_tracknet.LitLiteTrackNet
-ckpt_path: checkpoints/court/lite_tracknet_1heat/court-epoch=49-val_loss=0.000114.ckpt

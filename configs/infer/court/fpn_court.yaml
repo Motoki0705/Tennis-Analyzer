@@ -1,2 +1,0 @@
-_target_: src.court.lit_module.lit_fpn.LitFPN
-ckpt_path: "checkpoints/court/fpn/court-epoch=02-val_loss=0.0033.ckpt"

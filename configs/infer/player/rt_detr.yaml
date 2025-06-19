@@ -1,2 +1,0 @@
-_target_: src.player.lit_module.lit_rtdetr.LitRTDETR
-ckpt_path: checkpoints/player/rt_detr_tracking/best-epoch=05-val_loss_total=2.2782.ckpt
