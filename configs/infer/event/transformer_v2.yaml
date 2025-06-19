@@ -1,3 +1,0 @@
-# EventDetectionLitModule model configuration
-_target_: src.event.lit_module.lit_transformer_v2.LitTransformerV2
-ckpt_path: "checkpoints/event/transformer_v2/epoch=18-step=532.ckpt"
