@@ -1,6 +1,5 @@
 # コート検出用データモジュール設定
 _target_: src.court.lit_datamodule.court_datamodule.CourtDataModule
-
 # データパス
 annotation_root: 'datasets/court/'
 image_root: 'datasets/court/images'

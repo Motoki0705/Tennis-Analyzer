@@ -10,13 +10,14 @@ import os
 from collections import OrderedDict
 
 from src.court.models.lite_tracknet import LiteTrackNet
+from src.court.lit_module.lit_lite_tracknet_focal import LitLiteTracknetFocal
 
 # ------------------------------------------------------------------------
 # グローバル設定と新しいモデルロード方式
 # ------------------------------------------------------------------------
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-CHECKPOINT_PATH = "checkpoints/court/lit_lite_tracknet/epoch=010-val_loss=0.76632285.ckpt"
+CHECKPOINT_PATH = "checkpoints/court/lit_lite_tracknet/epoch=002-val_loss=nan.ckpt"
 INPUT_SIZE = (360, 640)
 NUM_KEYPOINTS = 15
 PEAK_SUPPRESSION_RADIUS = 10
@@ -26,26 +27,7 @@ try:
     # --- 新しいモデルロード方式 ---
     # 1. モデルの「骨格」を先に作成
     # コートモデルの入力チャンネルは3 (RGB)
-    model = LiteTrackNet(in_channels=3, out_channels=1)
-
-    # 2. チェックポイントを辞書としてロード
-    checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
-
-    # 3. 重みデータ(state_dict)を取り出す
-    weights = checkpoint['state_dict']
-
-    # 4. キーの名前を修正 ("model."というプレフィックスを削除)
-    cleaned_weights = OrderedDict()
-    for key, value in weights.items():
-        if key.startswith('model.'):
-            new_key = key[len('model.'):] # "model."の部分をスライスして削除
-            cleaned_weights[new_key] = value
-        else:
-            cleaned_weights[key] = value
-
-    # 5. 骨格に重みを流し込む
-    model.load_state_dict(cleaned_weights)
-    
+    model = LitLiteTracknetFocal.load_from_checkpoint(CHECKPOINT_PATH, map_location=device).model    
     model.to(device)
     model.eval() # 評価モードに設定
     print("Model weights loaded successfully by extracting from checkpoint.")
@@ -136,4 +118,4 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)

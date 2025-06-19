@@ -84,7 +84,7 @@ def draw_poses(frame, pose_results):
     """フレーム上に検出されたキーポイントと骨格を描画する"""
     for person_pose in pose_results:
         keypoints = person_pose['keypoints']
-        keypoint_scores = person_pose['keypoint_scores']
+        keypoint_scores = person_pose['scores']
 
         # キーポイントを描画
         for i, (point, score) in enumerate(zip(keypoints, keypoint_scores)):
@@ -171,7 +171,7 @@ def detect_and_estimate_pose_in_video(video_path: str, progress=gr.Progress(trac
         # バウンディングボックスも描画
         for score, label_id, box in zip(results_det["scores"], results_det["labels"], player_boxes):
             box_int = [round(i) for i in box.tolist()]
-            label = player_detector_model.config.id2label[label_id.item()]
+            label = {0: "player"}
             label_text = f"{label}: {score:.2f}"
             cv2.rectangle(output_frame, (box_int[0], box_int[1]), (box_int[2], box_int[3]), (36, 255, 12), 2)
             cv2.putText(output_frame, label_text, (box_int[0], box_int[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36, 255, 12), 2)
@@ -223,4 +223,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)

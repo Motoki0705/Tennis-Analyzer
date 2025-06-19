@@ -170,4 +170,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
 if __name__ == "__main__":
     # Gradioアプリを起動
-    demo.launch()
+    demo.launch(share=True)
