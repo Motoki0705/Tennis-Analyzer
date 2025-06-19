@@ -10,7 +10,7 @@ hydra:
 defaults:
   # LightningModuleの選択
   # コマンドライン例: litmodule=fpn
-  - litmodule: lite_tracknet
+  - litmodule: lite_tracknet_focal
   
   - litdatamodule: court_data
   - trainer: default

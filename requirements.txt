@@ -1,0 +1,50 @@
+# ==============================================================================
+#  Python Requirements for a General Machine Learning Project
+# ==============================================================================
+#
+# Installation:
+# 1. Create and activate a new virtual environment.
+# 2. Run the following command:
+#    pip install -r requirements.txt
+#
+# --- PyTorch Installation Note ---
+# For GPU (CUDA/MPS) support, it is STRONGLY recommended to install PyTorch
+# from the official website first, BEFORE running `pip install -r requirements.txt`.
+# Visit: https://pytorch.org/get-started/locally/
+# After installing the correct PyTorch version, you can comment out 'torch',
+# 'torchvision', and 'torchaudio' from this file.
+
+# --- Core Deep Learning & Machine Learning Frameworks ---
+torch
+torchvision
+torchaudio
+pytorch-lightning         # User requested (PL): High-level interface for PyTorch
+scikit-learn              # Essential library for classical machine learning
+
+# --- Experiment Configuration & Tracking ---
+hydra-core                # User requested: Framework for elegantly configuring complex applications
+wandb                     # A popular tool for experiment tracking and visualization (MLOps)
+
+# --- Data Handling & Numerical Computation ---
+numpy                     # Fundamental package for numerical computation
+pandas                    # Powerful data structures for data analysis
+scipy                     # Library for scientific and technical computing
+
+# --- Data Visualization ---
+matplotlib                # Standard library for plotting
+seaborn                   # Statistical data visualization based on matplotlib
+
+# --- Image & Data Processing/Augmentation ---
+opencv-python-headless    # Computer vision library (headless version avoids GUI dependencies)
+Pillow                    # Python Imaging Library (fork)
+albumentations            # Fast and flexible library for image augmentations
+
+# --- Hugging Face Ecosystem (State-of-the-art NLP/Vision models) ---
+transformers              # Provides thousands of pretrained models
+datasets                  # Provides easy access to thousands of datasets
+huggingface-hub           # Hub for models, datasets, and demos
+
+# --- Utilities ---
+tqdm                      # A fast, extensible progress bar for loops
+ipykernel                 # Required to use this virtual environment in Jupyter Notebooks/Lab
+python-dotenv             # Reads key-value pairs from a .env file and sets them as environment variables
