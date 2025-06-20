@@ -4,8 +4,8 @@ VideoSwinTransformer用LightningModuleのテストスクリプト
 """
 import torch
 import torch.nn as nn
-from src.ball.models.seq_lite_transformer import VideoSwinTransformer
-from src.ball.lit_module.lit_seq_lite_transformer import LitSeqLiteTransformer
+from src.ball.models.video_swin_transformer import VideoSwinTransformer
+from src.ball.lit_module.lit_video_swin_transformer import LitSeqLiteTransformer
 
 
 def test_model_only():
