@@ -12,7 +12,15 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import asyncio
+import subprocess
+import uuid
+import shutil
+from datetime import datetime
+import aiofiles
+import ffmpeg
+import cv2
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -81,6 +89,41 @@ class ClipListItem(BaseModel):
     clip_path: str = Field(description="クリップファイルパス")
 
 
+class VideoMetadata(BaseModel):
+    """動画メタデータ"""
+    filename: str = Field(description="ファイル名")
+    file_path: str = Field(description="ファイルパス")
+    duration: float = Field(description="長さ（秒）")
+    fps: float = Field(description="FPS")
+    width: int = Field(description="幅")
+    height: int = Field(description="高さ")
+    total_frames: int = Field(description="総フレーム数")
+    file_size: int = Field(description="ファイルサイズ（バイト）")
+    upload_date: str = Field(description="アップロード日時")
+
+
+class ClipRequest(BaseModel):
+    """クリップ生成リクエスト"""
+    video_path: str = Field(description="元動画のパス")
+    clip_name: str = Field(description="クリップ名")
+    start_time: float = Field(description="開始時間（秒）")
+    end_time: float = Field(description="終了時間（秒）")
+
+
+class ClipCreationTask(BaseModel):
+    """クリップ生成タスク"""
+    task_id: str = Field(description="タスクID")
+    video_path: str = Field(description="元動画のパス")
+    clip_name: str = Field(description="クリップ名")
+    start_time: float = Field(description="開始時間（秒）")
+    end_time: float = Field(description="終了時間（秒）")
+    status: str = Field(description="ステータス: 'pending', 'processing', 'completed', 'failed'")
+    progress: float = Field(default=0.0, description="進捗（0.0-1.0）")
+    error_message: Optional[str] = Field(None, description="エラーメッセージ")
+    created_at: str = Field(description="作成日時")
+    completed_at: Optional[str] = Field(None, description="完了日時")
+
+
 # グローバル設定
 class AppConfig:
     """アプリケーション設定"""
@@ -89,17 +132,155 @@ class AppConfig:
         self.clips_dir = self.data_dir / "clips"
         self.annotations_dir = self.data_dir / "annotations"
         self.videos_dir = self.data_dir / "videos"
+        self.raw_videos_dir = self.data_dir / "raw_videos"  # 新規追加：元動画ディレクトリ
+        self.temp_dir = self.data_dir / "temp"  # 新規追加：一時ファイル用
+        
+        # 許可する動画形式
+        self.allowed_video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
+        
+        # アップロードファイルサイズ制限（バイト）
+        self.max_upload_size = 10 * 1024 * 1024 * 1024  # 10GB
         
         # ディレクトリの作成
-        for dir_path in [self.data_dir, self.clips_dir, self.annotations_dir, self.videos_dir]:
+        for dir_path in [self.data_dir, self.clips_dir, self.annotations_dir, 
+                         self.videos_dir, self.raw_videos_dir, self.temp_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
 
 
 config = AppConfig()
 
+# グローバル変数：クリップ生成タスクの管理
+clip_creation_tasks: Dict[str, ClipCreationTask] = {}
+
 # 静的ファイルの提供（フロントエンド用）
 if os.path.exists("tools/annotation/web_app/static"):
     app.mount("/static", StaticFiles(directory="tools/annotation/web_app/static"), name="static")
+
+
+class VideoProcessor:
+    """動画処理クラス"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+    
+    def get_video_metadata(self, video_path: Path) -> VideoMetadata:
+        """
+        動画のメタデータを取得
+        
+        Args:
+            video_path: 動画ファイルのパス
+            
+        Returns:
+            動画メタデータ
+        """
+        try:
+            # OpenCVで動画情報を取得
+            cap = cv2.VideoCapture(str(video_path))
+            
+            if not cap.isOpened():
+                raise ValueError(f"動画ファイルを開けません: {video_path}")
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            cap.release()
+            
+            duration = frame_count / fps if fps > 0 else 0
+            file_size = video_path.stat().st_size
+            
+            return VideoMetadata(
+                filename=video_path.name,
+                file_path=str(video_path),
+                duration=duration,
+                fps=fps,
+                width=width,
+                height=height,
+                total_frames=frame_count,
+                file_size=file_size,
+                upload_date=datetime.now().isoformat()
+            )
+            
+        except Exception as e:
+            self.logger.error(f"動画メタデータ取得エラー {video_path}: {e}")
+            raise HTTPException(status_code=400, detail=f"動画メタデータ取得に失敗しました: {str(e)}")
+    
+    async def create_clip(self, video_path: str, clip_name: str, start_time: float, end_time: float) -> str:
+        """
+        FFmpegを使用してクリップを生成
+        
+        Args:
+            video_path: 元動画のパス
+            clip_name: クリップ名
+            start_time: 開始時間（秒）
+            end_time: 終了時間（秒）
+            
+        Returns:
+            生成されたクリップのパス
+        """
+        try:
+            input_path = Path(video_path)
+            if not input_path.exists():
+                raise FileNotFoundError(f"元動画が見つかりません: {video_path}")
+            
+            # 出力パスを設定
+            output_path = self.config.clips_dir / f"{clip_name}.mp4"
+            
+            # FFmpegでクリップを生成
+            (
+                ffmpeg
+                .input(str(input_path), ss=start_time, t=end_time - start_time)
+                .output(str(output_path), vcodec='libx264', acodec='aac')
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            
+            if not output_path.exists():
+                raise Exception("クリップファイルの生成に失敗しました")
+            
+            self.logger.info(f"クリップ生成完了: {output_path}")
+            return str(output_path)
+            
+        except ffmpeg.Error as e:
+            error_message = e.stderr.decode() if e.stderr else str(e)
+            self.logger.error(f"FFmpegエラー: {error_message}")
+            raise Exception(f"動画処理エラー: {error_message}")
+        except Exception as e:
+            self.logger.error(f"クリップ生成エラー: {e}")
+            raise Exception(f"クリップ生成に失敗しました: {str(e)}")
+    
+    def validate_video_file(self, file: UploadFile) -> bool:
+        """
+        アップロードされた動画ファイルの検証
+        
+        Args:
+            file: アップロードファイル
+            
+        Returns:
+            検証結果
+        """
+        try:
+            # ファイル拡張子チェック
+            file_extension = Path(file.filename).suffix.lower()
+            if file_extension not in self.config.allowed_video_extensions:
+                raise ValueError(f"サポートされていないファイル形式です: {file_extension}")
+            
+            # ファイルサイズチェック
+            if hasattr(file.file, 'seek') and hasattr(file.file, 'tell'):
+                file.file.seek(0, 2)  # ファイル末尾に移動
+                file_size = file.file.tell()
+                file.file.seek(0)  # ファイル先頭に戻る
+                
+                if file_size > self.config.max_upload_size:
+                    raise ValueError(f"ファイルサイズが上限を超えています: {file_size} bytes")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"動画ファイル検証エラー: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
 
 
 class AnnotationManager:
@@ -257,10 +438,77 @@ class AnnotationManager:
         except Exception as e:
             self.logger.error(f"アノテーション保存エラー {annotation_file}: {e}")
             raise HTTPException(status_code=500, detail=f"アノテーション保存に失敗しました: {e}")
+    
+    def create_empty_annotation_for_clip(self, clip_name: str, clip_path: str, source_video: str) -> bool:
+        """
+        クリップ用の空のアノテーションファイルを生成
+        
+        Args:
+            clip_name: クリップ名
+            clip_path: クリップファイルパス
+            source_video: 元動画のパス
+            
+        Returns:
+            生成成功フラグ
+        """
+        try:
+            # クリップの動画情報を取得
+            cap = cv2.VideoCapture(clip_path)
+            if not cap.isOpened():
+                raise ValueError(f"クリップファイルを開けません: {clip_path}")
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            
+            # クリップ情報を作成
+            clip_info = ClipInfo(
+                source_video=source_video,
+                clip_name=clip_name,
+                clip_path=clip_path,
+                fps=fps,
+                width=width,
+                height=height
+            )
+            
+            # 各フレーム用の空のアノテーションを作成
+            frames = []
+            for frame_num in range(frame_count):
+                frame_annotation = FrameAnnotation(
+                    frame_number=frame_num,
+                    ball=BallAnnotation(
+                        keypoint=None,
+                        visibility=0,
+                        is_interpolated=False
+                    ),
+                    event_status=0
+                )
+                frames.append(frame_annotation)
+            
+            # アノテーションデータを作成
+            annotation_data = AnnotationData(
+                clip_info=clip_info,
+                frames=frames
+            )
+            
+            # ファイルに保存
+            annotation_file = self.config.annotations_dir / f"{clip_name}.json"
+            with open(annotation_file, 'w', encoding='utf-8') as f:
+                json.dump(annotation_data.model_dump(), f, ensure_ascii=False, indent=2)
+            
+            self.logger.info(f"空のアノテーションファイルを生成しました: {annotation_file}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"空のアノテーション生成エラー {clip_name}: {e}")
+            return False
 
 
-# アノテーション管理インスタンス
+# インスタンス作成
 annotation_manager = AnnotationManager(config)
+video_processor = VideoProcessor(config)
 
 
 # APIエンドポイント定義
@@ -467,6 +715,270 @@ async def get_annotation_stats():
     except Exception as e:
         logger.error(f"統計情報取得エラー: {e}")
         raise HTTPException(status_code=500, detail="統計情報取得に失敗しました")
+
+
+# === 新規機能: 動画アップロードとクリップ生成 ===
+
+@app.get("/api/raw_videos", response_model=List[VideoMetadata])
+async def get_raw_videos():
+    """
+    アップロード済み元動画のリストを取得
+    
+    Returns:
+        動画メタデータのリスト
+    """
+    try:
+        videos = []
+        
+        for video_file in config.raw_videos_dir.glob("*"):
+            if video_file.suffix.lower() in config.allowed_video_extensions:
+                try:
+                    metadata = video_processor.get_video_metadata(video_file)
+                    videos.append(metadata)
+                except Exception as e:
+                    logger.warning(f"動画メタデータ取得スキップ {video_file}: {e}")
+        
+        # ファイル名でソート
+        videos.sort(key=lambda x: x.filename)
+        logger.info(f"元動画リスト取得: {len(videos)} 件")
+        return videos
+        
+    except Exception as e:
+        logger.error(f"元動画リスト取得エラー: {e}")
+        raise HTTPException(status_code=500, detail="元動画リスト取得に失敗しました")
+
+
+@app.post("/api/upload_video")
+async def upload_video(video_file: UploadFile = File(...)):
+    """
+    動画ファイルをアップロード
+    
+    Args:
+        video_file: アップロードする動画ファイル
+        
+    Returns:
+        アップロード結果とメタデータ
+    """
+    try:
+        # ファイル検証
+        video_processor.validate_video_file(video_file)
+        
+        # ファイル名の安全化
+        safe_filename = "".join(c for c in video_file.filename if c.isalnum() or c in "._-")
+        if not safe_filename:
+            safe_filename = f"uploaded_video_{uuid.uuid4().hex[:8]}.mp4"
+        
+        # 保存パス
+        save_path = config.raw_videos_dir / safe_filename
+        
+        # 既存ファイルがある場合は番号を付加
+        counter = 1
+        while save_path.exists():
+            name_parts = safe_filename.rsplit('.', 1)
+            if len(name_parts) == 2:
+                new_name = f"{name_parts[0]}_{counter}.{name_parts[1]}"
+            else:
+                new_name = f"{safe_filename}_{counter}"
+            save_path = config.raw_videos_dir / new_name
+            counter += 1
+        
+        # ファイル保存
+        async with aiofiles.open(save_path, 'wb') as f:
+            content = await video_file.read()
+            await f.write(content)
+        
+        # メタデータ取得
+        metadata = video_processor.get_video_metadata(save_path)
+        
+        logger.info(f"動画アップロード完了: {save_path}")
+        return {
+            "message": "動画アップロード完了",
+            "metadata": metadata
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"動画アップロードエラー: {e}")
+        raise HTTPException(status_code=500, detail=f"動画アップロードに失敗しました: {str(e)}")
+
+
+@app.post("/api/create_clip")
+async def create_clip_endpoint(clip_request: ClipRequest, background_tasks: BackgroundTasks):
+    """
+    クリップ生成を開始（非同期）
+    
+    Args:
+        clip_request: クリップ生成リクエスト
+        background_tasks: バックグラウンドタスク
+        
+    Returns:
+        タスクID
+    """
+    try:
+        # 入力検証
+        if not Path(clip_request.video_path).exists():
+            raise HTTPException(status_code=404, detail="元動画ファイルが見つかりません")
+        
+        if clip_request.start_time >= clip_request.end_time:
+            raise HTTPException(status_code=400, detail="無効な時間範囲です")
+        
+        # 重複するクリップ名をチェック
+        existing_clip = config.clips_dir / f"{clip_request.clip_name}.mp4"
+        if existing_clip.exists():
+            raise HTTPException(status_code=400, detail="同名のクリップが既に存在します")
+        
+        # タスクIDを生成
+        task_id = str(uuid.uuid4())
+        
+        # タスクを作成
+        task = ClipCreationTask(
+            task_id=task_id,
+            video_path=clip_request.video_path,
+            clip_name=clip_request.clip_name,
+            start_time=clip_request.start_time,
+            end_time=clip_request.end_time,
+            status="pending",
+            created_at=datetime.now().isoformat()
+        )
+        
+        # グローバル変数に保存
+        clip_creation_tasks[task_id] = task
+        
+        # バックグラウンドでクリップ生成を実行
+        background_tasks.add_task(process_clip_creation, task_id)
+        
+        logger.info(f"クリップ生成タスク開始: {task_id} - {clip_request.clip_name}")
+        return {"task_id": task_id, "message": "クリップ生成を開始しました"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"クリップ生成開始エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"クリップ生成開始に失敗しました: {str(e)}")
+
+
+@app.get("/api/clip_tasks/{task_id}", response_model=ClipCreationTask)
+async def get_clip_task_status(task_id: str):
+    """
+    クリップ生成タスクの状態を取得
+    
+    Args:
+        task_id: タスクID
+        
+    Returns:
+        タスク状態
+    """
+    if task_id not in clip_creation_tasks:
+        raise HTTPException(status_code=404, detail="タスクが見つかりません")
+    
+    return clip_creation_tasks[task_id]
+
+
+@app.get("/api/clip_tasks", response_model=List[ClipCreationTask])
+async def get_all_clip_tasks():
+    """
+    全てのクリップ生成タスクを取得
+    
+    Returns:
+        タスクリスト
+    """
+    tasks = list(clip_creation_tasks.values())
+    # 作成日時で降順ソート
+    tasks.sort(key=lambda x: x.created_at, reverse=True)
+    return tasks
+
+
+async def process_clip_creation(task_id: str):
+    """
+    クリップ生成を実際に処理する非同期関数
+    
+    Args:
+        task_id: タスクID
+    """
+    task = clip_creation_tasks.get(task_id)
+    if not task:
+        logger.error(f"タスクが見つかりません: {task_id}")
+        return
+    
+    try:
+        # ステータス更新
+        task.status = "processing"
+        task.progress = 0.1
+        
+        # クリップ生成
+        clip_path = await video_processor.create_clip(
+            task.video_path,
+            task.clip_name,
+            task.start_time,
+            task.end_time
+        )
+        
+        task.progress = 0.8
+        
+        # 空のアノテーションファイル生成
+        annotation_created = annotation_manager.create_empty_annotation_for_clip(
+            task.clip_name,
+            clip_path,
+            task.video_path
+        )
+        
+        if not annotation_created:
+            logger.warning(f"アノテーションファイル生成に失敗: {task.clip_name}")
+        
+        # 完了
+        task.status = "completed"
+        task.progress = 1.0
+        task.completed_at = datetime.now().isoformat()
+        
+        logger.info(f"クリップ生成完了: {task.clip_name}")
+        
+    except Exception as e:
+        task.status = "failed"
+        task.error_message = str(e)
+        task.completed_at = datetime.now().isoformat()
+        logger.error(f"クリップ生成失敗 {task.clip_name}: {e}")
+
+
+@app.get("/api/raw_video/{filename}")
+async def get_raw_video(filename: str):
+    """
+    元動画ファイルを取得（プレビュー用）
+    
+    Args:
+        filename: ファイル名
+        
+    Returns:
+        動画ファイル
+    """
+    video_path = config.raw_videos_dir / filename
+    
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
+    
+    # セキュリティチェック（ディレクトリトラバーサル対策）
+    try:
+        video_path.resolve().relative_to(config.raw_videos_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="アクセスが拒否されました")
+    
+    # メディアタイプの決定
+    extension = video_path.suffix.lower()
+    media_type_map = {
+        '.mp4': 'video/mp4',
+        '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime',
+        '.mkv': 'video/x-matroska',
+        '.flv': 'video/x-flv',
+        '.wmv': 'video/x-ms-wmv'
+    }
+    media_type = media_type_map.get(extension, 'video/mp4')
+    
+    return FileResponse(
+        str(video_path),
+        media_type=media_type,
+        filename=video_path.name
+    )
 
 
 # ヘルスチェック

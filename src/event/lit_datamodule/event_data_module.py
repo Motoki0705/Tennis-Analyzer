@@ -19,7 +19,7 @@ class EventDataModule(pl.LightningDataModule):
         annotation_file: Union[
             str, Path
         ] = r"datasets/event/coco_annotations_ball_pose_court_event_status.json",
-        T: int = 8,  # 時系列の長さ（フレーム数）
+        T: int = 300,  # 時系列の長さ（フレーム数）
         batch_size: int = 32,
         num_workers: int = 8,
         skip_frames_range: Tuple[int, int] = (1, 5),

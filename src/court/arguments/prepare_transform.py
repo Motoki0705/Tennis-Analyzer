@@ -3,7 +3,6 @@ from typing import List, Tuple, Union, Callable
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-
 def prepare_transform(
     input_size: Union[List[int], Tuple[int, int]], is_train: bool = True
 ) -> Callable:

@@ -17,7 +17,8 @@
 ```bash
 # Python 依存関係
 pip install -r requirements.txt
-
+```
+```bash
 # フロントエンド依存関係（Node.js が必要）
 cd web_app/frontend
 npm install
@@ -41,19 +42,37 @@ ffmpeg -i game1.mp4 -ss 00:02:45 -t 00:00:04 -c copy clip_003.mp4
 
 ## 使用方法
 
-### ステップ1: 手動クリップの配置と空アノテーション生成
+### ステップ1: クリップの準備
+
+**オプション A: ウェブベースクリッピング機能を使用（推奨）**
+
+1. システムを起動：
+```bash
+./run_annotation_system.sh start
+```
+
+2. ブラウザで `http://localhost:8000` にアクセス
+
+3. 「動画アップロード」タブで元動画をアップロード
+
+4. 「クリップ生成」タブで：
+   - アップロードした動画を選択
+   - プレビューで開始・終了時間を指定
+   - クリップ名を入力してクリップを生成
+
+**オプション B: 手動クリップの配置と空アノテーション生成（従来方式）**
 
 1. クリップファイルを配置先ディレクトリに移動：
 ```bash
-mkdir -p ./datasets/annotation_workspace/clips/
-cp clip_*.mp4 ./datasets/annotation_workspace/clips/
+mkdir -p ./data/annotation_workspace/clips/
+cp clip_*.mp4 ./data/annotation_workspace/clips/
 ```
 
 2. 空のアノテーションJSONファイルを自動生成：
 ```bash
 python generate_empty_annotations.py \
-    --clips_dir ./datasets/annotation_workspace/clips \
-    --annotations_dir ./datasets/annotation_workspace/annotations \
+    --clips_dir ./data/annotation_workspace/clips \
+    --annotations_dir ./data/annotation_workspace/annotations \
     --source_video ./raw_videos/game1.mp4 \
     --validate
 ```
@@ -73,7 +92,7 @@ python generate_empty_annotations.py \
 #### バックエンドサーバーの起動
 
 ```bash
-python web_app/app.py --port 8000 --data_dir ./datasets/annotation_workspace
+python web_app/app.py --port 8000 --data_dir ./data/annotation_workspace
 ```
 
 #### フロントエンドの起動
@@ -108,9 +127,9 @@ npm start
 
 ```bash
 python merge_to_coco.py \
-    --input_dir ./datasets/annotation_workspace/annotations \
-    --output_file ./datasets/tennis_events_dataset.json \
-    --stats_file ./datasets/dataset_statistics.json \
+    --input_dir ./data/annotation_workspace/annotations \
+    --output_file ./data/tennis_events_dataset.json \
+    --stats_file ./data/dataset_statistics.json \
     --cleanup
 ```
 
@@ -262,6 +281,42 @@ python merge_to_coco.py --verbose ...
 3. **ディスク I/O**: 高速SSDの使用でフレーム読み書き速度を向上
 4. **ネットワーク**: ローカルネットワークでの使用により動画読み込み速度を最適化
 
+## 新機能: ウェブベースクリッピング
+
+### 概要
+元動画をWebブラウザから直接アップロードし、プレビュー画面で範囲を指定してクリップを生成できる機能を追加しました。これにより、外部ツールを使わずにシステム内でワークフローを完結できます。
+
+### 主な機能
+- **動画アップロード**: ドラッグ&ドロップによる直感的なファイルアップロード（最大10GB対応）
+- **動画プレビュー**: ブラウザ内での動画再生とシークバー操作
+- **範囲選択**: 現在時間を開始・終了時間に設定するワンクリック機能
+- **非同期処理**: バックグラウンドでのクリップ生成とリアルタイム進捗表示
+- **自動統合**: クリップ生成時の空アノテーションファイル自動生成
+
+### 新しいAPIエンドポイント
+- `GET /api/raw_videos` - アップロード済み動画一覧
+- `POST /api/upload_video` - 動画ファイルアップロード
+- `POST /api/create_clip` - クリップ生成開始
+- `GET /api/clip_tasks` - クリップ生成タスク一覧
+- `GET /api/clip_tasks/{task_id}` - 特定タスクの状態取得
+- `GET /api/raw_video/{filename}` - 元動画ファイルの配信
+
+### システム要件
+- **FFmpeg**: サーバー側でのクリップ生成に必要
+- **ストレージ容量**: 元動画とクリップファイルの保存に十分な容量
+- **処理能力**: 動画処理のための適切なCPU性能
+
+### セキュリティ対策
+- ファイルタイプ検証（MP4、AVI、MOV、MKV のみ許可）
+- ファイルサイズ制限（最大10GB）
+- ディレクトリトラバーサル攻撃の防止
+- 安全なファイル名生成
+
+### 技術スタック
+- **バックエンド**: FastAPI、FFmpeg-python、OpenCV、aiofiles
+- **フロントエンド**: React、Material-UI、TypeScript
+- **動画処理**: FFmpeg、OpenCV
+
 ## 今後の展開
 
 - Player や Court のアノテーション機能追加
@@ -269,6 +324,8 @@ python merge_to_coco.py --verbose ...
 - アノテーション品質管理機能
 - クラウド環境での大規模運用
 - 自動品質チェック機能の追加
+- WebSocket による リアルタイム進捗通知
+- 動画プレビューでの高度な編集機能
 
 ## ライセンス
 
@@ -277,4 +334,4 @@ python merge_to_coco.py --verbose ...
 ## 貢献方法
 
 バグ報告や機能要望は Issue よりお知らせください。
-プルリクエストも歓迎いたします。 
+プルリクエストも歓迎いたします。

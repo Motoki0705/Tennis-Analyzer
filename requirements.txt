@@ -1,50 +1,57 @@
-# ==============================================================================
-#  Python Requirements for a General Machine Learning Project
-# ==============================================================================
-#
-# Installation:
-# 1. Create and activate a new virtual environment.
-# 2. Run the following command:
-#    pip install -r requirements.txt
-#
-# --- PyTorch Installation Note ---
+# Combined Requirements for Tennis Event Annotation System with ML Development
+
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Data handling & Numerical Computation
+pydantic==2.5.0
+numpy
+pandas==2.0.3
+scipy
+
+# Video processing
+ffmpeg-python==0.2.0
+aiofiles==23.2.0
+
+# Machine Learning & Deep Learning Frameworks
 # For GPU (CUDA/MPS) support, it is STRONGLY recommended to install PyTorch
 # from the official website first, BEFORE running `pip install -r requirements.txt`.
 # Visit: https://pytorch.org/get-started/locally/
 # After installing the correct PyTorch version, you can comment out 'torch',
 # 'torchvision', and 'torchaudio' from this file.
-
-# --- Core Deep Learning & Machine Learning Frameworks ---
-torch
-torchvision
+torch==2.1.1
+torchvision==0.16.1
 torchaudio
-pytorch-lightning         # User requested (PL): High-level interface for PyTorch
-scikit-learn              # Essential library for classical machine learning
+pytorch-lightning
+scikit-learn
 
-# --- Experiment Configuration & Tracking ---
-hydra-core                # User requested: Framework for elegantly configuring complex applications
-wandb                     # A popular tool for experiment tracking and visualization (MLOps)
+# Experiment Configuration & Tracking
+hydra-core
+wandb
 
-# --- Data Handling & Numerical Computation ---
-numpy                     # Fundamental package for numerical computation
-pandas                    # Powerful data structures for data analysis
-scipy                     # Library for scientific and technical computing
+# Data Visualization
+matplotlib
+seaborn
 
-# --- Data Visualization ---
-matplotlib                # Standard library for plotting
-seaborn                   # Statistical data visualization based on matplotlib
+# Image & Data Processing/Augmentation
+opencv-python==4.8.1.78
+# opencv-python-headless # Commented out, as opencv-python is preferred for full features, if GUI is not an issue
+Pillow
+albumentations==1.3.1
 
-# --- Image & Data Processing/Augmentation ---
-opencv-python-headless    # Computer vision library (headless version avoids GUI dependencies)
-Pillow                    # Python Imaging Library (fork)
-albumentations            # Fast and flexible library for image augmentations
+# Hugging Face Ecosystem
+transformers
+datasets
+huggingface-hub
 
-# --- Hugging Face Ecosystem (State-of-the-art NLP/Vision models) ---
-transformers              # Provides thousands of pretrained models
-datasets                  # Provides easy access to thousands of datasets
-huggingface-hub           # Hub for models, datasets, and demos
+# Utilities
+tqdm
+ipykernel
+python-dotenv
 
-# --- Utilities ---
-tqdm                      # A fast, extensible progress bar for loops
-ipykernel                 # Required to use this virtual environment in Jupyter Notebooks/Lab
-python-dotenv             # Reads key-value pairs from a .env file and sets them as environment variables
+# Optional: for development
+pytest==7.4.3
+black==23.11.0
+flake8==6.1.0
