@@ -49,6 +49,43 @@ while True:
         buffer.pop(0)  # スライディングウィンドウ
 ```
 
+### 分析ツール (NEW!)
+
+動画の検出性能を分析し、蒸留学習の戦略を決定:
+
+```bash
+# 基本的な分析
+python run_analysis.py \
+  --video tennis_video.mp4 \
+  --model_path weights.pth.tar
+
+# バッチ分析
+python batch_analysis.py \
+  --video_dir ./tennis_videos/ \
+  --model_path weights.pth.tar
+```
+
+詳細は `README_ANALYSIS.md` を参照。
+
+### 強化分析ツール (NEW! 🚀)
+
+3段階フィルタリングによる高精度分析：
+
+```bash
+# ローカル分類器の学習
+python -m ball_tracker.local_classifier.train \
+  --annotation_file coco_annotations.json \
+  --images_dir ./images/
+
+# 強化分析実行
+python enhanced_analysis_tool.py \
+  --video tennis_video.mp4 \
+  --ball_tracker_model ball_tracker.pth.tar \
+  --local_classifier_model local_classifier_checkpoints/best_model.pth
+```
+
+詳細は `README_ENHANCED.md` を参照。
+
 ## ファイル構成
 
 - `models/hrnet.py` - HRNet アーキテクチャ
@@ -56,6 +93,11 @@ while True:
 - `postprocessor.py` - ヒートマップ後処理
 - `video_demo.py` - SimpleDetector クラス
 - `utils/image.py` - 画像変換ユーティリティ
+- `analysis_tool.py` - 性能分析・可視化ツール
+- `batch_analysis.py` - バッチ処理分析ツール  
+- `run_analysis.py` - 簡易実行スクリプト
+- `enhanced_analysis_tool.py` - 3段階フィルタリング強化分析
+- `local_classifier/` - ローカル分類器モジュール（16x16パッチ2値分類）
 
 ## 元実装
 

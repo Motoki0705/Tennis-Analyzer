@@ -7,20 +7,70 @@ from PIL import Image
 from omegaconf import OmegaConf
 import logging
 
-# WASB-SBDT modules
-from models import build_model
-from trackers import build_tracker
-from utils import mkdir_if_missing
-from utils.image import get_affine_transform
-from detectors.postprocessor import TracknetV2Postprocessor
-import dataloaders.img_transforms as T
+# ball_tracker modules (with fallback)
+try:
+    from .models import build_model
+    from .online import OnlineTracker
+    from .postprocessor import TracknetV2Postprocessor
+except ImportError:
+    # Fallback for direct execution
+    from models import build_model
+    from online import OnlineTracker
+    from postprocessor import TracknetV2Postprocessor
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
+def get_affine_transform(center, scale, rot, output_size, shift=np.array([0, 0], dtype=np.float32), inv=0):
+    """Simple affine transform implementation"""
+    if not isinstance(scale, np.ndarray) and not isinstance(scale, list):
+        scale = np.array([scale, scale], dtype=np.float32)
+
+    scale_tmp = scale
+    src_w = scale_tmp[0]
+    dst_w = output_size[0]
+    dst_h = output_size[1]
+
+    rot_rad = np.pi * rot / 180
+    src_dir = get_dir([0, src_w * -0.5], rot_rad)
+    dst_dir = np.array([0, dst_w * -0.5], np.float32)
+
+    src = np.zeros((3, 2), dtype=np.float32)
+    dst = np.zeros((3, 2), dtype=np.float32)
+    src[0, :] = center + scale_tmp * shift
+    src[1, :] = center + src_dir + scale_tmp * shift
+    dst[0, :] = [dst_w * 0.5, dst_h * 0.5]
+    dst[1, :] = np.array([dst_w * 0.5, dst_h * 0.5], np.float32) + dst_dir
+
+    src[2:, :] = get_3rd_point(src[0, :], src[1, :])
+    dst[2:, :] = get_3rd_point(dst[0, :], dst[1, :])
+
+    if inv:
+        trans = cv2.getAffineTransform(np.float32(dst), np.float32(src))
+    else:
+        trans = cv2.getAffineTransform(np.float32(src), np.float32(dst))
+
+    return trans
+
+
+def get_dir(src_point, rot_rad):
+    """Get direction"""
+    sn, cs = np.sin(rot_rad), np.cos(rot_rad)
+    src_result = [0, 0]
+    src_result[0] = src_point[0] * cs - src_point[1] * sn
+    src_result[1] = src_point[0] * sn + src_point[1] * cs
+    return src_result
+
+
+def get_3rd_point(a, b):
+    """Get 3rd point"""
+    direct = a - b
+    return b + np.array([-direct[1], direct[0]], dtype=np.float32)
+
+
 class SimpleDetector:
-    """Simplified detector without DataParallel issues"""
+    """Simplified detector without complex dependencies"""
     
     def __init__(self, cfg, device):
         self._frames_in = cfg['model']['frames_in']
@@ -58,12 +108,6 @@ class SimpleDetector:
         self._model.load_state_dict(new_state_dict)
         self._model = self._model.to(device)
         self._model.eval()
-        
-        # Image transforms
-        self._transform = T.Compose([
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
         
         # Postprocessor
         self._postprocessor = TracknetV2Postprocessor(cfg)
@@ -104,8 +148,14 @@ class SimpleDetector:
         
         for frm in frames:
             frm_warp = cv2.warpAffine(frm, trans_in, (input_w, input_h), flags=cv2.INTER_LINEAR)
-            img_pil = Image.fromarray(cv2.cvtColor(frm_warp, cv2.COLOR_BGR2RGB))
-            imgs_t.append(self._transform(img_pil))
+            # Manual transform: BGR to RGB, normalize, to tensor
+            frm_rgb = cv2.cvtColor(frm_warp, cv2.COLOR_BGR2RGB)
+            frm_norm = frm_rgb.astype(np.float32) / 255.0
+            # Normalize with ImageNet stats
+            frm_norm = (frm_norm - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+            # Convert to tensor [C, H, W]
+            frm_tensor = torch.from_numpy(frm_norm.transpose(2, 0, 1))
+            imgs_t.append(frm_tensor)
             
         imgs_tensor = torch.cat(imgs_t, dim=0).unsqueeze(0).to(self._device)
         
@@ -213,7 +263,7 @@ def main():
 
     # Build detector and tracker
     detector = SimpleDetector(cfg, device)
-    tracker = build_tracker(cfg)
+    tracker = OnlineTracker(cfg)
     
     frames_in = detector.frames_in
     log.info(f"Model expects {frames_in} input frames")
