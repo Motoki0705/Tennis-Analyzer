@@ -17,6 +17,8 @@ from pathlib import Path
 import json
 import time
 import matplotlib.pyplot as plt
+
+# Conditional imports
 try:
     from sklearn.metrics import confusion_matrix, classification_report, f1_score
     import seaborn as sns
@@ -43,22 +45,11 @@ def train_local_classifier(
     learning_rate: float = 0.001,
     weight_decay: float = 1e-4,
     patch_size: int = 16,
+    position_noise: int = 2,  # ±ピクセルの位置ノイズ
     device: str = "cuda"
 ):
     """
     ローカル分類器の学習実行
-    
-    Args:
-        annotation_file (str): COCO形式アノテーションファイル
-        images_dir (str): 画像ディレクトリ
-        output_dir (str): チェックポイント保存ディレクトリ
-        model_type (str): モデルタイプ
-        epochs (int): エポック数
-        batch_size (int): バッチサイズ
-        learning_rate (float): 学習率
-        weight_decay (float): 重み減衰
-        patch_size (int): パッチサイズ
-        device (str): デバイス
     """
     
     # Setup directories
@@ -87,7 +78,8 @@ def train_local_classifier(
         annotation_file=annotation_file,
         images_dir=images_dir,
         batch_size=batch_size,
-        patch_size=patch_size
+        patch_size=patch_size,
+        position_noise=position_noise
     )
     
     logger.info(f"Training samples: {len(train_loader.dataset)}")
@@ -308,12 +300,12 @@ def validate_epoch(model, dataloader, criterion, device, return_detailed=False):
             all_labels.extend(labels.cpu().numpy().flatten())
             
             # Update progress bar
-            avg_loss = total_loss / len(pbar)
+            avg_loss = total_loss / len(pbar.iterable) if len(pbar.iterable) > 0 else 0
             accuracy = correct / total
             pbar.set_postfix({
                 'Loss': f'{avg_loss:.4f}', 
                 'Acc': f'{accuracy:.4f}',
-                'Batch': f'{len(pbar.iterable) - len(pbar.iterable) + pbar.n}/{len(dataloader)}'
+                'Batch': f'{pbar.n}/{len(dataloader)}'
             })
     
     # Calculate detailed metrics
@@ -437,6 +429,7 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--patch_size", type=int, default=16, help="Patch size")
+    parser.add_argument("--position_noise", type=int, default=2, help="Position noise")
     parser.add_argument("--device", default="cuda", help="Device")
     
     args = parser.parse_args()
@@ -466,6 +459,7 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         patch_size=args.patch_size,
+        position_noise=args.position_noise,
         device=args.device
     )
     
