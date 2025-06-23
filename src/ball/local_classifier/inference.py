@@ -1,6 +1,9 @@
 """
 Local Classifier Inference System
 3段階フィルタリングシステム（Stage 2: ローカル分類器）
+
+Note: このファイルは新しいパイプラインシステム（src/ball/pipeline/）に移行されました。
+互換性のため残していますが、新しい開発では pipeline パッケージを使用してください。
 """
 
 import torch
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BallDetection:
-    """ボール検出結果"""
+    """ボール検出結果（レガシー）"""
     x: float
     y: float
     confidence: float
