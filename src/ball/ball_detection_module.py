@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import cv2
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import albumentations as A
 
@@ -442,6 +443,205 @@ class BallDetectionModule:
             'detector_type': type(self.detector).__name__,
             'frames_required': getattr(self.detector, 'frames_in', 3)
         }
+
+
+def visualize_detections_on_video(
+    video_path: str,
+    detections: Dict[str, List[List[float]]],
+    output_path: str,
+    confidence_threshold: float = 0.3,
+    ball_radius: int = 8,
+    center_radius: int = 3,
+    ball_color: Tuple[int, int, int] = (0, 0, 255),
+    center_color: Tuple[int, int, int] = (255, 255, 255),
+    score_color: Tuple[int, int, int] = (0, 255, 0),
+    show_trajectory: bool = True,
+    trajectory_length: int = 15,
+    trajectory_color: Tuple[int, int, int] = (0, 255, 255),
+    show_progress: bool = True
+) -> str:
+    """Visualize ball detections on video and save the result.
+    
+    Args:
+        video_path: Path to input video
+        detections: Detection results from BallDetectionModule
+        output_path: Path to save the visualized video
+        confidence_threshold: Minimum confidence to show detections
+        ball_radius: Radius of ball circle
+        center_radius: Radius of center circle
+        ball_color: Ball circle color (B, G, R)
+        center_color: Center circle color (B, G, R)
+        score_color: Score text color (B, G, R)
+        show_trajectory: Whether to show ball trajectory
+        trajectory_length: Number of frames to show in trajectory
+        trajectory_color: Trajectory line color (B, G, R)
+        show_progress: Whether to show progress
+        
+    Returns:
+        Path to the output video file
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+    
+    # Get video properties
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Setup video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    
+    # Track trajectory points
+    trajectory_points = []
+    
+    frame_idx = 0
+    logger.info(f"Processing {total_frames} frames for visualization...")
+    
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            frame_id = f'frame_{frame_idx:06d}'
+            
+            # Get detections for current frame
+            if frame_id in detections:
+                frame_detections = detections[frame_id]
+                
+                for detection in frame_detections:
+                    if len(detection) >= 3:
+                        x_norm, y_norm, confidence = detection[:3]
+                        
+                        if confidence >= confidence_threshold:
+                            # Convert normalized coordinates to pixel coordinates
+                            x_pixel = int(x_norm * width)
+                            y_pixel = int(y_norm * height)
+                            
+                            # Add to trajectory
+                            trajectory_points.append((x_pixel, y_pixel))
+                            if len(trajectory_points) > trajectory_length:
+                                trajectory_points.pop(0)
+                            
+                            # Draw trajectory
+                            if show_trajectory and len(trajectory_points) > 1:
+                                for i in range(1, len(trajectory_points)):
+                                    thickness = max(1, int(3 * i / len(trajectory_points)))
+                                    cv2.line(frame, trajectory_points[i-1], trajectory_points[i], 
+                                           trajectory_color, thickness, cv2.LINE_AA)
+                            
+                            # Draw ball detection
+                            cv2.circle(frame, (x_pixel, y_pixel), ball_radius, ball_color, -1)
+                            cv2.circle(frame, (x_pixel, y_pixel), center_radius, center_color, -1)
+                            
+                            # Add confidence text
+                            score_text = f"Ball: {confidence:.2f}"
+                            cv2.putText(frame, score_text, (x_pixel + 15, y_pixel - 10),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, score_color, 1)
+            
+            out.write(frame)
+            frame_idx += 1
+            
+            if show_progress and frame_idx % 100 == 0:
+                logger.info(f"Processed {frame_idx}/{total_frames} frames")
+    
+    finally:
+        cap.release()
+        out.release()
+    
+    logger.info(f"Visualization saved to {output_path}")
+    return output_path
+
+
+def create_overlay_video(
+    video_path: str,
+    model_path: str,
+    output_path: str,
+    model_type: str = "auto",
+    device: str = "auto",
+    max_frames: int = None,
+    confidence_threshold: float = 0.3,
+    **visualization_kwargs
+) -> Tuple[str, Dict[str, Any]]:
+    """End-to-end pipeline: detect balls and create overlay video.
+    
+    Args:
+        video_path: Path to input video
+        model_path: Path to model checkpoint
+        output_path: Path to save the overlay video
+        model_type: Type of model ("auto", "lite_tracknet", "wasb_sbdt")
+        device: Device for inference ("auto", "cpu", "cuda")
+        max_frames: Maximum number of frames to process (None for all)
+        confidence_threshold: Minimum confidence threshold for visualization
+        **visualization_kwargs: Additional arguments for visualization
+        
+    Returns:
+        Tuple of (output_video_path, detection_results)
+    """
+    # Create detector
+    detector = create_ball_detection_module(
+        model_path=model_path,
+        model_type=model_type,
+        device=device
+    )
+    
+    # Read video frames
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    if max_frames:
+        total_frames = min(total_frames, max_frames)
+    
+    logger.info(f"Loading {total_frames} frames from video...")
+    
+    # Read all frames
+    all_frame_data = []
+    frame_idx = 0
+    
+    while frame_idx < total_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Convert BGR to RGB for detection
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        metadata = {
+            'frame_id': f'frame_{frame_idx:06d}',
+            'timestamp': frame_idx / fps,
+            'frame_number': frame_idx
+        }
+        all_frame_data.append((frame_rgb, metadata))
+        frame_idx += 1
+    
+    cap.release()
+    
+    # Detect balls
+    logger.info(f"Detecting balls in {len(all_frame_data)} frames...")
+    detections = detector.detect_balls(all_frame_data)
+    
+    # Create overlay video
+    output_video_path = visualize_detections_on_video(
+        video_path=video_path,
+        detections=detections,
+        output_path=output_path,
+        confidence_threshold=confidence_threshold,
+        **visualization_kwargs
+    )
+    
+    # Prepare results summary
+    results = {
+        'total_frames': len(all_frame_data),
+        'total_detections': sum(len(balls) for balls in detections.values()),
+        'frames_with_detections': len(detections),
+        'output_video': output_video_path,
+        'detections': detections
+    }
+    
+    return output_video_path, results
 
 
 def create_ball_detection_module(model_path: str, config_path: Optional[str] = None,
