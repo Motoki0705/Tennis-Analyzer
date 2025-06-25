@@ -289,6 +289,36 @@ def save_batch_report(report: Dict[str, Any], output_path: str):
 
 
 @hydra.main(version_base=None, config_path="../../configs/infer", config_name="batch_process")
+def validate_batch_config(cfg: DictConfig) -> None:
+    """バッチ処理設定検証"""
+    # 入力ソース検証
+    if not cfg.io.input_dir and not cfg.io.input_list:
+        raise ValueError("Either input_dir or input_list must be specified")
+    
+    # 必須フィールド検証
+    required_fields = [
+        ('io.output_dir', 'output directory'),
+        ('model.model_path', 'model file path')
+    ]
+    
+    for field_path, description in required_fields:
+        field_value = cfg
+        for key in field_path.split('.'):
+            field_value = getattr(field_value, key, None)
+        if not field_value:
+            raise ValueError(f"{field_path} ({description}) is required but not provided")
+    
+    # ファイル存在確認
+    if not os.path.exists(cfg.model.model_path):
+        raise FileNotFoundError(f"Model file not found: {cfg.model.model_path}")
+    
+    if cfg.io.input_list and not os.path.exists(cfg.io.input_list):
+        raise FileNotFoundError(f"Input list file not found: {cfg.io.input_list}")
+    
+    if cfg.io.input_dir and not os.path.exists(cfg.io.input_dir):
+        raise FileNotFoundError(f"Input directory not found: {cfg.io.input_dir}")
+
+
 def main(cfg: DictConfig) -> None:
     """メインエントリポイント"""
     # ログ設定
@@ -300,18 +330,7 @@ def main(cfg: DictConfig) -> None:
     
     try:
         # 設定検証
-        if not cfg.io.input_dir and not cfg.io.input_list:
-            raise ValueError("input_dir または input_list のいずれかを指定してください")
-        
-        if not cfg.io.output_dir:
-            raise ValueError("output_dir は必須です")
-            
-        if not cfg.model.model_path:
-            raise ValueError("model.model_path は必須です")
-        
-        # 入力検証
-        if not os.path.exists(cfg.model.model_path):
-            raise FileNotFoundError(f"モデルファイルが見つかりません: {cfg.model.model_path}")
+        validate_batch_config(cfg)
         
         # 出力ディレクトリ作成
         os.makedirs(cfg.io.output_dir, exist_ok=True)

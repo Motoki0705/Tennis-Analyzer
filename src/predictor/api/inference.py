@@ -211,6 +211,29 @@ def display_progress(result, progress_interval: float):
 
 
 @hydra.main(version_base=None, config_path="../../configs/infer", config_name="inference")
+def validate_config(cfg: DictConfig) -> None:
+    """設定検証"""
+    required_fields = [
+        ('io.video', 'input video file'),
+        ('io.output', 'output video file'),
+        ('model.model_path', 'model file path')
+    ]
+    
+    for field_path, description in required_fields:
+        field_value = cfg
+        for key in field_path.split('.'):
+            field_value = getattr(field_value, key, None)
+        if not field_value:
+            raise ValueError(f"{field_path} ({description}) is required but not provided")
+    
+    # ファイル存在確認
+    if not os.path.exists(cfg.io.video):
+        raise FileNotFoundError(f"Input video not found: {cfg.io.video}")
+    
+    if not os.path.exists(cfg.model.model_path):
+        raise FileNotFoundError(f"Model file not found: {cfg.model.model_path}")
+
+
 def main(cfg: DictConfig) -> None:
     """メインエントリポイント"""
     # ログ設定
@@ -222,24 +245,12 @@ def main(cfg: DictConfig) -> None:
     
     try:
         # 設定検証
-        if not cfg.io.video:
-            raise ValueError("io.video は必須です")
-            
-        if not cfg.io.output:
-            raise ValueError("io.output は必須です")
-            
-        if not cfg.model.model_path:
-            raise ValueError("model.model_path は必須です")
-        
-        # 入力検証
-        if not os.path.exists(cfg.io.video):
-            raise FileNotFoundError(f"入力動画が見つかりません: {cfg.io.video}")
-        
-        if not os.path.exists(cfg.model.model_path):
-            raise FileNotFoundError(f"モデルファイルが見つかりません: {cfg.model.model_path}")
+        validate_config(cfg)
         
         # 出力ディレクトリ作成
-        os.makedirs(os.path.dirname(cfg.io.output), exist_ok=True)
+        output_dir = os.path.dirname(cfg.io.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         
         # 設定取得
         pipeline_config = get_pipeline_config(cfg)
