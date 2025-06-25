@@ -1,0 +1,24 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/single/${now:%Y-%m-%d_%H-%M-%S}
+
+# デフォルト設定
+defaults:
+  - model: lite_tracknet
+  - pipeline: high_performance
+  - visualization: default
+  - system: default
+  - _self_
+
+# 入出力設定
+io:
+  video: null  # 入力動画ファイルパス (required)
+  output: null  # 出力動画ファイルパス (required)
+  stats_output: null  # 統計情報出力ファイルパス (JSON形式)
+
+# 実験名の設定
+version: inference_${model.type}_${pipeline.type}_${now:%Y%m%d_%H%M%S} 
