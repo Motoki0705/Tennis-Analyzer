@@ -16,19 +16,20 @@ defaults:
 
 # 入出力設定
 io:
-  input_dir: null  # 入力動画ディレクトリパス
-  input_list: null  # 入力動画リストファイル (1行1ファイル)
+  input_dir: null  # 入力動画ディレクトリパス (input_dir または input_list が必要)
+  input_list: null  # 入力動画リストファイル (input_dir または input_list が必要)
   output_dir: null  # 出力ディレクトリパス (required)
   report_path: null  # バッチ処理レポート出力パス (JSON形式)
-  file_patterns:
+  file_patterns:  # 処理対象ファイルパターン (input_dir使用時)
     - "*.mp4"
     - "*.avi" 
     - "*.mov"
+    - "*.mkv"
 
 # バッチ処理設定
 batch:
   parallel_jobs: 1  # 並列処理ジョブ数
-  continue_on_error: false  # エラー発生時も他ファイル処理を続行
+  continue_on_error: true  # エラー発生時も他ファイル処理を続行
   overwrite: false  # 既存出力ファイルを上書き
 
 # 実験名の設定
