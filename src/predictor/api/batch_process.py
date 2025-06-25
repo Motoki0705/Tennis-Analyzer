@@ -55,6 +55,7 @@ Examples:
         batch.continue_on_error=true
 """
 
+import copy
 import json
 import logging
 import os
@@ -81,6 +82,7 @@ from src.predictor import (
     REALTIME_CONFIG,
     DEBUG_CONFIG
 )
+from src.predictor.pipeline.config import PipelineConfig
 
 
 def collect_video_files(cfg: DictConfig) -> List[str]:
@@ -152,7 +154,7 @@ def process_single_video(
             video_path=video_path,
             detector_config=detector_config,
             output_path=output_path,
-            vis_config=vis_config
+            visualization_config=vis_config
         )
         
         result['processing_time'] = time.time() - result['start_time']
@@ -171,28 +173,48 @@ def process_single_video(
     return result
 
 
-def get_pipeline_config(cfg: DictConfig) -> Dict[str, Any]:
+def get_pipeline_config(cfg: DictConfig) -> PipelineConfig:
     """パイプライン設定取得"""
-    if cfg.pipeline.type == 'high_performance':
-        base_config = HIGH_PERFORMANCE_CONFIG
-    elif cfg.pipeline.type == 'memory_efficient':
-        base_config = MEMORY_EFFICIENT_CONFIG
-    elif cfg.pipeline.type == 'realtime':
-        base_config = REALTIME_CONFIG
-    elif cfg.pipeline.type == 'debug':
-        base_config = DEBUG_CONFIG
-    else:
-        raise ValueError(f"Unknown pipeline type: {cfg.pipeline.type}")
-    
-    # カスタマイズ適用
-    config = base_config.copy()
-    config.update({
-        'batch_size': cfg.pipeline.batch_size,
-        'num_workers': cfg.pipeline.num_workers,
-        'queue_size': cfg.pipeline.queue_size,
-    })
+    try:
+        if cfg.pipeline.type == 'high_performance':
+            base_config = HIGH_PERFORMANCE_CONFIG
+        elif cfg.pipeline.type == 'memory_efficient':
+            base_config = MEMORY_EFFICIENT_CONFIG
+        elif cfg.pipeline.type == 'realtime':
+            base_config = REALTIME_CONFIG
+        elif cfg.pipeline.type == 'debug':
+            base_config = DEBUG_CONFIG
+        else:
+            raise ValueError(f"Unknown pipeline type: {cfg.pipeline.type}")
         
-    return config
+        # PipelineConfigオブジェクトをコピー
+        config = copy.copy(base_config)
+        
+        # カスタム設定の値を取得（デフォルト値を提供）
+        batch_size = getattr(cfg.pipeline, 'batch_size', 8)
+        num_workers = getattr(cfg.pipeline, 'num_workers', 4)
+        queue_size = getattr(cfg.pipeline, 'queue_size', 100)
+        
+        # PipelineConfigオブジェクトのパラメータを更新
+        if hasattr(config, 'gpu_batch_size'):
+            config.gpu_batch_size = batch_size
+        if hasattr(config, 'num_workers'):
+            config.num_workers = num_workers
+        if hasattr(config, 'frame_buffer_size'):
+            config.frame_buffer_size = queue_size
+            
+        # PipelineConfigオブジェクトを直接返す
+        return config
+    
+    except Exception as e:
+        # エラーが発生した場合のフォールバック設定
+        logging.warning(f"Pipeline config error: {e}. Using default PipelineConfig.")
+        fallback_config = PipelineConfig()
+        # デフォルト設定をカスタマイズ
+        fallback_config.gpu_batch_size = getattr(cfg.pipeline, 'batch_size', 8)
+        fallback_config.num_workers = getattr(cfg.pipeline, 'num_workers', 4)
+        fallback_config.frame_buffer_size = getattr(cfg.pipeline, 'queue_size', 100)
+        return fallback_config
 
 
 def get_detector_config(cfg: DictConfig) -> Dict[str, Any]:
@@ -288,7 +310,6 @@ def save_batch_report(report: Dict[str, Any], output_path: str):
     logging.info(f"バッチレポートを保存: {output_path}")
 
 
-@hydra.main(version_base=None, config_path="../../configs/infer", config_name="batch_process")
 def validate_batch_config(cfg: DictConfig) -> None:
     """バッチ処理設定検証"""
     # 入力ソース検証
@@ -319,6 +340,7 @@ def validate_batch_config(cfg: DictConfig) -> None:
         raise FileNotFoundError(f"Input directory not found: {cfg.io.input_dir}")
 
 
+@hydra.main(version_base=None, config_path="../../configs/infer", config_name="batch_process")
 def main(cfg: DictConfig) -> None:
     """メインエントリポイント"""
     # ログ設定

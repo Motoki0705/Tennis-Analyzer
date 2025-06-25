@@ -57,6 +57,7 @@ Examples:
         io.stats_output=stats.json
 """
 
+import copy
 import json
 import logging
 import os
@@ -82,31 +83,52 @@ from src.predictor import (
     REALTIME_CONFIG,
     DEBUG_CONFIG
 )
+from src.predictor.pipeline.config import PipelineConfig
 
 
-def get_pipeline_config(cfg: DictConfig) -> Dict[str, Any]:
+def get_pipeline_config(cfg: DictConfig) -> PipelineConfig:
     """パイプライン設定取得"""
-    # ベース設定選択
-    if cfg.pipeline.type == 'high_performance':
-        base_config = HIGH_PERFORMANCE_CONFIG
-    elif cfg.pipeline.type == 'memory_efficient':
-        base_config = MEMORY_EFFICIENT_CONFIG
-    elif cfg.pipeline.type == 'realtime':
-        base_config = REALTIME_CONFIG
-    elif cfg.pipeline.type == 'debug':
-        base_config = DEBUG_CONFIG
-    else:
-        raise ValueError(f"Unknown pipeline type: {cfg.pipeline.type}")
-    
-    # カスタマイズ適用
-    config = base_config.copy()
-    config.update({
-        'batch_size': cfg.pipeline.batch_size,
-        'num_workers': cfg.pipeline.num_workers,
-        'queue_size': cfg.pipeline.queue_size,
-    })
+    try:
+        # ベース設定選択
+        if cfg.pipeline.type == 'high_performance':
+            base_config = HIGH_PERFORMANCE_CONFIG
+        elif cfg.pipeline.type == 'memory_efficient':
+            base_config = MEMORY_EFFICIENT_CONFIG
+        elif cfg.pipeline.type == 'realtime':
+            base_config = REALTIME_CONFIG
+        elif cfg.pipeline.type == 'debug':
+            base_config = DEBUG_CONFIG
+        else:
+            raise ValueError(f"Unknown pipeline type: {cfg.pipeline.type}")
         
-    return config
+        # PipelineConfigオブジェクトをコピー
+        config = copy.copy(base_config)
+        
+        # カスタム設定の値を取得（デフォルト値を提供）
+        batch_size = getattr(cfg.pipeline, 'batch_size', 8)
+        num_workers = getattr(cfg.pipeline, 'num_workers', 4)
+        queue_size = getattr(cfg.pipeline, 'queue_size', 100)
+        
+        # PipelineConfigオブジェクトのパラメータを更新
+        if hasattr(config, 'gpu_batch_size'):
+            config.gpu_batch_size = batch_size
+        if hasattr(config, 'num_workers'):
+            config.num_workers = num_workers
+        if hasattr(config, 'frame_buffer_size'):
+            config.frame_buffer_size = queue_size
+            
+        # PipelineConfigオブジェクトを直接返す
+        return config
+    
+    except Exception as e:
+        # エラーが発生した場合のフォールバック設定
+        logging.warning(f"Pipeline config error: {e}. Using default PipelineConfig.")
+        fallback_config = PipelineConfig()
+        # デフォルト設定をカスタマイズ
+        fallback_config.gpu_batch_size = getattr(cfg.pipeline, 'batch_size', 8)
+        fallback_config.num_workers = getattr(cfg.pipeline, 'num_workers', 4)
+        fallback_config.frame_buffer_size = getattr(cfg.pipeline, 'queue_size', 100)
+        return fallback_config
 
 
 def get_detector_config(cfg: DictConfig) -> Dict[str, Any]:
@@ -210,7 +232,6 @@ def display_progress(result, progress_interval: float):
         time.sleep(progress_interval)
 
 
-@hydra.main(version_base=None, config_path="../../configs/infer", config_name="inference")
 def validate_config(cfg: DictConfig) -> None:
     """設定検証"""
     required_fields = [
@@ -234,6 +255,7 @@ def validate_config(cfg: DictConfig) -> None:
         raise FileNotFoundError(f"Model file not found: {cfg.model.model_path}")
 
 
+@hydra.main(version_base=None, config_path="../../configs/infer", config_name="inference")
 def main(cfg: DictConfig) -> None:
     """メインエントリポイント"""
     # ログ設定
@@ -277,7 +299,7 @@ def main(cfg: DictConfig) -> None:
                 video_path=cfg.io.video,
                 detector_config=detector_config,
                 output_path=cfg.io.output,
-                vis_config=vis_config
+                visualization_config=vis_config
             )
             
             # 進捗表示
@@ -291,7 +313,7 @@ def main(cfg: DictConfig) -> None:
                 video_path=cfg.io.video,
                 detector_config=detector_config,
                 output_path=cfg.io.output,
-                vis_config=vis_config
+                visualization_config=vis_config
             )
         
         processing_time = time.time() - start_time
