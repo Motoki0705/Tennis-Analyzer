@@ -17,41 +17,46 @@ Features:
 
 Usage:
     python -m src.predictor.api.inference \
-        --video input.mp4 \
-        --output output.mp4 \
-        --model_path checkpoints/model.ckpt \
-        --model_type lite_tracknet \
-        --config high_performance
+        --config-path ../../configs/infer \
+        --config-name inference \
+        io.video=input.mp4 \
+        io.output=output.mp4 \
+        model.model_path=checkpoints/model.ckpt \
+        model=lite_tracknet \
+        pipeline=high_performance
 
 Examples:
     # 基本実行
     python -m src.predictor.api.inference \
-        --video tennis_match.mp4 \
-        --output annotated_match.mp4 \
-        --model_path checkpoints/lite_tracknet.ckpt
+        --config-path ../../configs/infer \
+        --config-name inference \
+        io.video=tennis_match.mp4 \
+        io.output=annotated_match.mp4 \
+        model.model_path=checkpoints/lite_tracknet.ckpt
 
     # 高性能並列処理
     python -m src.predictor.api.inference \
-        --video long_match.mp4 \
-        --output result.mp4 \
-        --model_path models/wasb_sbdt.pth \
-        --model_type wasb_sbdt \
-        --config high_performance \
-        --batch_size 16 \
-        --num_workers 8
+        --config-path ../../configs/infer \
+        --config-name inference \
+        io.video=long_match.mp4 \
+        io.output=result.mp4 \
+        model.model_path=models/wasb_sbdt.pth \
+        model=wasb_sbdt \
+        pipeline=high_performance \
+        pipeline.batch_size=16 \
+        pipeline.num_workers=8
 
     # カスタム可視化
     python -m src.predictor.api.inference \
-        --video input.mp4 \
-        --output stylized.mp4 \
-        --model_path model.ckpt \
-        --ball_radius 15 \
-        --trajectory_length 30 \
-        --enable_prediction \
-        --stats_output stats.json
+        --config-path ../../configs/infer \
+        --config-name inference \
+        io.video=input.mp4 \
+        io.output=stylized.mp4 \
+        model.model_path=model.ckpt \
+        visualization=enhanced \
+        io.stats_output=stats.json
 """
 
-import argparse
 import json
 import logging
 import os
@@ -60,7 +65,9 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
 
 # プロジェクトルートをPythonパスに追加
 project_root = Path(__file__).parent.parent.parent.parent
@@ -75,182 +82,72 @@ from src.predictor import (
     REALTIME_CONFIG,
     DEBUG_CONFIG
 )
-from src.utils.logging_utils import setup_logging
 
 
-def setup_arguments() -> argparse.ArgumentParser:
-    """コマンドライン引数設定"""
-    parser = argparse.ArgumentParser(
-        description="Tennis Ball Detection Inference System",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
-    )
-    
-    # === 入出力設定 ===
-    io_group = parser.add_argument_group('Input/Output Settings')
-    io_group.add_argument(
-        '--video', '-v', type=str, required=True,
-        help='入力動画ファイルパス'
-    )
-    io_group.add_argument(
-        '--output', '-o', type=str, required=True,
-        help='出力動画ファイルパス'
-    )
-    io_group.add_argument(
-        '--stats_output', type=str,
-        help='統計情報出力ファイルパス (JSON形式)'
-    )
-    
-    # === モデル設定 ===
-    model_group = parser.add_argument_group('Model Settings')
-    model_group.add_argument(
-        '--model_path', '-m', type=str, required=True,
-        help='モデルファイルパス (.ckpt または .pth)'
-    )
-    model_group.add_argument(
-        '--model_type', type=str, choices=['lite_tracknet', 'wasb_sbdt', 'auto'],
-        default='auto',
-        help='モデルタイプ (auto: 拡張子から自動判定)'
-    )
-    model_group.add_argument(
-        '--config_path', type=str,
-        help='モデル設定ファイルパス'
-    )
-    model_group.add_argument(
-        '--device', type=str, choices=['auto', 'cpu', 'cuda'],
-        default='auto',
-        help='実行デバイス (auto: GPU自動検出)'
-    )
-    
-    # === パイプライン設定 ===
-    pipeline_group = parser.add_argument_group('Pipeline Settings')
-    pipeline_group.add_argument(
-        '--config', type=str, 
-        choices=['high_performance', 'memory_efficient', 'realtime', 'debug'],
-        default='high_performance',
-        help='パイプライン設定プリセット'
-    )
-    pipeline_group.add_argument(
-        '--batch_size', type=int, default=8,
-        help='バッチサイズ'
-    )
-    pipeline_group.add_argument(
-        '--num_workers', type=int, default=4,
-        help='ワーカースレッド数'
-    )
-    pipeline_group.add_argument(
-        '--queue_size', type=int, default=100,
-        help='キューサイズ'
-    )
-    
-    # === 可視化設定 ===
-    vis_group = parser.add_argument_group('Visualization Settings')
-    vis_group.add_argument(
-        '--ball_radius', type=int, default=8,
-        help='ボール描画半径'
-    )
-    vis_group.add_argument(
-        '--trajectory_length', type=int, default=20,
-        help='軌跡表示フレーム数'
-    )
-    vis_group.add_argument(
-        '--enable_smoothing', action='store_true',
-        help='位置スムージング有効化'
-    )
-    vis_group.add_argument(
-        '--enable_prediction', action='store_true',
-        help='位置予測表示有効化'
-    )
-    vis_group.add_argument(
-        '--confidence_threshold', type=float, default=0.5,
-        help='信頼度閾値'
-    )
-    
-    # === システム設定 ===
-    sys_group = parser.add_argument_group('System Settings')
-    sys_group.add_argument(
-        '--log_level', type=str, 
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        default='INFO',
-        help='ログレベル'
-    )
-    sys_group.add_argument(
-        '--async_processing', action='store_true',
-        help='非同期処理モード'
-    )
-    sys_group.add_argument(
-        '--progress_interval', type=float, default=1.0,
-        help='進捗表示間隔（秒）'
-    )
-    
-    return parser
-
-
-def get_pipeline_config(config_name: str, args: argparse.Namespace) -> Dict[str, Any]:
+def get_pipeline_config(cfg: DictConfig) -> Dict[str, Any]:
     """パイプライン設定取得"""
     # ベース設定選択
-    if config_name == 'high_performance':
+    if cfg.pipeline.type == 'high_performance':
         base_config = HIGH_PERFORMANCE_CONFIG
-    elif config_name == 'memory_efficient':
+    elif cfg.pipeline.type == 'memory_efficient':
         base_config = MEMORY_EFFICIENT_CONFIG
-    elif config_name == 'realtime':
+    elif cfg.pipeline.type == 'realtime':
         base_config = REALTIME_CONFIG
-    elif config_name == 'debug':
+    elif cfg.pipeline.type == 'debug':
         base_config = DEBUG_CONFIG
     else:
-        raise ValueError(f"Unknown config: {config_name}")
+        raise ValueError(f"Unknown pipeline type: {cfg.pipeline.type}")
     
     # カスタマイズ適用
     config = base_config.copy()
-    if args.batch_size != 8:
-        config['batch_size'] = args.batch_size
-    if args.num_workers != 4:
-        config['num_workers'] = args.num_workers
-    if args.queue_size != 100:
-        config['queue_size'] = args.queue_size
+    config.update({
+        'batch_size': cfg.pipeline.batch_size,
+        'num_workers': cfg.pipeline.num_workers,
+        'queue_size': cfg.pipeline.queue_size,
+    })
         
     return config
 
 
-def get_detector_config(args: argparse.Namespace) -> Dict[str, Any]:
+def get_detector_config(cfg: DictConfig) -> Dict[str, Any]:
     """検出器設定取得"""
     # デバイス自動検出
-    if args.device == 'auto':
+    if cfg.model.device == 'auto':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
-        device = args.device
+        device = cfg.model.device
     
     # モデルタイプ自動判定
-    if args.model_type == 'auto':
-        if args.model_path.endswith('.ckpt'):
+    if cfg.model.type == 'auto':
+        if cfg.model.model_path.endswith('.ckpt'):
             model_type = 'lite_tracknet'
-        elif args.model_path.endswith('.pth'):
+        elif cfg.model.model_path.endswith('.pth'):
             model_type = 'wasb_sbdt'
         else:
-            raise ValueError(f"Cannot auto-detect model type from: {args.model_path}")
+            raise ValueError(f"Cannot auto-detect model type from: {cfg.model.model_path}")
     else:
-        model_type = args.model_type
+        model_type = cfg.model.type
     
     config = {
-        'model_path': args.model_path,
+        'model_path': cfg.model.model_path,
         'model_type': model_type,
         'device': device,
     }
     
-    if args.config_path:
-        config['config_path'] = args.config_path
+    if cfg.model.config_path:
+        config['config_path'] = cfg.model.config_path
         
     return config
 
 
-def get_visualization_config(args: argparse.Namespace) -> VisualizationConfig:
+def get_visualization_config(cfg: DictConfig) -> VisualizationConfig:
     """可視化設定取得"""
     return VisualizationConfig(
-        ball_radius=args.ball_radius,
-        trajectory_length=args.trajectory_length,
-        enable_smoothing=args.enable_smoothing,
-        enable_prediction=args.enable_prediction,
-        confidence_threshold=args.confidence_threshold
+        ball_radius=cfg.visualization.ball_radius,
+        trajectory_length=cfg.visualization.trajectory_length,
+        enable_smoothing=cfg.visualization.enable_smoothing,
+        enable_prediction=cfg.visualization.enable_prediction,
+        confidence_threshold=cfg.visualization.confidence_threshold
     )
 
 
@@ -313,37 +210,48 @@ def display_progress(result, progress_interval: float):
         time.sleep(progress_interval)
 
 
-def main():
+@hydra.main(version_base=None, config_path="../../configs/infer", config_name="inference")
+def main(cfg: DictConfig) -> None:
     """メインエントリポイント"""
-    # 引数解析
-    parser = setup_arguments()
-    args = parser.parse_args()
-    
     # ログ設定
-    setup_logging(level=args.log_level)
+    logging.basicConfig(
+        level=getattr(logging, cfg.system.log_level),
+        format='[%(levelname)s] %(message)s'
+    )
     logging.info("🎾 Tennis Ball Detection Inference System 開始")
     
     try:
-        # 入力検証
-        if not os.path.exists(args.video):
-            raise FileNotFoundError(f"入力動画が見つかりません: {args.video}")
+        # 設定検証
+        if not cfg.io.video:
+            raise ValueError("io.video は必須です")
+            
+        if not cfg.io.output:
+            raise ValueError("io.output は必須です")
+            
+        if not cfg.model.model_path:
+            raise ValueError("model.model_path は必須です")
         
-        if not os.path.exists(args.model_path):
-            raise FileNotFoundError(f"モデルファイルが見つかりません: {args.model_path}")
+        # 入力検証
+        if not os.path.exists(cfg.io.video):
+            raise FileNotFoundError(f"入力動画が見つかりません: {cfg.io.video}")
+        
+        if not os.path.exists(cfg.model.model_path):
+            raise FileNotFoundError(f"モデルファイルが見つかりません: {cfg.model.model_path}")
         
         # 出力ディレクトリ作成
-        os.makedirs(os.path.dirname(args.output), exist_ok=True)
+        os.makedirs(os.path.dirname(cfg.io.output), exist_ok=True)
         
         # 設定取得
-        pipeline_config = get_pipeline_config(args.config, args)
-        detector_config = get_detector_config(args)
-        vis_config = get_visualization_config(args)
+        pipeline_config = get_pipeline_config(cfg)
+        detector_config = get_detector_config(cfg)
+        vis_config = get_visualization_config(cfg)
         
-        logging.info(f"入力動画: {args.video}")
-        logging.info(f"出力動画: {args.output}")
-        logging.info(f"モデル: {detector_config['model_type']} ({args.model_path})")
+        logging.info(f"設定: {OmegaConf.to_yaml(cfg)}")
+        logging.info(f"入力動画: {cfg.io.video}")
+        logging.info(f"出力動画: {cfg.io.output}")
+        logging.info(f"モデル: {detector_config['model_type']} ({cfg.model.model_path})")
         logging.info(f"デバイス: {detector_config['device']}")
-        logging.info(f"パイプライン設定: {args.config}")
+        logging.info(f"パイプライン設定: {cfg.pipeline.type}")
         
         # パイプライン作成
         pipeline = VideoPipeline(pipeline_config)
@@ -351,27 +259,27 @@ def main():
         # 処理実行
         start_time = time.time()
         
-        if args.async_processing:
+        if cfg.system.async_processing:
             # 非同期処理
             logging.info("非同期処理モードで実行中...")
             result = pipeline.process_video_async(
-                video_path=args.video,
+                video_path=cfg.io.video,
                 detector_config=detector_config,
-                output_path=args.output,
+                output_path=cfg.io.output,
                 vis_config=vis_config
             )
             
             # 進捗表示
-            display_progress(result, args.progress_interval)
+            display_progress(result, cfg.system.progress_interval)
             final_result = result.get_result()
             
         else:
             # 同期処理
             logging.info("同期処理モードで実行中...")
             final_result = pipeline.process_video(
-                video_path=args.video,
+                video_path=cfg.io.video,
                 detector_config=detector_config,
-                output_path=args.output,
+                output_path=cfg.io.output,
                 vis_config=vis_config
             )
         
@@ -385,11 +293,11 @@ def main():
         logging.info(f"検出フレーム数: {sum(1 for det_list in final_result.get('detections', {}).values() if det_list)}")
         
         # 統計情報保存
-        if args.stats_output:
+        if cfg.io.stats_output:
             stats = calculate_statistics(final_result)
-            save_statistics(stats, args.stats_output)
+            save_statistics(stats, cfg.io.stats_output)
         
-        logging.info(f"出力動画: {args.output}")
+        logging.info(f"出力動画: {cfg.io.output}")
         
     except Exception as e:
         logging.error(f"エラーが発生しました: {e}")

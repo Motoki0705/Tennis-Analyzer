@@ -1,0 +1,35 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/batch/${now:%Y-%m-%d_%H-%M-%S}
+
+# デフォルト設定
+defaults:
+  - model: lite_tracknet
+  - pipeline: memory_efficient
+  - visualization: default
+  - system: default
+  - _self_
+
+# 入出力設定
+io:
+  input_dir: null  # 入力動画ディレクトリパス
+  input_list: null  # 入力動画リストファイル (1行1ファイル)
+  output_dir: null  # 出力ディレクトリパス (required)
+  report_path: null  # バッチ処理レポート出力パス (JSON形式)
+  file_patterns:
+    - "*.mp4"
+    - "*.avi" 
+    - "*.mov"
+
+# バッチ処理設定
+batch:
+  parallel_jobs: 1  # 並列処理ジョブ数
+  continue_on_error: false  # エラー発生時も他ファイル処理を続行
+  overwrite: false  # 既存出力ファイルを上書き
+
+# 実験名の設定
+version: batch_process_${model.type}_${pipeline.type}_${now:%Y%m%d_%H%M%S} 
