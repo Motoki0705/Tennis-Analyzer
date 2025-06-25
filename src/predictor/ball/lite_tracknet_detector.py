@@ -18,6 +18,39 @@ from ..base.detector import BaseBallDetector
 logger = logging.getLogger(__name__)
 
 
+def extract_tensor_from_output(model_output: Any, model_name: str = "model") -> torch.Tensor:
+    """Extract tensor from model output (handles both tensor and dict outputs).
+    
+    Args:
+        model_output: Model output (tensor or dict)
+        model_name: Name of the model for error messages
+        
+    Returns:
+        torch.Tensor: Extracted tensor
+        
+    Raises:
+        ValueError: If no tensor found in output
+    """
+    if isinstance(model_output, torch.Tensor):
+        return model_output
+    
+    if isinstance(model_output, dict):
+        # Try common keys for main output
+        main_keys = ['logits', 'predictions', 'output', 'out', 'heatmap', 'pred']
+        for key in main_keys:
+            if key in model_output:
+                return model_output[key]
+        
+        # Fallback: use first available tensor
+        for key, value in model_output.items():
+            if hasattr(value, 'cpu'):  # Check if it's a tensor
+                return value
+        
+        raise ValueError(f"No tensor found in {model_name} output dictionary with keys: {list(model_output.keys())}")
+    
+    raise ValueError(f"Unsupported {model_name} output type: {type(model_output)}")
+
+
 class LiteTrackNetDetector(BaseBallDetector):
     """LiteTrackNet-based ball detector with integrated WASB-SBDT tracking.
     
@@ -191,6 +224,10 @@ class LiteTrackNetDetector(BaseBallDetector):
                 
                 # Forward pass
                 heatmap_pred = self.model(batch_tensor)
+                
+                # Extract tensor from output (handles dict and tensor outputs)
+                heatmap_pred = extract_tensor_from_output(heatmap_pred, "LiteTrackNet")
+                
                 heatmap_prob = torch.sigmoid(heatmap_pred).squeeze().cpu().numpy()
                 
                 inference_results.append((heatmap_prob, metadata))

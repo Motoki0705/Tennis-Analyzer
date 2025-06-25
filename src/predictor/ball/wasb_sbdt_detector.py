@@ -16,6 +16,39 @@ from ..base.detector import BaseBallDetector
 logger = logging.getLogger(__name__)
 
 
+def extract_tensor_from_output(model_output: Any, model_name: str = "model") -> torch.Tensor:
+    """Extract tensor from model output (handles both tensor and dict outputs).
+    
+    Args:
+        model_output: Model output (tensor or dict)
+        model_name: Name of the model for error messages
+        
+    Returns:
+        torch.Tensor: Extracted tensor
+        
+    Raises:
+        ValueError: If no tensor found in output
+    """
+    if isinstance(model_output, torch.Tensor):
+        return model_output
+    
+    if isinstance(model_output, dict):
+        # Try common keys for main output
+        main_keys = ['logits', 'predictions', 'output', 'out', 'heatmap', 'pred']
+        for key in main_keys:
+            if key in model_output:
+                return model_output[key]
+        
+        # Fallback: use first available tensor
+        for key, value in model_output.items():
+            if hasattr(value, 'cpu'):  # Check if it's a tensor
+                return value
+        
+        raise ValueError(f"No tensor found in {model_name} output dictionary with keys: {list(model_output.keys())}")
+    
+    raise ValueError(f"Unsupported {model_name} output type: {type(model_output)}")
+
+
 class WASBSBDTDetector(BaseBallDetector):
     """HRNet-based WASB-SBDT ball detector using third-party models.
     
@@ -81,6 +114,10 @@ class WASBSBDTDetector(BaseBallDetector):
                 model_path=self.model_path, 
                 device=str(self.device)
             )
+            
+            # Ensure model is on correct device (redundant but safe)
+            self.model = self.model.to(self.device)
+            self.model.eval()
             
             # Set frames input/output (HRNet model uses 3 frames in, 3 frames out)
             if hasattr(self.config, 'model'):
@@ -211,6 +248,9 @@ class WASBSBDTDetector(BaseBallDetector):
             for frame_tensor_batch, metadata in model_inputs:
                 # Model inference: [B, 3*C, H, W] -> [B, 3, H, W]
                 heatmap_output = self.model(frame_tensor_batch)
+                
+                # Extract tensor from output (handles dict and tensor outputs)
+                heatmap_output = extract_tensor_from_output(heatmap_output, "WASB-SBDT")
                 
                 # Convert to numpy for postprocessing
                 heatmap_np = heatmap_output.cpu().numpy()

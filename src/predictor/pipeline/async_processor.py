@@ -347,7 +347,10 @@ class AsyncVideoProcessor:
             self.processing_stats['total_inference_time'] += inference_time
             
         except Exception as e:
-            logger.error(f"Batch inference error: {e}")
+            import traceback
+            error_msg = str(e) if str(e) else "Unknown error"
+            logger.error(f"Batch inference error: {error_msg}")
+            logger.error(f"Batch inference traceback: {traceback.format_exc()}")
             self._handle_thread_error()
     
     def _postprocessing_worker(self, worker_id: int):
@@ -398,7 +401,19 @@ class AsyncVideoProcessor:
                         break
                     
                     metadata, detections = render_data
-                    frame_number = metadata['frame_number']
+                    
+                    # Handle missing frame_number key (extract from frame_id if needed)
+                    frame_number = metadata.get('frame_number')
+                    if frame_number is None:
+                        # Extract from frame_id if frame_number not available
+                        frame_id = metadata.get('frame_id', '')
+                        if frame_id.startswith('frame_'):
+                            try:
+                                frame_number = int(frame_id.replace('frame_', '').lstrip('0') or '0')
+                            except ValueError:
+                                frame_number = 0
+                        else:
+                            frame_number = 0
                     
                     # Cache frame if out of order
                     frame_cache[frame_number] = (metadata, detections)
@@ -541,7 +556,19 @@ class AsyncVideoProcessor:
                         break
                     
                     metadata, detections = render_data
-                    frame_number = metadata['frame_number']
+                    
+                    # Handle missing frame_number key (extract from frame_id if needed)
+                    frame_number = metadata.get('frame_number')
+                    if frame_number is None:
+                        # Extract from frame_id if frame_number not available
+                        frame_id = metadata.get('frame_id', '')
+                        if frame_id.startswith('frame_'):
+                            try:
+                                frame_number = int(frame_id.replace('frame_', '').lstrip('0') or '0')
+                            except ValueError:
+                                frame_number = 0
+                        else:
+                            frame_number = 0
                     
                     # Cache frame if out of order
                     frame_cache[frame_number] = (metadata, detections)
