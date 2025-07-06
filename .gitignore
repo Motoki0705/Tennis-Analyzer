@@ -198,3 +198,22 @@ all_code/
 
 # hydra output
 hydra_outputs/
+
+# model weights
+*.tar
+*.pth
+*.pt         # PyTorchの別の拡張子
+*.bin        # Hugging Faceなどで使われるバイナリ形式
+*.safetensors # 安全で高速なモデル保存形式
+*.h5         # TensorFlow/Keras
+*.ckpt       # チェックポイントファイル
+
+# Large data files
+*.zip
+*.csv
+*.tsv
+*.gz
+
+# Python cache
+__pycache__/
+*.pyc
