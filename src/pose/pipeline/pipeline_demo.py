@@ -281,12 +281,12 @@ class MultithreadedPosePipeline:
 def main():
     parser = argparse.ArgumentParser(description="Multithreaded Player Detection and Pose Estimation Pipeline")
     parser.add_argument("--video", required=True, help="Path to input video")
-    parser.add_argument("--player_checkpoint", required=True, help="Path to player detector checkpoint (.ckpt)")
+    parser.add_argument("--player_checkpoint",default="checkpoints/best_model.ckpt" , help="Path to player detector checkpoint (.ckpt)")
     parser.add_argument("--output", default="demo_output_pose.mp4", help="Path to output video")
     parser.add_argument("--results_csv", default="pose_results.csv", help="Path to output CSV for results")
     parser.add_argument("--device", default="cuda", choices=["cuda", "cpu"], help="Device to use")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for player detection")
-    parser.add_argument("--player_threshold", type=float, default=0.5, help="Confidence threshold for player detection")
+    parser.add_argument("--player_threshold", type=float, default=0.7, help="Confidence threshold for player detection")
     parser.add_argument("--pose_keypoint_threshold", type=float, default=0.3, help="Confidence threshold for pose keypoint visibility")
     args = parser.parse_args()
 
