@@ -2,14 +2,14 @@
 _target_: src.player.lit_datamodule.coco_datamodule.CocoDataModule
 
 # データパス
-img_folder: "datasets/player/images"
-annotation_file: "datasets/player/annotations/player_annotations.json"
+img_folder: "datasets/ball/images"
+annotation_file: "datasets/ball/coco_annotations_ball_pose_court.json"
 cat_id_map: {2: 0}  # プレーヤーカテゴリIDをマッピング
 use_original_path: true
 
 # データローダー設定
-batch_size: 4
-num_workers: 4
+batch_size: 32
+num_workers: 8
 
 # 画像プロセッサ
 processor:

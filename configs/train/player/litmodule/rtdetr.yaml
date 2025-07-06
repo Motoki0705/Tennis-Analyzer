@@ -1,4 +1,3 @@
-# @package _global_.litmodule
 
 module:
   _target_: src.player.lit_module.lit_rtdetr.LitRtdetr

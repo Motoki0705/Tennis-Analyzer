@@ -1,0 +1,6 @@
+# @package system
+
+# システム設定
+log_level: DEBUG  # ログレベル (DEBUG, INFO, WARNING, ERROR)
+progress_interval: 1.0  # 進捗表示間隔（秒）
+async_processing: false  # 非同期処理モード 
