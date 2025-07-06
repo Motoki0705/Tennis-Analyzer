@@ -285,12 +285,12 @@ class MultithreadedCourtDetector:
 def main():
     parser = argparse.ArgumentParser(description="Multithreaded Court Keypoint Detection Pipeline")
     parser.add_argument("--video", required=True, help="Path to the input video")
-    parser.add_argument("--checkpoint_path", required=True, help="Path to the trained model checkpoint (.ckpt)")
+    parser.add_argument("--checkpoint_path", default="checkpoints/best_model.ckpt", help="Path to the trained model checkpoint (.ckpt)")
     parser.add_argument("--output", default="demo_output_court.mp4", help="Output video file with keypoints")
     parser.add_argument("--results_csv", default="court_keypoints.csv", help="Output CSV file for keypoint data")
     parser.add_argument("--device", default="auto", choices=["cuda", "cpu", "auto"], help="Device to use (cuda/cpu/auto)")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for inference")
-    parser.add_argument("--score_threshold", type=float, default=0.3, help="Minimum score to visualize a keypoint")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for inference")
+    parser.add_argument("--score_threshold", type=float, default=0.5, help="Minimum score to visualize a keypoint")
     args = parser.parse_args()
 
     try:

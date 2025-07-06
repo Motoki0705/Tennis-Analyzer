@@ -102,7 +102,7 @@ class CourtDataset(Dataset):
             )
             for i, (x, y, v) in enumerate(scaled_keypoints):
                 if v > 0:
-                    self.draw_each_gaussian(
+                    draw_gaussian(
                         heatmaps[i], (x.item(), y.item()), sigma=self.sigma
                     )
             return arged_image, heatmaps
@@ -111,7 +111,7 @@ class CourtDataset(Dataset):
             heatmap = torch.zeros((1, *self.heatmap_size), dtype=torch.float32)
             for i, (x, y, v) in enumerate(scaled_keypoints):
                 if v > 0:
-                    self.draw_each_gaussian(
+                    draw_gaussian(
                         heatmap[0], (x.item(), y.item()), sigma=self.sigma
                     )
             return arged_image, heatmap
@@ -180,16 +180,6 @@ class CourtDataset(Dataset):
         scaled_keypoints[:, 1] *= scale_y
 
         return scaled_keypoints
-
-    def draw_each_gaussian(self, heatmap, center, sigma=2):
-        """Draw a 2D Gaussian on the heatmap centered at the given point.
-
-        Parameters:
-            heatmap (torch.Tensor): The target heatmap (H x W)
-            center (Tuple[float, float]): Center of the Gaussian
-            sigma (float): Standard deviation of the Gaussian
-        """
-        return draw_gaussian(heatmap, center, sigma)
 
 
 if __name__ == "__main__":

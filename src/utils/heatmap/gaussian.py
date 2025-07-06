@@ -134,7 +134,7 @@ def generate_gaussian_heatmap(
     return torch.from_numpy(heatmap).unsqueeze(0)
 
 
-def draw_gaussian(heatmap, center, sigma=2):
+def draw_gaussian(heatmap, center, sigma=3.0):
     """
     ヒートマップにガウシアン分布を描画します（PyTorch版）
 

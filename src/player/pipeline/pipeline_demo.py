@@ -257,12 +257,12 @@ class MultithreadedPlayerDetector:
 def main():
     parser = argparse.ArgumentParser(description="Multithreaded Player Detection Pipeline")
     parser.add_argument("--video", required=True, help="Path to the input video")
-    parser.add_argument("--checkpoint_path", required=True, help="Path to the trained model checkpoint (.ckpt)")
+    parser.add_argument("--checkpoint_path", default="checkpoints/best_model.ckpt", help="Path to the trained model checkpoint (.ckpt)")
     parser.add_argument("--output", default="demo_output_player.mp4", help="Output video file with detections")
     parser.add_argument("--results_csv", default="player_detections.csv", help="Output CSV file for detection data")
     parser.add_argument("--device", default="auto", choices=["cuda", "cpu", "auto"], help="Device to use (cuda/cpu/auto)")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for inference")
-    parser.add_argument("--score_threshold", type=float, default=0.5, help="Minimum score to visualize a detection")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for inference")
+    parser.add_argument("--score_threshold", type=float, default=0.7, help="Minimum score to visualize a detection")
     args = parser.parse_args()
 
     try:
