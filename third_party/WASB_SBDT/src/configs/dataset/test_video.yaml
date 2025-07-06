@@ -1,0 +1,30 @@
+# soccer形式を参考にした、単一動画解析用の設定ファイル
+
+# データセットの種類を 'soccer' に指定
+# これにより extract_frame_soccer のロジックが使われる
+name: tennis
+
+# データが格納されているルートディレクトリのパス
+root_dir: ../data/tennis
+
+# 動画ファイルが格納されているディレクトリ名
+video_dirname: "videos"
+
+# 抽出したフレームを保存するディレクトリ名
+frame_dirname: "frames"
+
+# 動画ファイルの拡張子
+video_ext: ".mp4"
+
+# 生成されるフレーム画像の拡張子
+img_ext: ".png"
+
+# 学習用データ（今回は使わないので空リストにする）
+train:
+  videos: []
+
+# テスト用データ
+test:
+  # 解析したい動画のファイル名（拡張子なし）のリスト
+  videos:
+    - "test_video"
