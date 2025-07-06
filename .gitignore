@@ -130,6 +130,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv_*/
 env/
 venv/
 ENV/
@@ -198,3 +199,192 @@ all_code/
 
 # hydra output
 hydra_outputs/
+
+.tmp.driveupload/
+
+# =============================================================================
+# ML/AI プロジェクト特有のファイル・ディレクトリ
+# =============================================================================
+
+# PyTorch Lightning ログ
+lightning_logs/
+wandb/
+mlruns/
+
+# TensorBoard ログ
+runs/
+tensorboard_logs/
+
+# モデルファイル
+*.pth
+*.ckpt
+*.pt
+*.model
+*.pkl
+*.joblib
+
+# ONNX モデル
+*.onnx
+
+# 学習済みモデルのキャッシュ
+.cache/
+*.cache
+
+# =============================================================================
+# データセット・メディアファイル関連
+# =============================================================================
+
+# 大容量メディアファイル
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.m4v
+
+# ただし、samplesディレクトリ内のファイルは例外
+!samples/**
+
+# 画像ファイル（サンプル以外）
+# ※必要に応じてコメントアウト
+# *.jpg
+# *.jpeg
+# *.png
+# *.gif
+# *.bmp
+# *.tiff
+# *.webp
+
+# 音声ファイル
+*.wav
+*.mp3
+*.aac
+*.flac
+*.ogg
+*.m4a
+
+# アーカイブファイル
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.tar.bz2
+*.7z
+
+# ダウンロード関連
+downloads/
+downloaded_*/
+download_cache/
+downloaded_urls.txt
+*_urls.txt
+
+# =============================================================================
+# Node.js / フロントエンド関連
+# =============================================================================
+
+# 依存関係
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# パッケージロックファイル (プロジェクトによって要検討)
+package-lock.json
+yarn.lock
+
+# ビルド出力
+build/
+dist/
+out/
+
+# Next.js
+.next/
+
+# =============================================================================
+# エディタ・IDE関連
+# =============================================================================
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/tasks.json
+!.vscode/settings.json.example
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# =============================================================================
+# OS関連
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.nfs*
+
+# =============================================================================
+# 一時ファイル・テストファイル
+# =============================================================================
+
+# 一時ファイル
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.#*
+
+# テスト出力
+test_output/
+test_results/
+coverage_html/
+
+# ドキュメント一時ファイル
+*.md.bak
+*.md~
+
+# =============================================================================
+# プロジェクト固有の除外パターン
+# =============================================================================
+
+# 一時的なテストファイル
+test_*.md
+*_test.md
+
+# ball_tracker (外部ライブラリまたは一時的なコード)
+# ball_tracker/
+
+# アノテーション関連の一時ファイル
+**/annotation/data/temp/
+**/annotation/temp/
+
+# フロントエンドのビルド成果物
+**/frontend/build/
+**/frontend/dist/
+**/frontend/public/index.html
+
+# 動的生成されるファイル
+generated_*
+auto_generated_*
