@@ -24,6 +24,14 @@ PEAK_SUPPRESSION_RADIUS = 10
 model = None
 
 try:
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=torch.device("cpu"))
+    print("--- Top-level keys in the checkpoint ---")
+    print(checkpoint.keys())
+    print("-" * 40)
+except FileNotFoundError:
+    print(f"Error: Checkpoint file not found at '{CHECKPOINT_PATH}'")
+
+try:
     # --- 新しいモデルロード方式 ---
     # 1. モデルの「骨格」を先に作成
     # コートモデルの入力チャンネルは3 (RGB)
