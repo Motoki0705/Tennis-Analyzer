@@ -1,5 +1,0 @@
-_target_: src.court.models.lite_tracknet.LiteTrackNet
-in_channels: 3
-out_channels: 15
-
-ckpt_path: checkpoints/court/lite_tracknet/court-epoch=07-val_loss=0.000247.ckpt

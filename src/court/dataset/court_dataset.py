@@ -21,7 +21,7 @@ class CourtDataset(Dataset):
         heatmap_size=(360, 640),
         default_num_keypoints=15,
         transform=None,
-        sigma=2,
+        sigma=3,
         is_each_keypoint=True,
     ):
         self.input_size = input_size

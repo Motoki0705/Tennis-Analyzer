@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from transformers import RTDetrForObjectDetection
-
+import transformers
 
 class LitRtdetr(pl.LightningModule):
     """

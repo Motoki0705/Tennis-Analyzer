@@ -1,0 +1,7 @@
+# @package pipeline
+
+# パイプライン設定
+type: memory_efficient
+batch_size: 4
+num_workers: 2
+queue_size: 50 

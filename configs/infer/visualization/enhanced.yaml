@@ -1,0 +1,8 @@
+# @package visualization
+
+# 可視化設定
+ball_radius: 12  # ボール描画半径
+trajectory_length: 30  # 軌跡表示フレーム数
+enable_smoothing: true  # 位置スムージング有効化
+enable_prediction: true  # 位置予測表示有効化
+confidence_threshold: 0.3  # 信頼度閾値 
