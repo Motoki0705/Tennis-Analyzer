@@ -1,22 +1,24 @@
 # @package _global_.litmodule
 
 module:
-  _target_: src.court.lit_module.lit_lite_tracknet_focal.LitLiteTracknetFocal
+  _target_: src.court.lit_module.lit_swin_unet.LitSwinUNet
   
   # モデル構成パラメータ
   in_channels: 3
-  out_channels: 1
+  out_channels: 15
   
   # 学習パラメータ
   lr: 0.0001
+  lr_finetune: 0.00001
   weight_decay: 0.0001
   warmup_epochs: 1
   max_epochs: 50
-  
+  unfreeze_epoch: 10
+
   # Focal Loss パラメータ
   focal_alpha: 1.0
   focal_gamma: 2.0
-
+   
   # 距離の閾値（ピクセル単位）
   accuracy_threshold: 5
 
@@ -25,5 +27,5 @@ module:
 
 # メタ情報
 meta:
-  name: lite_tracknet
+  name: swin_unet
   output_type: "heatmap" 

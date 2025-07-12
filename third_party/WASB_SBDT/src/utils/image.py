@@ -78,6 +78,7 @@ def affine_transform(pt, t):
     if not ( isinstance(pt, np.ndarray) and pt.shape==(2,) ):
         raise RuntimeError('pt must be np.ndarray and pt.shape=(2,)')
     #print(t, t.shape)
+    t = t[0]
     if not ( isinstance(t, np.ndarray) and t.shape==(2,3) ):
         raise RuntimeError('t must be np.ndarray and t.shape=(2,3)')
     new_pt = np.array([pt[0], pt[1], 1.], dtype=np.float32).T

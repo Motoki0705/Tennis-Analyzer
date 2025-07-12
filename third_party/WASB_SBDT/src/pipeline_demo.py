@@ -16,21 +16,13 @@ import time
 # WASB-SBDT modules
 from . import load_default_config
 from .trackers import build_tracker
-from .pipeline_modules import FramePreprocessor, BallDetector, DetectionPostprocessor
+from .pipeline_modules import BallPreprocessor, BallDetector, DetectionPostprocessor
+from .drawing_utils import draw_on_frame
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-def draw_on_frame(frame, tracking_output):
-    """フレームにトラッキング結果（ボールの位置とスコア）を描画するヘルパー関数"""
-    if tracking_output.get("visi", False) and tracking_output.get("score", 0) > 0.1:
-        px, py = int(tracking_output["x"]), int(tracking_output["y"])
-        cv2.circle(frame, (px, py), 8, (0, 0, 255), -1)  # 赤い円
-        cv2.circle(frame, (px, py), 3, (255, 255, 255), -1)  # 中央の白い点
-        score_text = f"Score: {tracking_output['score']:.2f}"
-        cv2.putText(frame, score_text, (px + 15, py - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-    return frame
 
 class MultithreadedTennisTracker:
     """
@@ -75,7 +67,7 @@ class MultithreadedTennisTracker:
 
     def _initialize_pipeline_modules(self):
         """各種処理モジュールを初期化する"""
-        self.preprocessor = FramePreprocessor(self.cfg)
+        self.preprocessor = BallPreprocessor(self.cfg)
         self.detector = BallDetector(self.cfg, self.device)
         self.postprocessor = DetectionPostprocessor(self.cfg)
         self.tracker = build_tracker(self.cfg)
@@ -263,7 +255,6 @@ class MultithreadedTennisTracker:
         thread2.join()
         
         # ワーカーが終了したら、メインスレッドも終了
-        self.is_running.clear()
         thread3.join()
 
         log.info("All workers have finished.")
@@ -282,7 +273,7 @@ def main():
     parser.add_argument("--video", required=True, help="Path to the input video")
     parser.add_argument("--output", default="demo_output_multithread.mp4", help="Output video file")
     parser.add_argument("--results_csv", default="tracking_results.csv", help="Output CSV file for tracking results")
-    parser.add_argument("--model_path", default=None, help="Path to a trained model (.pth.tar or .pth)")
+    parser.add_argument("--model_path", default="/content/drive/MyDrive/ColabNotebooks/TennisAnalyzer/third_party/WASB_SBDT/pretrained_weights/wasb_tennis_best.pth.tar", help="Path to a trained model (.pth.tar or .pth)")
     parser.add_argument("--device", default="auto", help="Device to use (cuda/cpu/auto)")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size for processing frame sequences")
     args = parser.parse_args()

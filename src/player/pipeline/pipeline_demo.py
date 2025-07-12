@@ -14,13 +14,8 @@ import time
 from typing import List, Dict, Any
 
 # プレイヤー検出用モジュールをインポート
-# pipeline_module_player.py が同じディレクトリか、Pythonのパスが通った場所にあることを想定
-try:
-    from pipeline_module_player import PlayerPreprocessor, PlayerDetector, PlayerPostprocessor
-except ImportError:
-    print("Error: pipeline_module_player.py not found.")
-    print("Please make sure it is in the same directory or in the Python path.")
-    exit(1)
+from pipeline_module import PlayerPreprocessor, PlayerDetector, PlayerPostprocessor
+
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
