@@ -1,7 +1,0 @@
-# @package pipeline
-
-# パイプライン設定
-type: realtime
-batch_size: 1
-num_workers: 1
-queue_size: 10 

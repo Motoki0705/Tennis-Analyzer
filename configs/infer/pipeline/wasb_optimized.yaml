@@ -1,7 +1,0 @@
-# @package pipeline
-
-# WASB-SBDT最適化パイプライン設定
-type: wasb_optimized
-batch_size: 2        # HRNetは重いモデルなので小さめ
-num_workers: 2       # GPUボトルネック考慮
-queue_size: 20       # メモリ使用量を抑制

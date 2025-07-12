@@ -1,6 +1,7 @@
 # pipeline_demo_pose.py
 
-import argparse
+import hydra
+from omegaconf import DictConfig
 import os
 import cv2
 import torch
@@ -26,8 +27,8 @@ log = logging.getLogger(__name__)
 
 class MultithreadedPosePipeline:
     """マルチスレッドでプレイヤー検出と姿勢推定を実行するパイプライン"""
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
         self._initialize_device()
         self._initialize_pipeline_modules()
 
@@ -35,8 +36,9 @@ class MultithreadedPosePipeline:
         self.video_properties: Dict[str, Any] = {}
         
         # スレッド間通信用のキュー
-        self.preprocess_queue = queue.Queue(maxsize=args.batch_size * 2)
-        self.inference_queue = queue.Queue(maxsize=args.batch_size * 2)
+        queue_size = cfg.threading.queue_size_multiplier * cfg.batch_size
+        self.preprocess_queue = queue.Queue(maxsize=queue_size)
+        self.inference_queue = queue.Queue(maxsize=queue_size)
         
         self.all_results_for_csv: List[Dict] = []
         self.is_running = threading.Event()
@@ -44,24 +46,27 @@ class MultithreadedPosePipeline:
         self.timings = {'io_preprocess': [], 'inference_pipeline': [], 'postprocess_write': []}
 
     def _initialize_device(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() and self.args.device == "cuda" else "cpu")
+        if self.cfg.device == "cuda":
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(self.cfg.device)
         log.info(f"Using device: {self.device}")
 
     def _initialize_pipeline_modules(self):
         log.info("Initializing pipeline modules...")
         # Stage 1: Player Detection
         self.player_preprocessor = PlayerPreprocessor()
-        self.player_detector = PlayerDetector(self.args.player_checkpoint, self.device)
-        self.player_postprocessor = PlayerPostprocessor(self.args.player_threshold)
+        self.player_detector = PlayerDetector(self.cfg.player.checkpoint_path, self.device)
+        self.player_postprocessor = PlayerPostprocessor(self.cfg.player.threshold)
         # Stage 2: Pose Estimation
         self.pose_preprocessor = PosePreprocessor()
-        self.pose_estimator = PoseEstimator(self.device)
+        self.pose_estimator = PoseEstimator(self.device, model_name=self.cfg.pose.model_name)
         self.pose_postprocessor = PosePostprocessor()
         log.info("Pipeline modules initialized.")
 
     def _initialize_video_io(self):
-        cap = cv2.VideoCapture(self.args.video)
-        if not cap.isOpened(): raise RuntimeError(f"Cannot open video: {self.args.video}")
+        cap = cv2.VideoCapture(self.cfg.io.video)
+        if not cap.isOpened(): raise RuntimeError(f"Cannot open video: {self.cfg.io.video}")
         self.video_properties = {
             'fps': cap.get(cv2.CAP_PROP_FPS),
             'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -72,13 +77,13 @@ class MultithreadedPosePipeline:
         log.info(f"Video: {self.video_properties['width']}x{self.video_properties['height']}, "
                  f"{self.video_properties['fps']:.2f}fps, {self.video_properties['total_frames']} frames")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.args.output, fourcc, self.video_properties['fps'],
+        self.video_writer = cv2.VideoWriter(self.cfg.io.output, fourcc, self.video_properties['fps'],
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def _worker_io_preprocess(self):
         """Worker 1: 動画読み込み & Player検出の前処理"""
         log.info("Worker 1 (I/O & Player Preprocess) started.")
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         frames_batch, frame_indices = [], []
         total_frames = self.video_properties['total_frames']
 
@@ -89,7 +94,7 @@ class MultithreadedPosePipeline:
             frames_batch.append(frame)
             frame_indices.append(frame_idx)
 
-            if len(frames_batch) == self.args.batch_size or (frame_idx == total_frames - 1 and frames_batch):
+            if len(frames_batch) == self.cfg.batch_size or (frame_idx == total_frames - 1 and frames_batch):
                 start_time = time.perf_counter()
                 player_inputs, player_meta = self.player_preprocessor.process_batch(frames_batch)
                 self.preprocess_queue.put((player_inputs, player_meta, frames_batch, frame_indices))
@@ -155,7 +160,10 @@ class MultithreadedPosePipeline:
                 pose_results = pose_results_batch[i]
                 
                 # 描画
-                output_frame = draw_results_on_frame(frame, player_detections, pose_results, self.args)
+                if self.cfg.visualization.enabled:
+                    output_frame = draw_results_on_frame(frame, player_detections, pose_results, self.cfg)
+                else:
+                    output_frame = frame
                 self.video_writer.write(output_frame)
                 
                 # CSV用データ保存
@@ -173,7 +181,7 @@ class MultithreadedPosePipeline:
 
     def _save_results_as_csv(self):
         """検出結果と姿勢推定結果をCSVファイルに保存する"""
-        log.info(f"Saving results to {self.args.results_csv}...")
+        log.info(f"Saving results to {self.cfg.io.results_csv}...")
         
         # ヘッダー作成 (keypoint 0-16)
         header = ['frame', 'person_id', 'bbox_score', 'bbox_x_min', 'bbox_y_min', 'bbox_x_max', 'bbox_y_max']
@@ -181,7 +189,7 @@ class MultithreadedPosePipeline:
             header.extend([f'kp_{i}_x', f'kp_{i}_y', f'kp_{i}_score'])
         
         try:
-            with open(self.args.results_csv, 'w', newline='') as f:
+            with open(self.cfg.io.results_csv, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=header)
                 writer.writeheader()
                 
@@ -236,22 +244,22 @@ class MultithreadedPosePipeline:
         self._report_timings()
         
         if self.video_writer: self.video_writer.release()
-        log.info(f"Output video saved to: {self.args.output}")
+        log.info(f"Output video saved to: {self.cfg.io.output}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Multithreaded Player Detection and Pose Estimation Pipeline")
-    parser.add_argument("--video", required=True, help="Path to input video")
-    parser.add_argument("--player_checkpoint",default="checkpoints/best_model.ckpt" , help="Path to player detector checkpoint (.ckpt)")
-    parser.add_argument("--output", default="demo_output_pose.mp4", help="Path to output video")
-    parser.add_argument("--results_csv", default="pose_results.csv", help="Path to output CSV for results")
-    parser.add_argument("--device", default="cuda", choices=["cuda", "cpu"], help="Device to use")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for player detection")
-    parser.add_argument("--player_threshold", type=float, default=0.7, help="Confidence threshold for player detection")
-    parser.add_argument("--pose_keypoint_threshold", type=float, default=0.3, help="Confidence threshold for pose keypoint visibility")
-    args = parser.parse_args()
-
+@hydra.main(config_path="../../../configs/infer/pose", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Validate required config
+    if cfg.io.video is None:
+        raise ValueError("Video path is required. Please set io.video in config or via command line.")
+    
+    # Set up logging from config
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level.upper()),
+        format=cfg.logging.format
+    )
+    
     try:
-        pipeline = MultithreadedPosePipeline(args)
+        pipeline = MultithreadedPosePipeline(cfg)
         pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during pipeline execution: {e}", exc_info=True)
