@@ -1,0 +1,54 @@
+# @package _global_
+
+# Hydra configuration for ball tracking pipeline demo
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/ball/pipeline_demo/${now:%Y-%m-%d_%H-%M-%S}
+
+# Default configuration
+defaults:
+  - _self_
+
+# Task identifier
+task: ball
+
+# Input/Output settings
+io:
+  video: null  # Path to the input video (required)
+  output: "demo_output_ball.mp4"  # Output video file
+  results_csv: "ball_tracking_results.csv"  # Output CSV file for tracking results
+  
+# Device configuration
+device: auto  # Device to use: cuda, cpu, auto
+
+# Processing configuration
+batch_size: 8  # Batch size for processing
+
+# Ball model configuration
+ball:
+  model_path: "checkpoints/ball/wasb_tennis_best.pth.tar"  # Path to ball detector model (.pth.tar or .pth)
+  score_threshold: 0.5  # Minimum score threshold for ball detection
+  
+# Tracker configuration
+tracker:
+  max_displacement: 100  # Maximum displacement for tracking between frames
+  
+# Visualization settings
+visualization:
+  enabled: true
+  draw_trajectory: true
+  show_score: true
+  circle_radius: 8
+  colors:
+    ball: [0, 0, 255]  # Red for ball
+    trajectory: [255, 255, 0]  # Yellow for trajectory
+
+# Processing limits (for demo purposes)
+processing:
+  max_frames: null  # Maximum number of frames to process (null for all frames)
+  
+# Logging configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(levelname)s - %(message)s"

@@ -1,7 +1,0 @@
-# @package model
-
-# モデル設定
-type: lite_tracknet
-model_path: null  # モデルファイルパス (.ckpt または .pth) - required
-config_path: null  # モデル設定ファイルパス
-device: auto  # 実行デバイス (auto: GPU自動検出) 

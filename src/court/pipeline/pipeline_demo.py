@@ -1,4 +1,5 @@
-import argparse
+import hydra
+from omegaconf import DictConfig
 import os
 import cv2
 import torch
@@ -22,37 +23,40 @@ class MultithreadedCourtDetector:
     """
     マルチスレッドパイプラインでテニスコートのキーポイントを検出するクラス。
     """
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
         self._initialize_device()
         self._initialize_pipeline_modules()
         self.video_writer = None
         self.video_properties: Dict[str, Any] = {}
-        self.preprocess_queue: queue.Queue = queue.Queue(maxsize=args.batch_size * 2)
-        self.inference_queue: queue.Queue = queue.Queue(maxsize=args.batch_size * 2)
+        queue_size = cfg.threading.queue_size_multiplier * cfg.batch_size
+        self.preprocess_queue: queue.Queue = queue.Queue(maxsize=queue_size)
+        self.inference_queue: queue.Queue = queue.Queue(maxsize=queue_size)
         self.all_keypoint_results: List[Dict[str, np.ndarray]] = []
         self.is_running = threading.Event()
         self.timings: Dict[str, List[float]] = {k: [] for k in ['io_preprocess', 'inference', 'postprocess_write']}
 
     def _initialize_device(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() and self.args.device == "cuda" else "cpu")
+        if self.cfg.device == "cuda":
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(self.cfg.device)
         log.info(f"Using device: {self.device}")
 
     def _initialize_pipeline_modules(self):
         log.info("Initializing pipeline modules...")
-        # コマンドライン引数から入力サイズを取得
-        input_size = tuple(self.args.input_size)
+        input_size = tuple(self.cfg.court.input_size)
         self.preprocessor = CourtPreprocessor(input_size=input_size)
-        self.detector = CourtDetector(self.args.checkpoint_path, self.device)
+        self.detector = CourtDetector(self.cfg.court.checkpoint_path, self.device)
         self.postprocessor = CourtPostprocessor(
-            multi_channel=self.args.multi_channel,
+            multi_channel=self.cfg.court.multi_channel,
         )
         log.info("Pipeline modules initialized.")
 
     def _initialize_video_io(self):
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {self.args.video}")
+            raise RuntimeError(f"Cannot open video: {self.cfg.io.video}")
         self.video_properties = {
             'fps': cap.get(cv2.CAP_PROP_FPS),
             'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -63,12 +67,12 @@ class MultithreadedCourtDetector:
         log.info(f"Video: {self.video_properties['width']}x{self.video_properties['height']}, "
                  f"{self.video_properties['fps']:.2f}fps, {self.video_properties['total_frames']} frames")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.args.output, fourcc, self.video_properties['fps'],
+        self.video_writer = cv2.VideoWriter(self.cfg.io.output, fourcc, self.video_properties['fps'],
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def _worker_io_preprocess(self):
         log.info("Worker 1 (I/O & Preprocess) started.")
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         frames_batch_rgb, frames_batch_bgr = [], []
         for frame_idx in range(self.video_properties['total_frames']):
             if not self.is_running.is_set(): break
@@ -78,7 +82,7 @@ class MultithreadedCourtDetector:
             frames_batch_bgr.append(frame)
             frames_batch_rgb.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-            if len(frames_batch_rgb) == self.args.batch_size or (frame_idx == self.video_properties['total_frames'] - 1):
+            if len(frames_batch_rgb) == self.cfg.batch_size or (frame_idx == self.video_properties['total_frames'] - 1):
                 start_time = time.perf_counter()
                 batch_tensor, batch_meta = self.preprocessor.process_batch(frames_batch_rgb)
                 self.preprocess_queue.put((batch_tensor, batch_meta, frames_batch_bgr.copy()))
@@ -121,8 +125,9 @@ class MultithreadedCourtDetector:
                 output_frame = original_frames_batch[i]
                 
                 # --- 描画処理 ---
-                draw_keypoints_on_frame(output_frame, result['keypoints'], result['scores'], self.args.score_threshold)
-                draw_court_skeleton(output_frame, result['keypoints'], result['scores'], self.args.score_threshold)
+                if self.cfg.visualization.enabled:
+                    draw_keypoints_on_frame(output_frame, result['keypoints'], result['scores'], self.cfg.court.score_threshold)
+                    draw_court_skeleton(output_frame, result['keypoints'], result['scores'], self.cfg.court.score_threshold)
                 
                 self.video_writer.write(output_frame)
                 pbar.update(1)
@@ -153,26 +158,24 @@ class MultithreadedCourtDetector:
         # self._save_results_as_csv()
         self._report_timings()
         if self.video_writer: self.video_writer.release()
-        log.info(f"Output video saved to: {self.args.output}")
+        log.info(f"Output video saved to: {self.cfg.io.output}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Multithreaded Court Keypoint Detection Pipeline")
-    parser.add_argument("--video", required=True, help="Path to the input video")
-    parser.add_argument("--checkpoint_path", required=True, help="Path to the trained model checkpoint (.ckpt)")
-    parser.add_argument("--output", default="demo_output_court.mp4", help="Output video file")
-    # parser.add_argument("--results_csv", default="court_keypoints.csv", help="Output CSV file for keypoint data")
-    parser.add_argument("--device", default="cuda", choices=["cuda", "cpu"], help="Device to use")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for inference")
-    parser.add_argument("--score_threshold", type=float, default=0.3, help="Minimum score to visualize a keypoint")
+@hydra.main(config_path="../../../configs/infer/court", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Validate required config
+    if cfg.io.video is None:
+        raise ValueError("Video path is required. Please set io.video in config or via command line.")
+    if cfg.court.checkpoint_path is None:
+        raise ValueError("Checkpoint path is required. Please set court.checkpoint_path in config or via command line.")
     
-    # --- 追加された引数 ---
-    parser.add_argument("--input_size", type=int, nargs=2, default=[360, 640], help="Model input size (height width)")
-    parser.add_argument('--multi_channel', action='store_true', help='Enable milti channel heatmap postprocess')
+    # Set up logging from config
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level.upper()),
+        format=cfg.logging.format
+    )
     
-    args = parser.parse_args()
-
     try:
-        detector_pipeline = MultithreadedCourtDetector(args)
+        detector_pipeline = MultithreadedCourtDetector(cfg)
         detector_pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during the pipeline execution: {e}", exc_info=True)

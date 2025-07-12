@@ -1,0 +1,129 @@
+# @package _global_
+
+# Hydra configuration for integrated tennis analysis pipeline demo
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/integrate/pipeline_demo/${now:%Y-%m-%d_%H-%M-%S}
+
+# Default configuration
+defaults:
+  - _self_
+
+# Task identifier
+task: integrate
+
+# Input/Output settings
+io:
+  video: "datasets/test/video_input2.mp4"  # Path to input video
+  output_video: "demo_output_integrated.mp4"  # Path to output video
+  output_csv: "analysis_results.csv"  # Path to output CSV for all results
+
+# Device configuration
+device: auto  # Device to use: cuda, cpu, auto
+
+# Processing configuration
+batch_size: 16  # Batch size for processing
+
+# Task enabling/disabling
+tasks:
+  court: true   # Enable court detection
+  pose: true    # Enable player/pose detection
+  ball: true    # Enable ball tracking
+
+# Court detection configuration
+court:
+  checkpoint: "checkpoints/court/lit_vit_unet/best_model.ckpt"  # Path to court detector checkpoint (.ckpt)
+  input_size: [224, 224]  # Court model input size [height, width]
+  multi_channel: true  # Enable multi channel heatmap for court postprocess
+  score_threshold: 0.3  # Min score to visualize a court keypoint
+
+# Player/Pose configuration
+player:
+  checkpoint: "checkpoints/player/lit_rt_detr/best_model.ckpt"  # Path to player detector checkpoint (.ckpt)
+  threshold: 0.7  # Confidence threshold for player detection
+
+pose:
+  keypoint_threshold: 0.3  # Confidence threshold for pose keypoint visibility
+  model_name: "usyd-community/vitpose-base-simple"  # HuggingFace model name
+
+# Ball tracking configuration
+ball:
+  model_path: "checkpoints/ball/wasb_tennis_best.pth.tar"  # Path to ball detector model (.pth.tar or .pth)
+  score_threshold: 0.5  # Ball detection score threshold
+  tracker:
+    max_displacement: 100  # Maximum displacement for tracking
+
+# Visualization settings
+visualization:
+  enabled: true
+  
+  # Court visualization
+  court:
+    draw_keypoints: true
+    draw_skeleton: true
+    keypoint_radius: 5
+    line_thickness: 2
+    colors:
+      keypoints: [0, 255, 0]    # Green
+      skeleton: [255, 0, 0]     # Red
+      
+  # Player/Pose visualization
+  pose:
+    draw_boxes: true
+    draw_keypoints: true
+    draw_skeleton: true
+    keypoint_radius: 3
+    skeleton_thickness: 2
+    box_thickness: 2
+    colors:
+      boxes: [0, 255, 0]        # Green
+      keypoints: [255, 0, 0]    # Red
+      skeleton: [0, 0, 255]     # Blue
+      
+  # Ball visualization
+  ball:
+    draw_trajectory: true
+    circle_radius: 8
+    trajectory_length: 10
+    colors:
+      ball: [0, 0, 255]         # Red
+      trajectory: [255, 255, 0] # Yellow
+
+# Threading configuration
+threading:
+  num_workers: 3  # Number of worker threads (IO, Inference, Postprocess)
+  queue_size_multiplier: 2  # Queue size = batch_size * this value
+
+# Performance monitoring
+performance:
+  track_timings: true
+  report_interval: 100  # Report performance every N frames
+  timing_stages: ["io_preprocess", "unified_inference", "postprocess_write"]
+  
+# CSV export configuration
+csv_export:
+  # Ball tracking data
+  ball_data: true
+  # Court keypoints (14 points)
+  court_keypoints: true
+  # Player detection boxes and pose keypoints (17 points per player)
+  player_pose_data: true
+  # Coordinate precision
+  precision: 2
+
+# Memory management
+memory:
+  clear_cuda_cache: true  # Clear CUDA cache between batches
+  max_queue_size: 32      # Maximum items in processing queues
+
+# Logging configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(levelname)s - %(threadName)s - %(message)s"
+  
+# Error handling
+error_handling:
+  continue_on_frame_error: true
+  max_consecutive_errors: 10
+  fallback_behavior: "skip_frame"  # skip_frame, use_dummy, abort

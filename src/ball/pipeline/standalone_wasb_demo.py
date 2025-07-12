@@ -2,7 +2,8 @@
 # standalone_wasb_demo.py
 # Standalone WASB-SBDT ball tracking demo (first 10 frames)
 
-import argparse
+import hydra
+from omegaconf import DictConfig
 import os
 import cv2
 import torch
@@ -24,11 +25,11 @@ log = logging.getLogger(__name__)
 class StandaloneTennisTracker:
     """Standalone tennis ball tracker (first 10 frames only)."""
     
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, cfg: DictConfig):
+        self.cfg_hydra = cfg
         self.cfg = load_default_config()
-        if args.model_path is not None:
-            self.cfg.detector.model_path = args.model_path
+        if cfg.ball.model_path is not None:
+            self.cfg.detector.model_path = cfg.ball.model_path
 
         # Initialize device
         self._initialize_device()
@@ -42,10 +43,10 @@ class StandaloneTennisTracker:
 
     def _initialize_device(self):
         """Initialize device."""
-        if self.args.device == "auto":
+        if self.cfg_hydra.device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
-            self.device = torch.device(self.args.device)
+            self.device = torch.device(self.cfg_hydra.device)
         log.info(f"Using device: {self.device}")
 
     def _initialize_pipeline_modules(self):
@@ -58,9 +59,9 @@ class StandaloneTennisTracker:
 
     def _initialize_video_io(self):
         """Initialize video input and output."""
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg_hydra.io.video)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {self.args.video}")
+            raise RuntimeError(f"Cannot open video: {self.cfg_hydra.io.video}")
 
         self.video_properties = {
             'fps': cap.get(cv2.CAP_PROP_FPS),
@@ -74,14 +75,14 @@ class StandaloneTennisTracker:
                  f"{self.video_properties['fps']:.2f}fps, {self.video_properties['total_frames']} frames")
         
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.args.output, fourcc, self.video_properties['fps'],
+        self.video_writer = cv2.VideoWriter(self.cfg_hydra.io.output, fourcc, self.video_properties['fps'],
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def _save_results_as_csv(self):
         """Save tracking results to CSV file."""
-        log.info(f"Saving tracking results to {self.args.results_csv}...")
+        log.info(f"Saving tracking results to {self.cfg_hydra.io.results_csv}...")
         try:
-            with open(self.args.results_csv, 'w', newline='') as csvfile:
+            with open(self.cfg_hydra.io.results_csv, 'w', newline='') as csvfile:
                 fieldnames = ['frame', 'visible', 'score', 'x', 'y']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
@@ -101,12 +102,13 @@ class StandaloneTennisTracker:
         """Run the standalone pipeline on first 10 frames."""
         self._initialize_video_io()
         
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg_hydra.io.video)
         frames_in = self.preprocessor.frames_in
         frame_history = deque(maxlen=frames_in)
         
-        # Process only first 10 frames
-        max_frames = min(50, self.video_properties['total_frames'])
+        # Process only first N frames
+        processing_limit = self.cfg_hydra.processing.get('max_frames', 50)
+        max_frames = min(processing_limit, self.video_properties['total_frames']) if processing_limit else self.video_properties['total_frames']
         log.info(f"Processing first {max_frames} frames...")
         
         self.tracker.refresh()
@@ -168,21 +170,24 @@ class StandaloneTennisTracker:
         if self.video_writer:
             self.video_writer.release()
         
-        log.info(f"Output video saved to: {self.args.output}")
-        log.info(f"Tracking results saved to: {self.args.results_csv}")
+        log.info(f"Output video saved to: {self.cfg_hydra.io.output}")
+        log.info(f"Tracking results saved to: {self.cfg_hydra.io.results_csv}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Standalone WASB-SBDT Tennis Ball Tracking (First 10 frames)")
-    parser.add_argument("--video", required=True, help="Path to the input video")
-    parser.add_argument("--output", default="standalone_wasb_output.mp4", help="Output video file")
-    parser.add_argument("--results_csv", default="standalone_tracking_results.csv", help="Output CSV file for tracking results")
-    parser.add_argument("--model_path", default=r"C:\Users\kamim\code\tennis_systems\third_party\WASB_SBDT\pretrained_weights\wasb_tennis_best.pth.tar", help="Path to a trained model (.pth.tar or .pth)")
-    parser.add_argument("--device", default="auto", help="Device to use (cuda/cpu/auto)")
-    args = parser.parse_args()
-
+@hydra.main(config_path="../../../configs/infer/ball", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Validate required config
+    if cfg.io.video is None:
+        raise ValueError("Video path is required. Please set io.video in config or via command line.")
+    
+    # Set up logging from config
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level.upper()),
+        format=cfg.logging.format
+    )
+    
     try:
-        tracker_pipeline = StandaloneTennisTracker(args)
+        tracker_pipeline = StandaloneTennisTracker(cfg)
         tracker_pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during the pipeline execution: {e}", exc_info=True)

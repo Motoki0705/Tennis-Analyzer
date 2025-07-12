@@ -1,4 +1,5 @@
-import argparse
+import hydra
+from omegaconf import DictConfig
 import os
 import cv2
 import torch
@@ -41,14 +42,15 @@ class IntegratedTennisAnalysisPipeline:
     コート検出、選手姿勢推定、ボール追跡を統合したマルチスレッド解析パイプライン。
     3つのワーカースレッド（I/O & Preprocess, Unified Inference, Postprocess & Write）で処理を分担する。
     """
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
         self.is_running = threading.Event()
         self._initialize_device()
 
         # スレッド間通信用のキュー
-        self.inference_queue = queue.Queue(maxsize=args.batch_size * 2)
-        self.postprocess_queue = queue.Queue(maxsize=args.batch_size * 2)
+        queue_size = cfg.threading.queue_size_multiplier * cfg.batch_size
+        self.inference_queue = queue.Queue(maxsize=queue_size)
+        self.postprocess_queue = queue.Queue(maxsize=queue_size)
 
         # パイプラインモジュールの初期化
         self._initialize_pipeline_modules()
@@ -63,10 +65,10 @@ class IntegratedTennisAnalysisPipeline:
 
     def _initialize_device(self):
         """デバイスを初期化"""
-        if self.args.device == "auto":
+        if self.cfg.device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
-            self.device = torch.device(self.args.device)
+            self.device = torch.device(self.cfg.device)
         log.info(f"Using device: {self.device}")
 
     def _initialize_pipeline_modules(self):
@@ -74,26 +76,26 @@ class IntegratedTennisAnalysisPipeline:
         log.info("Initializing pipeline modules...")
         
         # --- コート検出モジュール ---
-        if not self.args.disable_court:
-            court_input_size = tuple(self.args.court_input_size)
+        if self.cfg.tasks.court:
+            court_input_size = tuple(self.cfg.court.input_size)
             self.court_preprocessor = CourtPreprocessor(input_size=court_input_size)
-            self.court_detector = CourtDetector(self.args.court_checkpoint, self.device)
-            self.court_postprocessor = CourtPostprocessor(multi_channel=self.args.court_multi_channel)
+            self.court_detector = CourtDetector(self.cfg.court.checkpoint, self.device)
+            self.court_postprocessor = CourtPostprocessor(multi_channel=self.cfg.court.multi_channel)
 
         # --- 選手・姿勢推定モジュール ---
-        if not self.args.disable_pose:
+        if self.cfg.tasks.pose:
             self.player_preprocessor = PlayerPreprocessor()
-            self.player_detector = PlayerDetector(self.args.player_checkpoint, self.device)
-            self.player_postprocessor = PlayerPostprocessor(self.args.player_threshold)
+            self.player_detector = PlayerDetector(self.cfg.player.checkpoint, self.device)
+            self.player_postprocessor = PlayerPostprocessor(self.cfg.player.threshold)
             self.pose_preprocessor = PosePreprocessor()
-            self.pose_estimator = PoseEstimator(self.device)
+            self.pose_estimator = PoseEstimator(self.device, model_name=self.cfg.pose.model_name)
             self.pose_postprocessor = PosePostprocessor()
             
         # --- ボール追跡モジュール ---
-        if not self.args.disable_ball:
+        if self.cfg.tasks.ball:
             self.ball_cfg = load_default_config()
-            if self.args.ball_model_path:
-                self.ball_cfg.detector.model_path = self.args.ball_model_path
+            if self.cfg.ball.model_path:
+                self.ball_cfg.detector.model_path = self.cfg.ball.model_path
             self.ball_preprocessor = BallPreprocessor(self.ball_cfg)
             self.ball_detector = BallDetector(self.ball_cfg, self.device)
             self.ball_postprocessor = BallPostprocessor(self.ball_cfg)
@@ -103,9 +105,9 @@ class IntegratedTennisAnalysisPipeline:
 
     def _initialize_video_io(self):
         """ビデオI/Oを初期化"""
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {self.args.video}")
+            raise RuntimeError(f"Cannot open video: {self.cfg.io.video}")
         self.video_properties = {
             'fps': cap.get(cv2.CAP_PROP_FPS),
             'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -115,7 +117,7 @@ class IntegratedTennisAnalysisPipeline:
         cap.release()
         log.info(f"Video properties: {self.video_properties}")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.args.output_video, fourcc, self.video_properties['fps'],
+        self.video_writer = cv2.VideoWriter(self.cfg.io.output_video, fourcc, self.video_properties['fps'],
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def run(self):
@@ -137,19 +139,19 @@ class IntegratedTennisAnalysisPipeline:
         self._report_timings()
         
         if self.video_writer: self.video_writer.release()
-        log.info(f"Output video saved to: {self.args.output_video}")
-        log.info(f"Analysis results saved to: {self.args.output_csv}")
+        log.info(f"Output video saved to: {self.cfg.io.output_video}")
+        log.info(f"Analysis results saved to: {self.cfg.io.output_csv}")
 
     def _worker_io_preprocess(self):
         """Worker 1: ビデオ読み込みと全タスクの前処理"""
         log.info("Started.")
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         total_frames = self.video_properties['total_frames']
         
         # ボール追跡用のフレームシーケンス管理
-        ball_frame_history = deque(maxlen=self.ball_preprocessor.frames_in if not self.args.disable_ball else 1)
+        ball_frame_history = deque(maxlen=self.ball_preprocessor.frames_in if self.cfg.tasks.ball else 1)
         
-        frames_batch, frame_indices_batch = [], []
+        frames_batch, ball_frames_batch, frame_indices_batch = [], [], []
 
         for frame_idx in range(total_frames):
             if not self.is_running.is_set(): break
@@ -159,11 +161,14 @@ class IntegratedTennisAnalysisPipeline:
             frames_batch.append(frame)
             frame_indices_batch.append(frame_idx)
 
-            if not self.args.disable_ball:
+            if self.cfg.tasks.ball:
                 ball_frame_history.append(frame)
+                if len(ball_frame_history) == self.ball_preprocessor.frames_in:
+                    ball_frames_batch.append(list(ball_frame_history))
+
 
             is_last_frame_in_video = (frame_idx == total_frames - 1)
-            if len(frames_batch) == self.args.batch_size or (is_last_frame_in_video and frames_batch):
+            if len(frames_batch) == self.cfg.batch_size or (is_last_frame_in_video and frames_batch):
                 start_time = time.perf_counter()
                 
                 # RGBに変換したフレームを各プリプロセッサに渡す
@@ -172,17 +177,16 @@ class IntegratedTennisAnalysisPipeline:
                 # 各タスクの前処理を実行
                 data_for_inference = {'original_frames': frames_batch.copy(), 'frame_indices': frame_indices_batch.copy()}
                 
-                if not self.args.disable_court:
+                if self.cfg.tasks.court:
                     data_for_inference['court_input'], data_for_inference['court_meta'] = self.court_preprocessor.process_batch(frames_batch_rgb)
 
-                if not self.args.disable_pose:
+                if self.cfg.tasks.pose:
                     data_for_inference['player_input'], data_for_inference['player_meta'] = self.player_preprocessor.process_batch(frames_batch)
 
-                if not self.args.disable_ball:
+                if self.cfg.tasks.ball:
                     # ボールはシーケンス入力のため、バッチごとに処理
                     ball_sequences = []
                     # 最後のフレームを基準に過去のフレームを取得してシーケンスを作成
-                    # この実装は単純化しており、厳密にはバッチ内の各フレームに対応するシーケンスを作るべき
                     if len(ball_frame_history) >= self.ball_preprocessor.frames_in:
                          ball_sequences = [list(ball_frame_history)] * len(frames_batch) # 簡易的なバッチ化
                          data_for_inference['ball_input'], data_for_inference['ball_meta'] = self.ball_preprocessor.process_batch(ball_sequences)
@@ -191,6 +195,7 @@ class IntegratedTennisAnalysisPipeline:
                 self.timings['io_preprocess'].append(time.perf_counter() - start_time)
                 
                 frames_batch.clear()
+                ball_frames_batch.clear()
                 frame_indices_batch.clear()
         
         self.inference_queue.put(None) # 終了シグナル
@@ -210,15 +215,15 @@ class IntegratedTennisAnalysisPipeline:
             
             # --- 推論実行 ---
             # 1. コート検出
-            if not self.args.disable_court:
+            if self.cfg.tasks.court:
                 data['court_preds'] = self.court_detector.predict(data['court_input'])
 
             # 2. ボール検出
-            if not self.args.disable_ball and 'ball_input' in data:
+            if self.cfg.tasks.ball and 'ball_input' in data:
                 data['ball_preds'] = self.ball_detector.predict_batch(data['ball_input'])
 
             # 3. 選手検出 -> 姿勢推定
-            if not self.args.disable_pose:
+            if self.cfg.tasks.pose:
                 player_outputs = self.player_detector.predict(data['player_input'])
                 player_detections_batch = self.player_postprocessor.process_batch(player_outputs, data['player_meta'])
                 
@@ -245,7 +250,7 @@ class IntegratedTennisAnalysisPipeline:
         pbar = tqdm(total=self.video_properties['total_frames'], desc="Processing Video")
         
         # ボールトラッカーの初期化
-        if not self.args.disable_ball:
+        if self.cfg.tasks.ball:
             self.ball_tracker.refresh()
             if hasattr(self.ball_preprocessor, 'frames_in') and self.ball_preprocessor.frames_in > 1:
                 for _ in range(self.ball_preprocessor.frames_in - 1):
@@ -260,10 +265,10 @@ class IntegratedTennisAnalysisPipeline:
 
             # --- 後処理 ---
             # 1. コート
-            court_results_batch = self.court_postprocessor.process_batch(data['court_preds'], data['court_meta']) if not self.args.disable_court and 'court_preds' in data else [None] * len(original_frames)
+            court_results_batch = self.court_postprocessor.process_batch(data['court_preds'], data['court_meta']) if self.cfg.tasks.court and 'court_preds' in data else [None] * len(original_frames)
             
             # 2. ボール (最終修正)
-            if not self.args.disable_ball and 'ball_preds' in data:
+            if self.cfg.tasks.ball and 'ball_preds' in data:
                 # ball_detectorが出力した辞書を、CPUに移動させずにそのまま後処理モジュールに渡す
                 # 後処理モジュールが内部でGPUデータと辞書形式を正しく処理する
                 predictions_dict_gpu = data['ball_preds']
@@ -272,7 +277,7 @@ class IntegratedTennisAnalysisPipeline:
                 ball_detections_batch = [[]] * len(original_frames)
 
             # 3. 姿勢
-            pose_results_batch = [self.pose_postprocessor.process_frame(data['pose_preds'][i], data['pose_meta'][i]) if not self.args.disable_pose and i in data.get('pose_preds', {}) else [] for i in range(len(original_frames))]
+            pose_results_batch = [self.pose_postprocessor.process_frame(data['pose_preds'][i], data['pose_meta'][i]) if self.cfg.tasks.pose and i in data.get('pose_preds', {}) else [] for i in range(len(original_frames))]
 
             # --- フレームごとの処理ループ ---
             for i, frame in enumerate(original_frames):
@@ -281,25 +286,27 @@ class IntegratedTennisAnalysisPipeline:
                 frame_results = {"frame_idx": frame_idx}
 
                 # コート描画
-                if not self.args.disable_court and court_results_batch[i]:
+                if self.cfg.tasks.court and court_results_batch[i] and self.cfg.visualization.enabled:
                     court_res = court_results_batch[i]
                     frame_results["court"] = court_res
-                    draw_court_keypoints(output_frame, court_res['keypoints'], court_res['scores'], self.args.court_score_threshold)
-                    draw_court_skeleton(output_frame, court_res['keypoints'], court_res['scores'], self.args.court_score_threshold)
+                    draw_court_keypoints(output_frame, court_res['keypoints'], court_res['scores'], self.cfg.court.score_threshold)
+                    draw_court_skeleton(output_frame, court_res['keypoints'], court_res['scores'], self.cfg.court.score_threshold)
 
                 # 選手・姿勢描画
-                if not self.args.disable_pose:
+                if self.cfg.tasks.pose:
                     player_dets = data.get('player_detections', {}).get(i, {'scores': [], 'boxes': []})
                     pose_res = pose_results_batch[i]
                     frame_results["players"] = player_dets
                     frame_results["poses"] = pose_res
-                    draw_pose_results(output_frame, player_dets, pose_res, self.args)
+                    if self.cfg.visualization.enabled:
+                        draw_pose_results(output_frame, player_dets, pose_res, self.cfg)
 
                 # ボール追跡と描画
-                if not self.args.disable_ball:
+                if self.cfg.tasks.ball:
                     ball_tracking_output = self.ball_tracker.update(ball_detections_batch[i])
                     frame_results["ball"] = ball_tracking_output
-                    draw_ball_tracking(output_frame, ball_tracking_output)
+                    if self.cfg.visualization.enabled:
+                        draw_ball_tracking(output_frame, ball_tracking_output)
 
                 self.video_writer.write(output_frame)
                 self.all_results_data.append(frame_results)
@@ -327,7 +334,7 @@ class IntegratedTennisAnalysisPipeline:
             for kp_id in range(17): # COCO 17点
                 header.extend([f'p{p_id}_kp{kp_id}_x', f'p{p_id}_kp{kp_id}_y', f'p{p_id}_kp{kp_id}_s'])
 
-        with open(self.args.output_csv, 'w', newline='') as f:
+        with open(self.cfg.io.output_csv, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=header, extrasaction='ignore')
             writer.writeheader()
 
@@ -374,47 +381,26 @@ class IntegratedTennisAnalysisPipeline:
             log.info(f"Stage '{name}': Total Calls: {num_calls}, Total Time: {total_time:.3f} s, Avg Time/Call: {avg_time:.3f} s")
         log.info("--------------------------")
 
-def main():
-    parser = argparse.ArgumentParser(description="Integrated Tennis Analysis Pipeline")
-    # --- I/O Arguments ---
-    parser.add_argument("--video", default="datasets/test/video_input2.mp4", help="Path to input video")
-    parser.add_argument("--output_video", default="demo_output_integrated.mp4", help="Path to output video")
-    parser.add_argument("--output_csv", default="analysis_results.csv", help="Path to output CSV for all results")
+@hydra.main(config_path="../../configs/infer/integrate", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Validate required config
+    if cfg.io.video is None:
+        raise ValueError("Video path is required. Please set io.video in config or via command line.")
     
-    # --- General Arguments ---
-    parser.add_argument("--device", default="auto", choices=["cuda", "cpu", "auto"], help="Device to use")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for processing")
+    # Validate task-specific requirements
+    if cfg.tasks.court and cfg.court.checkpoint is None:
+        raise ValueError("Court checkpoint is required when court task is enabled. Please set court.checkpoint.")
+    if cfg.tasks.pose and cfg.player.checkpoint is None:
+        raise ValueError("Player checkpoint is required when pose task is enabled. Please set player.checkpoint.")
     
-    # --- Task Disabling Arguments ---
-    parser.add_argument("--disable_court", action='store_true', help="Disable court detection")
-    parser.add_argument("--disable_pose", action='store_true', help="Disable player/pose detection")
-    parser.add_argument("--disable_ball", action='store_true', help="Disable ball tracking")
-
-    # --- Court Detection Arguments ---
-    parser.add_argument("--court_checkpoint", default="checkpoints/court/lit_vit_unet/best_model.ckpt", help="Path to court detector checkpoint (.ckpt)")
-    parser.add_argument("--court_input_size", type=int, nargs=2, default=[224, 224], help="Court model input size (height width)")
-    parser.add_argument('--court_multi_channel', default=True, help='Enable milti channel heatmap for court postprocess')
-    parser.add_argument("--court_score_threshold", type=float, default=0.3, help="Min score to visualize a court keypoint")
-
-    # --- Player/Pose Arguments ---
-    parser.add_argument("--player_checkpoint", default="checkpoints/player/lit_rt_detr/best_model.ckpt",  help="Path to player detector checkpoint (.ckpt)")
-    parser.add_argument("--player_threshold", type=float, default=0.7, help="Confidence threshold for player detection")
-    parser.add_argument("--pose_keypoint_threshold", type=float, default=0.3, help="Confidence threshold for pose keypoint visibility")
-
-    # --- Ball Tracking Arguments ---
-    parser.add_argument("--ball_model_path", default="checkpoints/ball/wasb_tennis_best.pth.tar", help="Path to ball detector model (.pth.tar or .pth)")
+    # Set up logging from config
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level.upper()),
+        format=cfg.logging.format
+    )
     
-    args = parser.parse_args()
-
-    # 引数のバリデーション
-    if not args.disable_court and not args.court_checkpoint:
-        parser.error("--court_checkpoint is required unless --disable_court is specified.")
-    if not args.disable_pose and not args.player_checkpoint:
-        parser.error("--player_checkpoint is required unless --disable_pose is specified.")
-    # ball_model_pathはオプションなのでチェック不要
-
     try:
-        pipeline = IntegratedTennisAnalysisPipeline(args)
+        pipeline = IntegratedTennisAnalysisPipeline(cfg)
         pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during pipeline execution: {e}", exc_info=True)

@@ -1,0 +1,97 @@
+# @package _global_
+
+# Hydra configuration for pose estimation pipeline demo
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/pose/pipeline_demo/${now:%Y-%m-%d_%H-%M-%S}
+
+# Default configuration
+defaults:
+  - _self_
+
+# Task identifier
+task: pose
+
+# Input/Output settings
+io:
+  video: null  # Path to input video (required)
+  output: "demo_output_pose.mp4"  # Path to output video
+  results_csv: "pose_results.csv"  # Path to output CSV for results
+
+# Device configuration
+device: cuda  # Device to use: cuda, cpu
+
+# Processing configuration
+batch_size: 4  # Batch size for player detection
+
+# Player detection configuration (stage 1)
+player:
+  checkpoint_path: "checkpoints/best_model.ckpt"  # Path to player detector checkpoint (.ckpt)
+  threshold: 0.7  # Confidence threshold for player detection
+
+# Pose estimation configuration (stage 2)
+pose:
+  model_name: "usyd-community/vitpose-base-simple"  # HuggingFace model name
+  keypoint_threshold: 0.3  # Confidence threshold for pose keypoint visibility
+  input_size: [256, 192]  # Input size for pose estimation [height, width]
+  
+# COCO keypoint configuration
+keypoints:
+  num_keypoints: 17  # COCO format has 17 keypoints
+  names: [
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle"
+  ]
+  # COCO skeleton connections for drawing
+  skeleton: [
+    [16, 14], [14, 12], [17, 15], [15, 13], [12, 13],  # legs
+    [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],         # torso and arms
+    [8, 10], [9, 11], [2, 3], [1, 2], [1, 3],         # face
+    [2, 4], [3, 5], [4, 6], [5, 7]                    # head to shoulders
+  ]
+
+# Visualization settings
+visualization:
+  enabled: true
+  draw_boxes: true        # Draw player bounding boxes
+  draw_keypoints: true    # Draw pose keypoints
+  draw_skeleton: true     # Draw pose skeleton
+  draw_labels: true       # Draw player labels
+  # Visual styling
+  keypoint_radius: 3
+  skeleton_thickness: 2
+  box_thickness: 2
+  font_scale: 0.6
+  font_thickness: 2
+  # Colors
+  colors:
+    player_box: [0, 255, 0]      # Green for player boxes
+    keypoints: [255, 0, 0]       # Red for keypoints
+    skeleton: [0, 0, 255]        # Blue for skeleton
+    text: [255, 255, 255]        # White for text
+
+# Threading configuration
+threading:
+  num_workers: 3  # Number of worker threads
+  queue_size_multiplier: 2  # Queue size = batch_size * this value
+
+# Performance monitoring
+performance:
+  track_timings: true
+  report_interval: 50  # Report performance every N frames
+  timing_stages: ["io_preprocess", "inference_pipeline", "postprocess_write"]
+
+# CSV export configuration
+csv_export:
+  include_player_boxes: true
+  include_pose_keypoints: true
+  include_confidence_scores: true
+  precision: 3  # Decimal precision for coordinates
+
+# Logging configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(levelname)s - %(message)s"

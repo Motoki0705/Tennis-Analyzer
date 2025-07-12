@@ -1,6 +1,7 @@
 # pipeline_demo_player.py
 
-import argparse
+import hydra
+from omegaconf import DictConfig
 import os
 import cv2
 import torch
@@ -54,16 +55,17 @@ class MultithreadedPlayerDetector:
     """
     マルチスレッドパイプラインでプレイヤーを検出するクラス。
     """
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
         self._initialize_device()
         self._initialize_pipeline_modules()
 
         self.video_writer = None
         self.video_properties: Dict[str, Any] = {}
         
-        self.preprocess_queue: queue.Queue = queue.Queue(maxsize=args.batch_size * 2)
-        self.inference_queue: queue.Queue = queue.Queue(maxsize=args.batch_size * 2)
+        queue_size = cfg.threading.queue_size_multiplier * cfg.batch_size
+        self.preprocess_queue: queue.Queue = queue.Queue(maxsize=queue_size)
+        self.inference_queue: queue.Queue = queue.Queue(maxsize=queue_size)
         
         self.all_detection_results: List[Dict[str, np.ndarray]] = []
         self.is_running = threading.Event()
@@ -74,34 +76,38 @@ class MultithreadedPlayerDetector:
 
     def _initialize_device(self):
         """デバイスを初期化する"""
-        if self.args.device == "auto":
+        if self.cfg.device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
-            self.device = torch.device(self.args.device)
+            self.device = torch.device(self.cfg.device)
         log.info(f"Using device: {self.device}")
 
     def _initialize_pipeline_modules(self):
         """各種処理モジュールを初期化する"""
         log.info("Initializing pipeline modules...")
         self.preprocessor = PlayerPreprocessor()
-        self.detector = PlayerDetector(self.args.checkpoint_path, self.device)
-        self.postprocessor = PlayerPostprocessor(confidence_threshold=self.args.score_threshold)
+        self.detector = PlayerDetector(self.cfg.player.checkpoint_path, self.device)
+        self.postprocessor = PlayerPostprocessor(confidence_threshold=self.cfg.player.score_threshold)
         log.info("Pipeline modules initialized.")
         # モデルのラベルマップを取得しようと試みる
         global ID2LABEL
         try:
             if hasattr(self.detector.model.model, 'config') and hasattr(self.detector.model.model.config, 'id2label'):
                 ID2LABEL = self.detector.model.model.config.id2label
-                log.info(f"Loaded label map from model: {ID2LABEL}")
+            elif hasattr(self.cfg, 'detection') and hasattr(self.cfg.detection, 'id2label'):
+                ID2LABEL = self.cfg.detection.id2label
+                log.info(f"Loaded label map from config: {ID2LABEL}")
+            else:
+                log.info(f"Using default label map: {ID2LABEL}")
         except Exception as e:
             log.warning(f"Could not load label map from model, using default. Error: {e}")
 
 
     def _initialize_video_io(self):
         """入力動画のプロパティを読み込み、出力用のVideoWriterを準備する"""
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {self.args.video}")
+            raise RuntimeError(f"Cannot open video: {self.cfg.io.video}")
 
         self.video_properties = {
             'fps': cap.get(cv2.CAP_PROP_FPS),
@@ -115,13 +121,13 @@ class MultithreadedPlayerDetector:
                  f"{self.video_properties['fps']:.2f}fps, {self.video_properties['total_frames']} frames")
         
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.args.output, fourcc, self.video_properties['fps'],
+        self.video_writer = cv2.VideoWriter(self.cfg.io.output, fourcc, self.video_properties['fps'],
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def _worker_io_preprocess(self):
         """ワーカー1: 動画読み込みと前処理 (CPUバウンド)"""
         log.info("Worker 1 (I/O & Preprocess) started.")
-        cap = cv2.VideoCapture(self.args.video)
+        cap = cv2.VideoCapture(self.cfg.io.video)
         frames_batch: List[np.ndarray] = []
         
         total_frames = self.video_properties['total_frames']
@@ -132,7 +138,7 @@ class MultithreadedPlayerDetector:
             
             frames_batch.append(frame)
 
-            if len(frames_batch) == self.args.batch_size or (frame_idx == total_frames - 1 and frames_batch):
+            if len(frames_batch) == self.cfg.batch_size or (frame_idx == total_frames - 1 and frames_batch):
                 start_time = time.perf_counter()
                 
                 original_frames_bgr = [f.copy() for f in frames_batch]
@@ -185,7 +191,9 @@ class MultithreadedPlayerDetector:
             
             for i, result in enumerate(batch_results):
                 self.all_detection_results.append(result)
-                output_frame = draw_detections_on_frame(original_frames_batch[i], result)
+                output_frame = original_frames_batch[i]
+                if self.cfg.visualization.enabled:
+                    output_frame = draw_detections_on_frame(output_frame, result)
                 self.video_writer.write(output_frame)
                 pbar.update(1)
 
@@ -196,9 +204,9 @@ class MultithreadedPlayerDetector:
 
     def _save_results_as_csv(self):
         """検出結果をCSVファイルに保存する"""
-        log.info(f"Saving detection results to {self.args.results_csv}...")
+        log.info(f"Saving detection results to {self.cfg.io.results_csv}...")
         try:
-            with open(self.args.results_csv, 'w', newline='') as csvfile:
+            with open(self.cfg.io.results_csv, 'w', newline='') as csvfile:
                 fieldnames = ['frame', 'label_id', 'label_name', 'score', 'x_min', 'y_min', 'x_max', 'y_max']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
@@ -247,21 +255,22 @@ class MultithreadedPlayerDetector:
         self._report_timings()
 
         if self.video_writer: self.video_writer.release()
-        log.info(f"Output video saved to: {self.args.output}")
+        log.info(f"Output video saved to: {self.cfg.io.output}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Multithreaded Player Detection Pipeline")
-    parser.add_argument("--video", required=True, help="Path to the input video")
-    parser.add_argument("--checkpoint_path", default="checkpoints/best_model.ckpt", help="Path to the trained model checkpoint (.ckpt)")
-    parser.add_argument("--output", default="demo_output_player.mp4", help="Output video file with detections")
-    parser.add_argument("--results_csv", default="player_detections.csv", help="Output CSV file for detection data")
-    parser.add_argument("--device", default="auto", choices=["cuda", "cpu", "auto"], help="Device to use (cuda/cpu/auto)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for inference")
-    parser.add_argument("--score_threshold", type=float, default=0.7, help="Minimum score to visualize a detection")
-    args = parser.parse_args()
-
+@hydra.main(config_path="../../../configs/infer/player", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Validate required config
+    if cfg.io.video is None:
+        raise ValueError("Video path is required. Please set io.video in config or via command line.")
+    
+    # Set up logging from config
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level.upper()),
+        format=cfg.logging.format
+    )
+    
     try:
-        detector_pipeline = MultithreadedPlayerDetector(args)
+        detector_pipeline = MultithreadedPlayerDetector(cfg)
         detector_pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during the pipeline execution: {e}", exc_info=True)
