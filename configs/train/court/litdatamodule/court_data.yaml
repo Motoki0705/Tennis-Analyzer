@@ -5,17 +5,18 @@ annotation_root: 'datasets/court/'
 image_root: 'datasets/court/images'
 
 # データローダー設定
-batch_size: 16
+batch_size: 32
 num_workers: 8
 
 # 画像サイズ設定
-input_size: [360, 640]
-heatmap_size: [360, 640]
+input_size: [224, 224]
+heatmap_size: [224, 224]
 
 # ヒートマップ設定
 default_keypoints: 15
-is_each_keypoint: false
+is_each_keypoint: true
 sigma: 3.0
+use_peak_valley_heatmaps: true
 
 # 変換設定
 train_transform:

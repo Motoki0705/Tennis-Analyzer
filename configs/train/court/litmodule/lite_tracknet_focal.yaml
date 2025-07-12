@@ -8,7 +8,7 @@ module:
   out_channels: 1
   
   # 学習パラメータ
-  lr: 0.001
+  lr: 0.0001
   weight_decay: 0.0001
   warmup_epochs: 1
   max_epochs: 50
@@ -16,6 +16,12 @@ module:
   # Focal Loss パラメータ
   focal_alpha: 1.0
   focal_gamma: 2.0
+
+  # 距離の閾値（ピクセル単位）
+  accuracy_threshold: 5
+
+  # ピーク + 谷ヒートマップかどうか
+  use_peak_valley_heatmaps: true
 
 # メタ情報
 meta:

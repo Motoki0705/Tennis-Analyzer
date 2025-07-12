@@ -16,7 +16,7 @@ from .detectors.postprocessor import TracknetV2Postprocessor
 
 log = logging.getLogger(__name__)
 
-class FramePreprocessor:
+class BallPreprocessor:
     """フレームシーケンスを前処理し、モデル入力用のテンソルを生成するクラス"""
 
     def __init__(self, cfg):

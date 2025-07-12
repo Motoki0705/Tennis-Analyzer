@@ -43,7 +43,7 @@ pipeline.run()
 ```python
 from third_party.WASB_SBDT import (
     load_default_config,
-    FramePreprocessor,
+    BallPreprocessor,
     BallDetector,
     DetectionPostprocessor,
     build_tracker,
@@ -54,7 +54,7 @@ import torch
 config = load_default_config()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-preprocessor = FramePreprocessor(config)
+preprocessor = BallPreprocessor(config)
 detector = BallDetector(config, device)
 postprocessor = DetectionPostprocessor(config)
 tracker = build_tracker(config)
@@ -108,14 +108,14 @@ from .trackers import build_tracker as build_tracker_internal
 # --- 中レベルAPI ---
 # パイプラインコンポーネントのインポート
 from .pipeline_modules import (
-    FramePreprocessor,
+    BallPreprocessor,
     BallDetector,
     DetectionPostprocessor,
 )
 
 # --- 高レベルAPI ---
 # 完全なパイプラインのインポート
-from .pipeline_demo import MultithreadedTennisTracker
+# from .pipeline_demo import MultithreadedTennisTracker
 
 
 def load_default_config() -> DictConfig:
@@ -267,9 +267,9 @@ def build_tracker(config: DictConfig) -> object:
 # エクスポートするモジュールを__all__で明示的に指定
 __all__ = [
     # --- 高レベルAPI ---
-    "MultithreadedTennisTracker",
+    # "MultithreadedTennisTracker",
     # --- 中レベルAPI ---
-    "FramePreprocessor",
+    "BallPreprocessor",
     "BallDetector",
     "DetectionPostprocessor",
     # --- 低レベルAPI ---

@@ -82,11 +82,12 @@ def download_videos_renamed(urls, base_output_dir="data/videos", record_file="do
 
 if __name__ == "__main__":
     urls_to_download = [
-        "https://www.youtube.com/watch?v=EPLKsPXz1TM&t=17s"
+        "https://www.youtube.com/watch?v=EPLKsPXz1TM&t=17s",
+        "https://www.youtube.com/watch?v=xp2mYmNl-lg&t=210s"
     ]
     
     # スクリプトの実行場所からの相対パスとしてPathオブジェクトを使用
-    base_dir = Path("tools/annotation/data/annotation_workspace/videos")
+    base_dir = Path("data/raw/videos/")
     record_file_path = Path("tools/download/downloaded_urls.txt")
     
     download_videos_renamed(urls_to_download, base_output_dir=base_dir, record_file=record_file_path)

@@ -48,6 +48,7 @@ class TracknetV2Postprocessor(object):
         xys, scores = [], []
         if np.max(hm) > self._score_threshold:
             visi = True
+            hm = hm.astype(np.float32)
             th, hm_th        = cv2.threshold(hm, self._score_threshold, 1, cv2.THRESH_BINARY)
             n_labels, labels = cv2.connectedComponents(hm_th.astype(np.uint8))
             for m in range(1,n_labels):

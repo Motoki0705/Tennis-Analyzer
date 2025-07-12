@@ -8,8 +8,7 @@ from typing import Tuple, Dict, Any, List
 from tqdm import tqdm # 進捗表示のために追加
 from scipy.ndimage import maximum_filter
 
-from src.court.lit_module.lit_lite_tracknet_focal import LitLiteTracknetFocal
-
+from src.court.lit_module.lit_vit_unet import LitViTUNet
 
 class CourtPreprocessor:
     """
@@ -68,7 +67,7 @@ class CourtDetector:
         self.device = device
         
         try:
-            self.model = LitLiteTracknetFocal.load_from_checkpoint(
+            self.model = LitViTUNet.load_from_checkpoint(
                 checkpoint_path, map_location=device
             ).model
             self.model.to(self.device)
@@ -97,172 +96,114 @@ class CourtDetector:
 
 class CourtPostprocessor:
     """
-    モデルの出力（ヒートマップ）を後処理し、キーポイントを抽出するクラス。
+    モデルの出力を後処理し、キーポイントを抽出するクラス。
+    2つのモードをサポート：
+    - multi_channel=True: 複数のヒートマップからそれぞれ1つのキーポイントを抽出 (15->15)
+    - multi_channel=False: 1つのヒートマップから複数のキーポイントを抽出 (1->15)
     """
-    def __init__(self, num_keypoints: int = 15, peak_threshold: float = 0.1, min_distance: int = 10):
+
+    def __init__(self,
+                 multi_channel: bool = True,
+                 num_keypoints: int = 15,
+                 peak_threshold: float = 0.7,
+                 min_distance: int = 10):
         """
         Args:
-            num_keypoints (int): 検出するキーポイントの数。
-            peak_threshold (float): ピーク検出の閾値。
-            min_distance (int): ピーク間の最小距離（ピクセル）。
+            multi_channel (bool): True: 複数チャンネルからそれぞれ1つのキーポイントを抽出 (15->15)
+                                 False: 1つのチャンネルから複数のキーポイントを抽出 (1->15)
+            num_keypoints (int): 検出するキーポイントの最大数。
+            peak_threshold (float): ピークとして認識するための最小スコア（0.0-1.0）。
+            min_distance (int): ピーク間の最小距離（ピクセル単位）。
         """
+        if not (0.0 <= peak_threshold <= 1.0):
+            raise ValueError("peak_thresholdは0.0から1.0の間の値でなければなりません。")
+            
+        self.multi_channel = multi_channel
         self.num_keypoints = num_keypoints
         self.peak_threshold = peak_threshold
         self.min_distance = min_distance
+        
+        mode_description = "multi-channel mode (15->15)" if multi_channel else "single-channel mode (1->15)"
+        print(f"CourtPostprocessor initialized with: {mode_description}, num_keypoints={num_keypoints}, peak_threshold={peak_threshold}, min_distance={min_distance}")
 
-    def _find_peaks(self, heatmap: np.ndarray, num_peaks: int) -> Tuple[np.ndarray, np.ndarray]:
+    def _find_peaks(self, heatmap: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        単一のヒートマップから指定された数のピークを検出する。
-        
+        単一の2Dヒートマップから、指定された条件で上位N個のピークを検出する。
+
         Args:
-            heatmap (np.ndarray): 2Dヒートマップ (H, W)
-            num_peaks (int): 検出するピークの数
-            
+            heatmap (np.ndarray): 2Dヒートマップ (H, W)。
+
         Returns:
-            Tuple[np.ndarray, np.ndarray]: 
-                - peaks: ピークの座標 (num_peaks, 2) [x, y]
-                - scores: 各ピークのスコア (num_peaks,)
+            Tuple[np.ndarray, np.ndarray]:
+                - peaks: 検出されたピークの座標 (num_keypoints, 2) [x, y]形式。
+                - scores: 各ピークのスコア (num_keypoints,)。
         """
-        # ローカルマキシマを検出
-        local_maxima = maximum_filter(heatmap, size=self.min_distance) == heatmap
+        # 局所的最大値を見つける
+        local_max = maximum_filter(heatmap, size=self.min_distance, mode='constant') == heatmap
         
-        # 閾値以上の点のみを考慮
-        above_threshold = heatmap >= self.peak_threshold
+        # 閾値を超える点のみを対象にする
+        above_threshold = heatmap > self.peak_threshold
         
-        # 両方の条件を満たす点を取得
-        peaks_mask = local_maxima & above_threshold
-        peak_coords = np.where(peaks_mask)
+        # 両方の条件を満たす点をピーク候補とする
+        peaks_mask = local_max & above_threshold
         
-        if len(peak_coords[0]) == 0:
-            # ピークが見つからない場合は、最も高い値の点を返す
-            max_idx = np.unravel_index(np.argmax(heatmap), heatmap.shape)
-            peaks = np.array([[max_idx[1], max_idx[0]]], dtype=np.float32)  # [x, y]
-            scores = np.array([heatmap[max_idx]], dtype=np.float32)
+        # ピーク候補の座標とスコアを取得
+        coords_y, coords_x = np.where(peaks_mask)
+        scores = heatmap[coords_y, coords_x]
+
+        # スコアでソートし、上位N件を取得
+        if len(scores) > 0:
+            sorted_indices = np.argsort(scores)[::-1]  # 降順
+            num_to_take = min(self.num_keypoints, len(sorted_indices))
+            top_indices = sorted_indices[:num_to_take]
+
+            peaks_x = coords_x[top_indices]
+            peaks_y = coords_y[top_indices]
+            
+            # [x, y] の形式に整形
+            peaks = np.vstack((peaks_x, peaks_y)).T
+            final_scores = scores[top_indices]
         else:
-            # スコアでソートして上位num_peaks個を取得
-            peak_scores = heatmap[peak_coords]
-            sorted_indices = np.argsort(peak_scores)[::-1]  # 降順
-            
-            # 必要な数だけ取得（足りない場合は全て取得）
-            num_to_take = min(num_peaks, len(sorted_indices))
-            selected_indices = sorted_indices[:num_to_take]
-            
-            peaks = np.column_stack([
-                peak_coords[1][selected_indices],  # x座標
-                peak_coords[0][selected_indices]   # y座標
-            ]).astype(np.float32)
-            scores = peak_scores[selected_indices].astype(np.float32)
-        
-        # 足りない場合は低スコアのダミーピークで埋める
-        if len(peaks) < num_peaks:
-            remaining = num_peaks - len(peaks)
-            dummy_peaks = np.zeros((remaining, 2), dtype=np.float32)
-            dummy_scores = np.zeros(remaining, dtype=np.float32)
-            
-            peaks = np.vstack([peaks, dummy_peaks])
-            scores = np.concatenate([scores, dummy_scores])
-        
-        return peaks, scores
+            # ピークが見つからなかった場合
+            peaks = np.empty((0, 2), dtype=np.float32)
+            final_scores = np.empty(0, dtype=np.float32)
 
-    def process_batch(self, heatmap_preds: torch.Tensor, batch_meta: List[Dict[str, Any]]) -> List[Dict[str, np.ndarray]]:
+        # 検出数が足りない場合、ゼロパディングする
+        num_found = len(final_scores)
+        if num_found < self.num_keypoints:
+            padding_size = self.num_keypoints - num_found
+            padded_peaks = np.zeros((padding_size, 2), dtype=np.float32)
+            padded_scores = np.zeros(padding_size, dtype=np.float32)
+            
+            peaks = np.vstack((peaks, padded_peaks)) if num_found > 0 else padded_peaks
+            final_scores = np.concatenate((final_scores, padded_scores)) if num_found > 0 else padded_scores
+            
+        return peaks.astype(np.float32), final_scores.astype(np.float32)
+
+    def _find_single_peak(self, heatmap: np.ndarray) -> Tuple[np.ndarray, float]:
         """
-        生のヒートマップのバッチから、各画像のキーポイント座標とスコアを抽出する。
+        単一の2Dヒートマップから最も信頼度の高い1つのピークを検出する。
 
         Args:
-            heatmap_preds (torch.Tensor): モデルの出力テンソルのバッチ (B, 1, H, W)。
-            batch_meta (List[Dict[str, Any]]): Preprocessorから渡されたメタデータのリスト。
+            heatmap (np.ndarray): 2Dヒートマップ (H, W)。
 
         Returns:
-            List[Dict[str, np.ndarray]]:
-                各画像の検出結果（'keypoints'と'scores'）を格納した辞書のリスト。
+            Tuple[np.ndarray, float]:
+                - peak: 検出されたピークの座標 (2,) [x, y]形式。
+                - score: ピークのスコア。
         """
-        # (B, 1, H, W) -> B x (H, W)
-        heatmap_probs = torch.sigmoid(heatmap_preds).cpu().numpy()
+        # 最大値の位置を取得
+        max_idx = np.unravel_index(np.argmax(heatmap), heatmap.shape)
+        max_score = heatmap[max_idx]
         
-        batch_results = []
-        for i in range(heatmap_probs.shape[0]): # バッチサイズでループ
-            # 単一のヒートマップを取得 (1, H, W) -> (H, W)
-            heatmap_prob = heatmap_probs[i, 0, :, :]  # 最初のチャンネルのみ使用
-            meta = batch_meta[i]
-            
-            original_h, original_w = meta["original_size"]
-            input_h, input_w = meta["input_size"]
-            
-            # ピークを検出
-            peaks, scores = self._find_peaks(heatmap_prob, self.num_keypoints)
-            
-            # 元の画像サイズに座標を変換
-            keypoints = np.zeros((self.num_keypoints, 2), dtype=np.float32)
-            for k in range(len(peaks)):
-                original_x = (peaks[k, 0] / input_w) * original_w
-                original_y = (peaks[k, 1] / input_h) * original_h
-                keypoints[k] = [original_x, original_y]
-            
-            batch_results.append({"keypoints": keypoints, "scores": scores})
-
-        return batch_results
-
-    def visualize_heatmap(self, heatmap_pred: torch.Tensor) -> Image.Image:
-        """単一のヒートマップ全体を視覚化して画像として返す（デバッグ用）"""
-        # (1, 1, H, W) or (1, H, W) -> (H, W)
-        if heatmap_pred.dim() == 4:
-            heatmap_pred = heatmap_pred.squeeze(0).squeeze(0)
-        elif heatmap_pred.dim() == 3:
-            heatmap_pred = heatmap_pred.squeeze(0)
+        # 座標を [x, y] 形式に変換
+        peak_x, peak_y = max_idx[1], max_idx[0]  # (row, col) -> (x, y)
         
-        heatmap_prob = torch.sigmoid(heatmap_pred).cpu().numpy()
+        # 閾値チェック
+        if max_score < self.peak_threshold:
+            return np.array([0.0, 0.0], dtype=np.float32), 0.0
         
-        heatmap_normalized = cv2.normalize(heatmap_prob, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        heatmap_colored = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-        heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-        
-        return Image.fromarray(heatmap_rgb)
-
-    def visualize_peaks(self, heatmap_pred: torch.Tensor, show_peaks: bool = True) -> Image.Image:
-        """
-        ヒートマップと検出されたピークを視覚化する（デバッグ用）
-        
-        Args:
-            heatmap_pred (torch.Tensor): モデルの出力テンソル
-            show_peaks (bool): ピークを表示するかどうか
-            
-        Returns:
-            Image.Image: 視覚化された画像
-        """
-        # ヒートマップの準備
-        if heatmap_pred.dim() == 4:
-            heatmap_pred = heatmap_pred.squeeze(0).squeeze(0)
-        elif heatmap_pred.dim() == 3:
-            heatmap_pred = heatmap_pred.squeeze(0)
-        
-        heatmap_prob = torch.sigmoid(heatmap_pred).cpu().numpy()
-        
-        # 基本的なヒートマップを作成
-        heatmap_normalized = cv2.normalize(heatmap_prob, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        heatmap_colored = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-        heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-        
-        if show_peaks:
-            # ピークを検出して描画
-            peaks, scores = self._find_peaks(heatmap_prob, self.num_keypoints)
-            
-            for i, (peak, score) in enumerate(zip(peaks, scores)):
-                if score > 0:  # ダミーピークでない場合のみ描画
-                    x, y = int(peak[0]), int(peak[1])
-                    cv2.circle(heatmap_rgb, (x, y), 3, (255, 255, 255), -1)
-                    cv2.putText(heatmap_rgb, f'{i}', (x+5, y-5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        return Image.fromarray(heatmap_rgb)
-    """
-    モデルの出力（ヒートマップ）を後処理し、キーポイントを抽出するクラス。
-    """
-    def __init__(self, num_keypoints: int = 15):
-        """
-        Args:
-            num_keypoints (int): 検出するキーポイントの数。
-        """
-        self.num_keypoints = num_keypoints
+        return np.array([peak_x, peak_y], dtype=np.float32), float(max_score)
 
     def process_batch(self, heatmap_preds: torch.Tensor, batch_meta: List[Dict[str, Any]]) -> List[Dict[str, np.ndarray]]:
         """
@@ -276,45 +217,159 @@ class CourtPostprocessor:
             List[Dict[str, np.ndarray]]:
                 各画像の検出結果（'keypoints'と'scores'）を格納した辞書のリスト。
         """
-        # (B, K, H, W) -> B x (K, H, W)
-        heatmap_probs = torch.sigmoid(heatmap_preds).cpu().numpy()
-        
         batch_results = []
-        for i in range(heatmap_probs.shape[0]): # バッチサイズでループ
-            heatmap_prob = heatmap_probs[i]
-            meta = batch_meta[i]
+        
+        if not self.multi_channel:
+            # 1つのヒートマップから複数のキーポイントを抽出 (1->15)
+            if heatmap_preds.shape[1] != 1:
+                print(f"Warning: single-channel mode (1->15)では1チャンネルのヒートマップを想定していますが、入力は{heatmap_preds.shape[1]}チャンネルです。最初のチャンネルのみを使用します。")
             
-            keypoints = np.zeros((self.num_keypoints, 2), dtype=np.float32)
-            scores = np.zeros(self.num_keypoints, dtype=np.float32)
-
-            original_h, original_w = meta["original_size"]
-            input_h, input_w = meta["input_size"]
-
-            for k in range(self.num_keypoints):
-                hmap = heatmap_prob[k, :, :]
-                peak_y, peak_x = np.unravel_index(np.argmax(hmap), hmap.shape)
-                score = hmap[peak_y, peak_x]
-
-                original_x = (peak_x / input_w) * original_w
-                original_y = (peak_y / input_h) * original_h
-
-                keypoints[k] = [original_x, original_y]
-                scores[k] = score
+            # ヒートマップを確率に変換
+            heatmap_probs = torch.sigmoid(heatmap_preds[:, 0, :, :]).cpu().numpy()
             
-            batch_results.append({"keypoints": keypoints, "scores": scores})
-
+            for i in range(heatmap_probs.shape[0]):
+                heatmap = heatmap_probs[i]
+                meta = batch_meta[i]
+                
+                # 複数のピークを検出
+                peaks_coords, scores = self._find_peaks(heatmap)
+                
+                # 元の画像サイズに座標を変換
+                original_h, original_w = meta["original_size"]
+                input_h, input_w = meta["input_size"]
+                
+                scale_x = original_w / input_w
+                scale_y = original_h / input_h
+                
+                original_keypoints = peaks_coords * np.array([scale_x, scale_y])
+                original_keypoints[scores == 0] = [0, 0]
+                
+                batch_results.append({
+                    "keypoints": original_keypoints,
+                    "scores": scores
+                })
+        
+        else:
+            # 複数のヒートマップからそれぞれ1つのキーポイントを抽出 (15->15)
+            expected_channels = self.num_keypoints
+            actual_channels = heatmap_preds.shape[1]
+            
+            if actual_channels != expected_channels:
+                print(f"Warning: multi-channel mode (15->15)では{expected_channels}チャンネルのヒートマップを想定していますが、入力は{actual_channels}チャンネルです。")
+            
+            # 利用可能なチャンネル数を決定
+            num_channels = min(actual_channels, expected_channels)
+            
+            # ヒートマップを確率に変換
+            heatmap_probs = torch.sigmoid(heatmap_preds[:, :num_channels, :, :]).cpu().numpy()
+            
+            for i in range(heatmap_probs.shape[0]):
+                keypoints_list = []
+                scores_list = []
+                
+                for ch in range(num_channels):
+                    heatmap = heatmap_probs[i, ch]
+                    peak_coord, score = self._find_single_peak(heatmap)
+                    keypoints_list.append(peak_coord)
+                    scores_list.append(score)
+                
+                # 不足分をゼロパディング
+                while len(keypoints_list) < self.num_keypoints:
+                    keypoints_list.append(np.array([0.0, 0.0], dtype=np.float32))
+                    scores_list.append(0.0)
+                
+                keypoints = np.array(keypoints_list)
+                scores = np.array(scores_list)
+                
+                # 元の画像サイズに座標を変換
+                meta = batch_meta[i]
+                original_h, original_w = meta["original_size"]
+                input_h, input_w = meta["input_size"]
+                
+                scale_x = original_w / input_w
+                scale_y = original_h / input_h
+                
+                original_keypoints = keypoints * np.array([scale_x, scale_y])
+                original_keypoints[scores == 0] = [0, 0]
+                
+                batch_results.append({
+                    "keypoints": original_keypoints,
+                    "scores": scores
+                })
+        
         return batch_results
 
-    def visualize_heatmap(self, heatmap_pred: torch.Tensor) -> Image.Image:
-        """単一のヒートマップ全体を視覚化して画像として返す（デバッグ用）"""
-        # (1, K, H, W) or (K, H, W) -> (K, H, W)
-        heatmap_pred = heatmap_pred.squeeze(0)
-        heatmap_prob = torch.sigmoid(heatmap_pred).cpu().numpy()
+    def visualize_heatmap(self, heatmap_pred: torch.Tensor, channel_idx: int = 0) -> Image.Image:
+        """
+        指定されたチャンネルのヒートマップを視覚化して画像として返す（デバッグ用）
         
-        combined_heatmap = np.max(heatmap_prob, axis=0)
+        Args:
+            heatmap_pred (torch.Tensor): モデルの出力テンソル
+            channel_idx (int): 表示するチャンネルのインデックス
+        """
+        # 指定されたチャンネルを取得
+        if heatmap_pred.dim() == 4:  # (B, C, H, W)
+            heatmap = heatmap_pred[0, channel_idx, :, :]
+        elif heatmap_pred.dim() == 3:  # (C, H, W)
+            heatmap = heatmap_pred[channel_idx, :, :]
+        else:  # (H, W)
+            heatmap = heatmap_pred
+
+        heatmap_prob = torch.sigmoid(heatmap).cpu().numpy()
         
-        heatmap_normalized = cv2.normalize(combined_heatmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        heatmap_normalized = cv2.normalize(heatmap_prob, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         heatmap_colored = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
         heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        
+        return Image.fromarray(heatmap_rgb)
+
+    def visualize_peaks(self, heatmap_pred: torch.Tensor, channel_idx: int = 0, show_peaks: bool = True) -> Image.Image:
+        """
+        指定されたチャンネルのヒートマップと検出されたピークを視覚化する（デバッグ用）
+        
+        Args:
+            heatmap_pred (torch.Tensor): モデルの出力テンソル
+            channel_idx (int): 表示するチャンネルのインデックス
+            show_peaks (bool): ピークを表示するかどうか
+        """
+        # 指定されたチャンネルを取得
+        if heatmap_pred.dim() == 4:  # (B, C, H, W)
+            heatmap = heatmap_pred[0, channel_idx, :, :]
+        elif heatmap_pred.dim() == 3:  # (C, H, W)
+            heatmap = heatmap_pred[channel_idx, :, :]
+        else:  # (H, W)
+            heatmap = heatmap_pred
+
+        heatmap_prob = torch.sigmoid(heatmap).cpu().numpy()
+        
+        # 基本的なヒートマップを作成
+        heatmap_normalized = cv2.normalize(heatmap_prob, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        heatmap_colored = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+        heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        
+        if show_peaks:
+            if self.multi_channel:
+                # multi-channel mode: 指定されたチャンネルから1つのピークを検出
+                peak, score = self._find_single_peak(heatmap_prob)
+                if score > self.peak_threshold:
+                    x, y = int(peak[0]), int(peak[1])
+                    cv2.circle(heatmap_rgb, (x, y), 5, (255, 255, 255), -1, cv2.LINE_AA)
+                    cv2.circle(heatmap_rgb, (x, y), 7, (0, 0, 0), 2, cv2.LINE_AA)
+                    cv2.putText(heatmap_rgb, f'Ch{channel_idx}', (x + 8, y + 8), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(heatmap_rgb, f'Ch{channel_idx}', (x + 8, y + 8), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+            else:
+                # single-channel mode: 複数のピークを検出
+                peaks, scores = self._find_peaks(heatmap_prob)
+                for i, (peak, score) in enumerate(zip(peaks, scores)):
+                    if score > self.peak_threshold:
+                        x, y = int(peak[0]), int(peak[1])
+                        cv2.circle(heatmap_rgb, (x, y), 3, (255, 255, 255), -1, cv2.LINE_AA)
+                        cv2.circle(heatmap_rgb, (x, y), 5, (0, 0, 0), 1, cv2.LINE_AA)
+                        cv2.putText(heatmap_rgb, f'{i}', (x + 5, y + 5), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2, cv2.LINE_AA)
+                        cv2.putText(heatmap_rgb, f'{i}', (x + 5, y + 5), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1, cv2.LINE_AA)
         
         return Image.fromarray(heatmap_rgb)
