@@ -1,0 +1,7 @@
+# @package _group_
+
+_target_: src.ball.models.conv3d_tsm_fpn.BallDetNet
+
+# Parameters for the SwinBallUNet model
+num_frames: 8
+num_classes: 1

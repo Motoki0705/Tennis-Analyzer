@@ -23,13 +23,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Handle different model types
-try:   
-    from src.ball.lit_module.lit_lite_tracknet_focal import LitLiteTracknetFocalLoss
+try:
+    from src.ball.lit_module.lit_generic_ball_model import LitGenericBallModel
     LITE_TRACKNET_AVAILABLE = True
-    logger.info("LiteTrackNet modules available.")
+    logger.info("Generic LitModule available.")
 except ImportError:
     LITE_TRACKNET_AVAILABLE = False
-    raise ImportError("LiteTrackNet modules not available. Check imports.")
+    # This is a fallback for the old system, can be removed after full migration
+    try:
+        from src.ball.lit_module.lit_lite_tracknet_focal import LitLiteTracknetFocalLoss
+        LITE_TRACKNET_AVAILABLE = True
+        logger.warning("Falling back to old LitLiteTracknetFocalLoss module.")
+    except ImportError:
+        LITE_TRACKNET_AVAILABLE = False
+        raise ImportError("Neither Generic nor specific LiteTrackNet modules are available.")
 
 try:
     from third_party.WASB_SBDT.src import load_simple_config, create_ball_detector
@@ -101,16 +108,29 @@ class LiteTrackNetDetector(BaseBallDetector):
             raise FileNotFoundError(f"Model file not found: {model_path}")
         
         try:
-            lit_model = LitLiteTracknetFocalLoss.load_from_checkpoint(
+            # Use the generic module to load any checkpoint created with the new system
+            lit_model = LitGenericBallModel.load_from_checkpoint(
                 model_path, map_location=self.device
             )
             model = lit_model.model
             model.to(self.device)
             model.eval()
-            logger.info(f"Model loaded successfully from '{model_path}'")
+            logger.info(f"Model loaded successfully from '{model_path}' using LitGenericBallModel")
             return model
         except Exception as e:
-            raise RuntimeError(f"Failed to load model: {e}")
+            # Fallback for old checkpoints if needed, can be removed later
+            try:
+                logger.warning(f"Failed to load with generic module ({e}), trying old module...")
+                lit_model = LitLiteTracknetFocalLoss.load_from_checkpoint(
+                    model_path, map_location=self.device
+                )
+                model = lit_model.model
+                model.to(self.device)
+                model.eval()
+                logger.info(f"Model loaded successfully from '{model_path}' using fallback LitLiteTracknetFocalLoss")
+                return model
+            except Exception as final_e:
+                raise RuntimeError(f"Failed to load model with both generic and specific modules: {final_e}")
     
     def preprocess(self, frame_data: List[Tuple[np.array, dict]]) -> List[Tuple[Any, dict]]:
         """Preprocess frames for LiteTrackNet (requires 3 consecutive frames).

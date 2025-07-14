@@ -1,0 +1,4 @@
+# @package _group_
+_target_: src.ball.models.lite_tracknet.LiteTrackNet
+in_channels: 9
+out_channels: 1

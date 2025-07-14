@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - override /model: video_swin
+  - override /litmodule: generic_focal_loss
+  - override /litdatamodule: N_frames_stack_all # Use a compatible datamodule
+  - override /trainer: default
+  - override /callbacks: default
+  - _self_
+
+# Inject the instantiated 'model' into the 'litmodule' configuration.
+litmodule:
+  model: ${model}
