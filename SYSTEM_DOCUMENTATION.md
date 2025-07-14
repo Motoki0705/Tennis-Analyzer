@@ -363,6 +363,125 @@ python -m src.event.api.train --config-name config
 - **Override**: Command-line parameter overrides
 - **Experiment tracking**: Automatic output organization
 
+### 6.3 Generic PyTorch Lightning Training Pipeline Refactoring (Ball Module Example)
+
+This section details the refactoring process applied to the ball detection training pipeline (`src/ball`) to improve scalability, maintainability, and reusability. The principles outlined here can be applied to other AI components within the system.
+
+#### 6.3.1 Motivation: Addressing Redundant LightningModules
+
+**Problem:**
+Initially, each specific model architecture (e.g., LiteTrackNet, Video Swin Transformer) had its own dedicated PyTorch Lightning `LightningModule` implementation (e.g., `src/ball/lit_module/lit_lite_tracknet_focal.py`). This led to:
+- **Code Duplication:** Significant boilerplate code for training loops, optimization, and logging was repeated across different `LightningModule` files.
+- **Poor Scalability:** Adding a new model architecture required creating an entirely new `LightningModule` file, even if the core training logic remained the same.
+- **Maintenance Overhead:** Changes to the fundamental training process (e.g., a new logging strategy, a different optimizer setup) had to be applied to multiple files.
+
+**Goal:**
+Decouple the training logic (handled by `LightningModule`) from the model architecture (`torch.nn.Module`). Create a single, generic `LightningModule` that can train any `torch.nn.Module` by accepting it as an argument.
+
+#### 6.3.2 Step 1: Implementing a Generic LightningModule
+
+A new generic `LightningModule`, `LitGenericBallModel`, was created at `src/ball/lit_module/lit_generic_ball_model.py`.
+
+**Key Features:**
+- **Model Agnostic:** Its constructor accepts an instance of `torch.nn.Module`, a loss function, and configuration for optimizers/schedulers.
+- **Hyperparameter Saving:** Utilizes `self.save_hyperparameters()` to automatically save the model's class path and initialization parameters. This enables `load_from_checkpoint` to reconstruct the model structure dynamically.
+- **Standard PL Hooks:** Implements standard PyTorch Lightning hooks (`training_step`, `validation_step`, `configure_optimizers`, etc.) in a generic way, operating on the provided `nn.Module`.
+
+**Example (Conceptual):**
+```python
+# src/ball/lit_module/lit_generic_ball_model.py
+import pytorch_lightning as pl
+import torch.nn as nn
+from omegaconf import DictConfig
+
+class LitGenericBallModel(pl.LightningModule):
+    def __init__(self, model: nn.Module, loss_fn: nn.Module, optimizer_cfg: DictConfig, scheduler_cfg: DictConfig = None):
+        super().__init__()
+        self.save_hyperparameters(ignore=['model', 'loss_fn']) # Save everything except the actual model/loss instance
+        self.model = model
+        self.loss_fn = loss_fn
+        self.optimizer_cfg = optimizer_cfg
+        self.scheduler_cfg = scheduler_cfg
+
+    def training_step(self, batch, batch_idx):
+        # Generic training logic
+        pass
+
+    def validation_step(self, batch, batch_idx):
+        # Generic validation logic
+        pass
+
+    def configure_optimizers(self):
+        # Generic optimizer/scheduler configuration
+        pass
+```
+
+#### 6.3.3 Step 2: Restructuring Hydra Configurations
+
+The introduction of `LitGenericBallModel` necessitated a significant overhaul of the Hydra configuration files for training (`configs/train/ball/`). The goal was to achieve a highly modular and composable configuration system.
+
+**Previous Approach (Problematic):**
+- Each `config.yaml` directly defined a specific `LightningModule` and its associated model architecture.
+
+**New Approach (Modular Composition):**
+1.  **Separate Model Architectures:** Model definitions (`torch.nn.Module` instances) are now defined in dedicated YAML files under `configs/train/ball/model/`.
+    *   `configs/train/ball/model/lite_tracknet.yaml`
+    *   `configs/train/ball/model/conv3d_tsm_fpn.yaml` (or `swin.yaml`, `video_swin.yaml` etc.)
+    *   These files define the `_target_` (class path) and `_recursive_` instantiation parameters for the `nn.Module`.
+
+2.  **Generic LightningModule Configuration:** The `LitGenericBallModel` itself is configured in a separate YAML file under `configs/train/ball/lit_module/`.
+    *   `configs/train/ball/lit_module/generic_focal_loss.yaml`
+    *   This file defines the `_target_` for `LitGenericBallModel` and its `loss_fn` and optimizer/scheduler configurations. Crucially, it expects the `model` argument to be provided via composition.
+
+3.  **Experiment-Specific Composition:** Top-level experiment configuration files combine the generic `LightningModule` with a specific model architecture.
+    *   `configs/train/ball/lite_tracknet_generic.yaml`
+    *   `configs/train/ball/conv3d_tsm_fpn_generic.yaml`
+    *   These files use Hydra's `defaults` keyword to compose the `lit_module` and `model` components.
+
+**Example (Conceptual `conv3d_tsm_fpn_generic.yaml`):**
+```yaml
+# configs/train/ball/conv3d_tsm_fpn_generic.yaml
+defaults:
+  - lit_module: generic_focal_loss # Uses the generic LightningModule config
+  - model: conv3d_tsm_fpn           # Uses the specific Conv3D TSM FPN model config
+  - trainer: default
+  - callbacks: default
+  - data: default
+  - _self_
+
+# Any overrides specific to this experiment
+```
+
+This modularity allows for easy swapping of models, loss functions, or training strategies without modifying the core `LightningModule` or duplicating configurations.
+
+#### 6.3.4 Step 3: Adapting Training and Inference Scripts
+
+**Training Script (`src/ball/api/train.py`):**
+- The `train.py` script was updated to instantiate the `LightningModule` using `hydra.utils.instantiate(cfg.lit_module)`. Hydra automatically resolves the composed `model` argument for `LitGenericBallModel`.
+- The `@hydra.main` decorator's `config_path` was set to `None` to avoid conflicts when specifying the config name via the command line (e.g., `python -m src.ball.api.train --config-name conv3d_tsm_fpn_generic`).
+
+**Inference Script (`src/ball/ball_detection_module.py`):**
+- The inference logic was updated to use `LitGenericBallModel.load_from_checkpoint()`. This method, combined with `save_hyperparameters` in the generic module, allows for seamless loading of checkpoints trained with the new generic pipeline.
+- A fallback mechanism was temporarily implemented to ensure compatibility with older, model-specific checkpoints during the transition phase.
+- Old, model-specific `LightningModule` files were removed after successful migration.
+
+#### 6.3.5 Step 4: Automating Training and Checkpoint Management
+
+A shell script, `scripts/train/ball/train_all_models.sh`, was created to automate the training of multiple models and manage their checkpoints.
+
+**Script Functionality:**
+- Iterates through a predefined list of model configurations (e.g., `lite_tracknet_generic`, `conv3d_tsm_fpn_generic`).
+- For each model, it executes the `src/ball/api/train.py` script with the corresponding Hydra configuration.
+- After training, it identifies the best checkpoint (based on `val_loss`) from Hydra's output directory.
+- It then copies and renames the best checkpoint to a standardized location: `checkpoints/ball/<model_name>/best_model.ckpt`.
+- It ensures that Hydra's output directory is fixed for predictable checkpoint saving (`hydra.run.dir` and `default_root_dir` are set to relative paths within the project).
+
+**Debugging Notes:**
+- **`Could not override 'model'` error:** This was resolved by setting `config_path=None` in `@hydra.main` in `src/ball/api/train.py`, allowing command-line overrides to take precedence.
+- **Undefined `${version}` in callbacks/trainer configs:** This was resolved by ensuring `default_root_dir` and `dirpath` in the trainer and checkpoint configs were set to fixed relative paths (e.g., `default_root_dir: "."`, `dirpath: "checkpoints"`) within the Hydra run directory, as the `train_all_models.sh` script already manages the overall output directory structure. This removed the dependency on Hydra's dynamic versioning for internal paths.
+
+This comprehensive refactoring process ensures that the training pipeline for ball detection is robust, flexible, and easily extensible to new model architectures, setting a precedent for similar improvements across other components of the Tennis Systems platform.
+
 ---
 
 ## 7. Testing & Quality Assurance
