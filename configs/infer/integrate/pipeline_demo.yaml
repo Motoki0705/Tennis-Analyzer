@@ -49,7 +49,7 @@ pose:
 
 # Ball tracking configuration
 ball:
-  model_path: "checkpoints/ball/wasb_tennis_best.pth.tar"  # Path to ball detector model (.pth.tar or .pth)
+  model_path: "checkpoints/ball/hrnet/wasb_tennis_best.pth.tar"  # Path to ball detector model (.pth.tar or .pth)
   score_threshold: 0.5  # Ball detection score threshold
   tracker:
     max_displacement: 100  # Maximum displacement for tracking

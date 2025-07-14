@@ -6,7 +6,10 @@
       "Bash(find:*)",
       "Bash(python:*)",
       "Bash(ls:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(mv:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker:*)"
     ],
     "deny": []
   }

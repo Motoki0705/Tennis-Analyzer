@@ -112,14 +112,14 @@ class BallDetector:
 
 
 class DetectionPostprocessor:
-    """Simplified detection postprocessor for extracting ball coordinates."""
+    """Simplified detection postprocessor for extracting ball coordinates using maximum detection."""
 
     def __init__(self, cfg):
         self._score_threshold = cfg['detector']['postprocessor']['score_threshold']
         self._frames_out = cfg['model']['frames_out']
 
     def process_batch(self, batch_preds, batch_meta, device):
-        """Process batch predictions with simple peak detection."""
+        """Process batch predictions with simple maximum detection."""
         scale_factors_list = batch_meta['scale_factors']
         batch_size = len(scale_factors_list)
         
@@ -141,7 +141,6 @@ class DetectionPostprocessor:
         
         batch_detections = []
         for batch_idx in range(batch_size):
-            detections = []
             scale_x, scale_y = scale_factors_list[batch_idx]
             
             # Get the last frame heatmap (most recent prediction)
@@ -150,30 +149,32 @@ class DetectionPostprocessor:
             else:
                 hm = heatmaps[batch_idx, -1]  # Use last available frame
             
-            # Simple peak detection - find top peaks
-            if np.max(hm) > self._score_threshold:
-                # Find top 5 peaks
-                flat_hm = hm.flatten()
-                top_indices = np.argpartition(flat_hm, -5)[-5:]
+            # Simple maximum detection
+            max_score = np.max(hm)
+            if max_score > self._score_threshold:
+                # Find the position of maximum value
+                max_pos = np.unravel_index(np.argmax(hm), hm.shape)
+                y, x = max_pos
                 
-                for idx in top_indices:
-                    score = flat_hm[idx]
-                    if score > self._score_threshold:
-                        # Convert flat index to 2D coordinates
-                        y, x = divmod(idx, hm.shape[1])
-                        
-                        # Scale back to original image coordinates
-                        x_orig = x * scale_x
-                        y_orig = y * scale_y
-                        
-                        detections.append({
-                            'xy': np.array([x_orig, y_orig], dtype=np.float32), 
-                            'score': float(score)
-                        })
+                # Scale back to original image coordinates
+                x_orig = x * scale_x
+                y_orig = y * scale_y
                 
-                # Sort by score (highest first)
-                detections.sort(key=lambda x: x['score'], reverse=True)
+                detection = {
+                    'x': float(x_orig),
+                    'y': float(y_orig), 
+                    'score': float(max_score),
+                    'visi': True
+                }
+            else:
+                # No detection above threshold
+                detection = {
+                    'x': -1,
+                    'y': -1,
+                    'score': 0.0,
+                    'visi': False
+                }
             
-            batch_detections.append(detections)
+            batch_detections.append(detection)
         
         return batch_detections

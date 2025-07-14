@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # standalone_wasb_demo.py
-# Standalone WASB-SBDT ball tracking demo (first 10 frames)
+# Standalone WASB-SBDT ball detection demo (simplified without tracking)
 
 import hydra
 from omegaconf import DictConfig
@@ -14,16 +14,15 @@ from collections import deque
 import csv
 
 # Local WASB modules
-from wasb_modules import load_default_config, build_tracker
+from wasb_modules import load_default_config
 from wasb_modules.pipeline_modules import BallPreprocessor, BallDetector, DetectionPostprocessor
-from wasb_modules.drawing_utils import draw_on_frame
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
 
-class StandaloneTennisTracker:
-    """Standalone tennis ball tracker (first 10 frames only)."""
+class StandaloneTennisDetector:
+    """Standalone tennis ball detector (simplified without tracking)."""
     
     def __init__(self, cfg: DictConfig):
         self.cfg_hydra = cfg
@@ -39,7 +38,7 @@ class StandaloneTennisTracker:
         
         self.video_writer = None
         self.video_properties = {}
-        self.all_tracking_results = []
+        self.all_detection_results = []
 
     def _initialize_device(self):
         """Initialize device."""
@@ -54,8 +53,7 @@ class StandaloneTennisTracker:
         self.preprocessor = BallPreprocessor(self.cfg)
         self.detector = BallDetector(self.cfg, self.device)
         self.postprocessor = DetectionPostprocessor(self.cfg)
-        self.tracker = build_tracker(self.cfg)
-        log.info("Pipeline modules initialized.")
+        log.info("Pipeline modules initialized (no tracking).")
 
     def _initialize_video_io(self):
         """Initialize video input and output."""
@@ -79,14 +77,14 @@ class StandaloneTennisTracker:
                                             (self.video_properties['width'], self.video_properties['height']))
 
     def _save_results_as_csv(self):
-        """Save tracking results to CSV file."""
-        log.info(f"Saving tracking results to {self.cfg_hydra.io.results_csv}...")
+        """Save detection results to CSV file."""
+        log.info(f"Saving detection results to {self.cfg_hydra.io.results_csv}...")
         try:
             with open(self.cfg_hydra.io.results_csv, 'w', newline='') as csvfile:
                 fieldnames = ['frame', 'visible', 'score', 'x', 'y']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-                for frame_idx, result in enumerate(self.all_tracking_results):
+                for frame_idx, result in enumerate(self.all_detection_results):
                     row = {
                         'frame': frame_idx,
                         'visible': 1 if result.get("visi", False) else 0,
@@ -99,7 +97,7 @@ class StandaloneTennisTracker:
             log.error(f"Failed to write CSV file: {e}")
 
     def run(self):
-        """Run the standalone pipeline on first 10 frames."""
+        """Run the standalone pipeline with simple detection."""
         self._initialize_video_io()
         
         cap = cv2.VideoCapture(self.cfg_hydra.io.video)
@@ -111,11 +109,9 @@ class StandaloneTennisTracker:
         max_frames = min(processing_limit, self.video_properties['total_frames']) if processing_limit else self.video_properties['total_frames']
         log.info(f"Processing first {max_frames} frames...")
         
-        self.tracker.refresh()
-        
-        # Add dummy results for first frames_in - 1 frames
+        # Add dummy results for first frames_in - 1 frames (warm-up period)
         for _ in range(frames_in - 1):
-            self.all_tracking_results.append(self.tracker.update([]))
+            self.all_detection_results.append({'visi': False, 'x': -1, 'y': -1, 'score': 0.0})
         
         pbar = tqdm(total=max_frames, desc="Processing frames")
         
@@ -125,7 +121,14 @@ class StandaloneTennisTracker:
                 break
             
             frame_history.append(frame)
+            
+            # Skip until we have enough frames for sequence
             if len(frame_history) < frames_in:
+                output_frame = frame.copy()
+                if self.cfg_hydra.visualization.enabled:
+                    cv2.putText(output_frame, "Warming up...", (10, 30), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                self.video_writer.write(output_frame)
                 pbar.update(1)
                 continue
             
@@ -143,19 +146,26 @@ class StandaloneTennisTracker:
                 # Postprocessing
                 batch_detections = self.postprocessor.process_batch(batch_preds, batch_meta, self.device)
                 
-                # Tracking
-                detections = batch_detections[0]  # Get first (and only) batch item
-                tracking_output = self.tracker.update(detections)
-                self.all_tracking_results.append(tracking_output)
+                # Get detection result
+                detection_result = batch_detections[0]  # Get first (and only) batch item
+                self.all_detection_results.append(detection_result)
                 
                 # Draw and save frame
-                output_frame = draw_on_frame(frame, tracking_output)
+                output_frame = frame.copy()
+                if self.cfg_hydra.visualization.enabled and detection_result['visi']:
+                    x, y = int(detection_result['x']), int(detection_result['y'])
+                    score = detection_result['score']
+                    # Draw ball as red circle
+                    cv2.circle(output_frame, (x, y), 8, (0, 0, 255), -1)
+                    cv2.putText(output_frame, f'{score:.2f}', (x+10, y-10), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                    
                 self.video_writer.write(output_frame)
                 
             except Exception as e:
                 log.warning(f"Error processing frame {frame_idx}: {e}")
-                # Add dummy tracking result for failed frames
-                self.all_tracking_results.append(self.tracker.update([]))
+                # Add dummy detection result for failed frames
+                self.all_detection_results.append({'visi': False, 'x': -1, 'y': -1, 'score': 0.0})
                 self.video_writer.write(frame)
             
             pbar.update(1)
@@ -171,7 +181,7 @@ class StandaloneTennisTracker:
             self.video_writer.release()
         
         log.info(f"Output video saved to: {self.cfg_hydra.io.output}")
-        log.info(f"Tracking results saved to: {self.cfg_hydra.io.results_csv}")
+        log.info(f"Detection results saved to: {self.cfg_hydra.io.results_csv}")
 
 
 @hydra.main(config_path="../../../configs/infer/ball", config_name="pipeline_demo", version_base=None)
@@ -187,8 +197,8 @@ def main(cfg: DictConfig) -> None:
     )
     
     try:
-        tracker_pipeline = StandaloneTennisTracker(cfg)
-        tracker_pipeline.run()
+        detector_pipeline = StandaloneTennisDetector(cfg)
+        detector_pipeline.run()
     except Exception as e:
         log.error(f"An error occurred during the pipeline execution: {e}", exc_info=True)
 

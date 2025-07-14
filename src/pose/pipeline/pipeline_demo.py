@@ -161,7 +161,7 @@ class MultithreadedPosePipeline:
                 
                 # 描画
                 if self.cfg.visualization.enabled:
-                    output_frame = draw_results_on_frame(frame, player_detections, pose_results, self.cfg)
+                    output_frame = draw_results_on_frame(frame, player_detections, pose_results, self.cfg.pose.keypoint_threshold)
                 else:
                     output_frame = frame
                 self.video_writer.write(output_frame)

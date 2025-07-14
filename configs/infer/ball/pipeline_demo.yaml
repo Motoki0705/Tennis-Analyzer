@@ -1,6 +1,6 @@
 # @package _global_
 
-# Hydra configuration for ball tracking pipeline demo
+# Hydra configuration for ball detection pipeline demo
 hydra:
   output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
   run:
@@ -17,7 +17,7 @@ task: ball
 io:
   video: null  # Path to the input video (required)
   output: "demo_output_ball.mp4"  # Output video file
-  results_csv: "ball_tracking_results.csv"  # Output CSV file for tracking results
+  results_csv: "ball_detection_results.csv"  # Output CSV file for detection results
   
 # Device configuration
 device: auto  # Device to use: cuda, cpu, auto
@@ -30,19 +30,17 @@ ball:
   model_path: "checkpoints/ball/wasb_tennis_best.pth.tar"  # Path to ball detector model (.pth.tar or .pth)
   score_threshold: 0.5  # Minimum score threshold for ball detection
   
-# Tracker configuration
-tracker:
-  max_displacement: 100  # Maximum displacement for tracking between frames
+# Detection configuration
+detection:
+  use_tracking: false  # Tracking disabled, using simple detection
   
 # Visualization settings
 visualization:
   enabled: true
-  draw_trajectory: true
   show_score: true
   circle_radius: 8
   colors:
     ball: [0, 0, 255]  # Red for ball
-    trajectory: [255, 255, 0]  # Yellow for trajectory
 
 # Processing limits (for demo purposes)
 processing:

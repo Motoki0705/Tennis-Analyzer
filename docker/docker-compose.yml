@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  tennis-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    container_name: tennis_systems_dev
+    volumes:
+      # Mount the entire project directory
+      - ..:/workspace
+      # Mount data directories for persistence
+      - ../datasets:/workspace/datasets
+      - ../checkpoints:/workspace/checkpoints
+      - ../outputs:/workspace/outputs
+      # Create volume for pip cache to speed up rebuilds
+      - pip_cache:/home/developer/.cache/pip
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace
+      - DEBIAN_FRONTEND=noninteractive
+    # Keep container running for development
+    stdin_open: true
+    tty: true
+    # Use host network for easier port access during development
+    network_mode: host
+
+  # Service for running specific commands
+  tennis-run:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    container_name: tennis_systems_run
+    volumes:
+      - ..:/workspace
+      - ../datasets:/workspace/datasets
+      - ../checkpoints:/workspace/checkpoints
+      - ../outputs:/workspace/outputs
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace
+    # This service is designed for one-off command execution
+    profiles:
+      - tools
+
+volumes:
+  pip_cache:
