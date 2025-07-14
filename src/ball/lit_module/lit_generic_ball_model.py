@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torchvision
+from torchvision.ops import sigmoid_focal_loss
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LambdaLR
 
 class LitGenericBallModel(pl.LightningModule):
@@ -23,7 +24,7 @@ class LitGenericBallModel(pl.LightningModule):
     def __init__(
         self,
         model: nn.Module,
-        criterion: nn.Module,
+        criterion: Dict[str, Any],
         optimizer_params: Dict[str, Any],
         scheduler_params: Dict[str, Any],
         num_log_images: int = 4,
@@ -31,7 +32,7 @@ class LitGenericBallModel(pl.LightningModule):
         """
         Args:
             model (nn.Module): The neural network model to be trained.
-            criterion (nn.Module): The loss function.
+            criterion (Dict[str, Any]): Parameters for the loss function (e.g.,).
             optimizer_params (Dict): Parameters for the optimizer (e.g., lr, weight_decay).
             scheduler_params (Dict): Parameters for the LR scheduler (e.g., warmup_epochs, max_epochs).
             num_log_images (int): Number of images to log during validation.
@@ -44,9 +45,9 @@ class LitGenericBallModel(pl.LightningModule):
         self.save_hyperparameters(ignore=['model', 'criterion'])
 
         self.model = model
-        self.criterion = criterion
         
         # Store params directly for easier access
+        self.criterion = criterion
         self.optimizer_params = optimizer_params
         self.scheduler_params = scheduler_params
         
@@ -99,14 +100,10 @@ class LitGenericBallModel(pl.LightningModule):
         if logits.dim() == 3:
             logits = logits.unsqueeze(1)
             
-        # Calculate loss using the injected criterion
-        loss = self.criterion(logits, heatmaps)
-        
-        preds = torch.sigmoid(logits)
-        masked_iou = self.compute_masked_iou(preds, heatmaps)
+        # Calculate loss using the Focal loss
+        loss = sigmoid_focal_loss(inputs=logits, targets=heatmaps, alpha=self.criterion.alpha, gamma=self.criterion.gamma, reduction=self.criterion.reduction)
 
         self.log(f"{stage}_loss", loss, on_step=(stage == "train"), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        self.log(f"{stage}_iou", masked_iou, on_step=(stage == "train"), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         
         return loss
 
@@ -145,22 +142,6 @@ class LitGenericBallModel(pl.LightningModule):
 
         # Clear the stored outputs
         self._val_batch_outputs_for_log = None
-
-    @staticmethod
-    def compute_masked_iou(
-        preds: torch.Tensor, targets: torch.Tensor, threshold: float = 0.5
-    ) -> torch.Tensor:
-        """Computes Intersection over Union (IoU) for binary masks."""
-        gt_mask = targets > threshold
-        pred_mask = preds > threshold
-        
-        intersection = (gt_mask & pred_mask).float().sum(dim=(1, 2, 3))
-        union = (gt_mask | pred_mask).float().sum(dim=(1, 2, 3))
-        
-        # Add a small epsilon to avoid division by zero
-        iou = (intersection + 1e-6) / (union + 1e-6)
-        
-        return iou.mean()
 
     def configure_optimizers(self):
         """Configure optimizers and learning rate schedulers."""

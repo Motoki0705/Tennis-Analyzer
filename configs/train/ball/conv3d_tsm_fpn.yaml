@@ -1,13 +1,9 @@
 # @package _global_
 
 defaults:
-  - override /model: conv3d_tsm_fpn
-  - override /litmodule: generic_focal_loss
-  - override /litdatamodule: N_frames_stack_all
-  - override /trainer: default
-  - override /callbacks: default
+  - model: conv3d_tsm_fpn
+  - litmodule: generic_focal_loss
+  - litdatamodule: N_frames_stack_all
+  - trainer: default
+  - callbacks: default
   - _self_
-
-# Inject the instantiated 'model' into the 'litmodule' configuration.
-litmodule:
-  model: ${model}

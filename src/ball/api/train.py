@@ -118,7 +118,7 @@ def get_best_model_info(callbacks: list) -> tuple[Optional[str], Optional[float]
     return best_model_path, best_score
 
 
-@hydra.main(config_path="../../../configs/train/ball", config_name="lite_tracknet_focal", version_base=None)
+@hydra.main(config_path=None, config_name="lite_tracknet_generic", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
     ボール検出モデルのトレーニングを実行する
@@ -152,7 +152,7 @@ def main(cfg: DictConfig) -> None:
         log.info("LightningModuleを作成中...")
         # Hydraがネストされた設定（model, criterionなど）を自動的にインスタンス化し、
         # LitGenericBallModelに注入します。
-        lit_module = hydra.utils.instantiate(cfg.lit_module)
+        lit_module = hydra.utils.instantiate(cfg.litmodule)
         
         # Callbacksの設定
         callbacks = setup_callbacks(cfg)
