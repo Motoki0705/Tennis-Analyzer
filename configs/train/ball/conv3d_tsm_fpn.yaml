@@ -1,0 +1,9 @@
+# @package _global_
+
+defaults:
+  - model: conv3d_tsm_fpn
+  - litmodule: generic_focal_loss
+  - litdatamodule: N_frames_stack_all
+  - trainer: default
+  - callbacks: default
+  - _self_
