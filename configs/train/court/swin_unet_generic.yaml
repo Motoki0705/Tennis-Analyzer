@@ -1,0 +1,31 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  - model: swin_unet
+  - litmodule: generic_focal_loss
+  - litdatamodule: court_data
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# SwinUNet specific optimizer override
+litmodule:
+  optimizer_params:
+    lr: 0.001  # Higher learning rate for transformer models
+    weight_decay: 0.0001
+  scheduler_params:
+    warmup_epochs: 5  # Longer warmup for transformer
+    max_epochs: 100
+
+# 実験名（ディレクトリ名）の設定
+version: ${model.meta.name}_court_generic
+
+# 再現性のための乱数シード
+seed: 42
