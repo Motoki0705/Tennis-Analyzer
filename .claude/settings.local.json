@@ -9,7 +9,20 @@
       "Bash(rg:*)",
       "Bash(mv:*)",
       "Bash(docker-compose:*)",
-      "Bash(docker:*)"
+      "Bash(docker:*)",
+      "Bash(git checkout:*)",
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(src/player/lit_module/__init__.py )",
+      "Bash(src/player/api/train.py )",
+      "Bash(configs/train/player/model/ )",
+      "Bash(configs/train/player/litmodule/generic_detection.yaml )",
+      "Bash(configs/train/player/rtdetr_generic.yaml )",
+      "Bash(scripts/train/player/)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(git stash:*)"
     ],
     "deny": []
   }

@@ -51,6 +51,7 @@ train_and_archive_model() {
 
     # Set a deterministic output path for this run
     local run_output_dir="${HYDRA_OUTPUT_ROOT}/${config_name}"
+    local source_ckpt_dir="${run_output_dir}/checkpoints"
     
     # Clean up previous run directory to ensure a fresh start
     if [ -d "${run_output_dir}" ]; then
@@ -64,16 +65,14 @@ train_and_archive_model() {
         --config-name="${config_name}" \
         hydra.run.dir="${run_output_dir}" \
         trainer.default_root_dir="${run_output_dir}" \
-        callbacks.checkpoint.dirpath="${run_output_dir}"; then
+        callbacks.checkpoint.dirpath="${source_ckpt_dir}"; then
         print_error "Training failed for ${config_name}. Aborting."
         exit 1
     fi
 
     print_success "Training completed for ${config_name}."
 
-    # --- Checkpoint Archiving ---
-    local source_ckpt_dir="${run_output_dir}/checkpoints"
-    
+    # --- Checkpoint Archiving ---    
     # Find the best checkpoint file. Using -print -quit to get only the first match.
     local best_ckpt
     best_ckpt=$(find "${source_ckpt_dir}" -name "*.ckpt" -print -quit)
