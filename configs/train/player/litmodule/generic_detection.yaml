@@ -1,0 +1,26 @@
+# Generic Detection LitModule Configuration
+_target_: src.player.lit_module.lit_generic_player_model.LitGenericPlayerModel
+
+# Model (injected from parent config)
+model: ${model}
+
+# Optimizer parameters
+optimizer_params:
+  lr: 0.0001
+  lr_backbone: 0.00001
+  weight_decay: 0.0001
+
+# Scheduler parameters
+scheduler_params:
+  T_max: 50
+  eta_min: 0.000001
+  num_freeze_epoch: 3
+
+# Criterion parameters (optional, loss handled by model)
+criterion: {}
+
+# Meta information
+meta:
+  name: generic_detection
+  output_type: "detection"
+  description: "Generic Lightning module for object detection models"

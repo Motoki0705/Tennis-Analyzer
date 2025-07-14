@@ -1,0 +1,12 @@
+# LiteTrackNet model configuration
+# @package _global_.model
+
+_target_: src.court.models.lite_tracknet.LiteTrackNet
+in_channels: 3
+out_channels: 15
+
+# Meta information
+meta:
+  name: lite_tracknet
+  architecture: "U-Net with depthwise separable convolutions"
+  output_type: "heatmap"
