@@ -79,7 +79,7 @@ train_and_archive_model() {
     if [ -z "${best_ckpt}" ]; then
         print_warning "No checkpoint file found for ${config_name} in ${source_ckpt_dir}. Skipping archival."
         return
-    }
+    fi 
 
     local dest_dir="${CHECKPOINT_ROOT}/${config_name}"
     local dest_path="${dest_dir}/best_model.ckpt"
