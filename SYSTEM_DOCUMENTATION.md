@@ -1,347 +1,663 @@
-# テニス動画解析システム 総合ドキュメント
+# Tennis Systems - AI-Powered Tennis Video Analysis Platform
 
-## 1. プロジェクト概要 (Executive Summary)
+## 1. Executive Summary
 
-### 1.1. 目的
-本プロジェクトは、テニス動画から多様な情報を自動的に抽出し、分析するためのAIプラットフォームです。主な目的は、試合の戦術分析、選手のパフォーマンス評価、および動画のハイライト生成を支援することです。
+### 1.1 Project Overview
+Tennis Systems is a comprehensive AI-powered platform for automated tennis video analysis, providing real-time multi-modal analysis of tennis matches. The system integrates five core AI components to extract comprehensive insights from tennis videos:
 
-### 1.2. 主要機能
-システムは以下の5つのコア機能から構成されています。
-- **ボール検出・追跡**: 高精度なボール検出と軌跡追跡
-- **コート検出**: テニスコートの主要な線とキーポイントの認識
-- **選手検出**: リアルタイムでの選手の位置特定
-- **姿勢推定**: 選手の骨格キーポイントを推定し、フォームを解析
-- **イベント検出**: 上記情報を統合し、「ヒット」や「バウンド」などの重要イベントを時系列で特定
+- **Ball Detection & Tracking**: High-precision ball detection and trajectory tracking
+- **Court Detection**: Tennis court keypoint detection (15 keypoints)
+- **Player Detection**: RT-DETR based player detection
+- **Pose Estimation**: 17 keypoint pose estimation using VitPose
+- **Event Detection**: Multi-modal time-series analysis for hit/bounce detection
 
-### 1.3. 技術的成果
-- 軽量モデル(LiteTrackNet)と高精度モデル(Video Swin Transformer)の選択肢を提供。
-- リアルタイム物体検出モデル(RT-DETR)をテニス選手検出に特化させてファインチューニング。
-- 複数の異なる情報源（ボール、コート、選手、姿勢）を統合し、文脈を理解するマルチモーダルTransformer（EventTransformerV2）を実装。
-- PyTorch Lightningによる再現性の高い学習パイプラインと、Hydraによる柔軟な設定管理を実現。
+### 1.2 Key Features
+- **Modular Pipeline Architecture**: Independent components that can be used standalone or integrated
+- **Hydra Configuration Management**: Unified configuration system replacing argparse
+- **Multi-threaded Processing**: Optimized pipeline with I/O, inference, and post-processing workers
+- **Real-time Capabilities**: Support for both batch and real-time video processing
+- **Standalone WASB Integration**: Local implementation eliminating third-party dependencies
 
-### 1.4. 使用場面
-- **プロ・アマチュアの試合分析**: 選手のポジショニング、ボールの軌道、ショットの種類などをデータ化し、戦術研究に活用。
-- **コーチング支援**: 選手のフォームを骨格レベルで解析し、改善点を可視化。
-- **メディア・放送**: 試合のハイライトシーン（ラリー、エースなど）を自動生成。
-- **個人プレイヤー**: 自身のプレイを客観的に分析し、スキル向上に役立てる。
+### 1.3 Technical Achievements
+- **Model Diversity**: Choice between lightweight (LiteTrackNet) and high-accuracy (Video Swin Transformer) models
+- **Fine-tuned Detection**: RT-DETR specialized for tennis player detection
+- **Multi-modal Fusion**: EventTransformerV2 integrating ball, court, player, and pose information
+- **Production-Ready**: PyTorch Lightning training pipelines with Hydra configuration management
 
 ---
 
-## 2. システムアーキテクチャ
+## 2. System Architecture
 
-### 2.1. 全体構成図 (詳細版)
-本システムは、動画を入力とし、分析結果を可視化した動画とイベント確率グラフを出力するエンドツーエンドのパイプラインです。
+### 2.1 Overall Pipeline Architecture
 
 ```mermaid
 graph TD
-    A[動画ファイル (.mp4)] --> B{1. フレーム抽出 & バッチ化};
-    B --> C{2a. ボール特徴量抽出 (LiteTrackNet)};
-    B --> D{2b. コート特徴量抽出 (LiteTrackNet)};
-    B --> E{2c. 選手特徴量抽出 (RT-DETR)};
-    E --> F{2d. 姿勢特徴量抽出 (ViTPose)};
-    C --> G[3. ボール軌道平滑化];
-    G --> H{4. 特徴量統合 & パディング};
-    D --> H;
-    F --> H;
-    H --> I{5. イベント検出 (EventTransformerV2)};
-    I --> J{6a. イベント確率グラフ生成};
-    I --> K{6b. 結果動画レンダリング};
-    J --> L[グラフ画像 (.png)];
-    K --> M[出力動画 (.mp4)];
-
-    subgraph "ステージ1: 特徴抽出 (GPUバッチ処理)"
-        B; C; D; E; F;
+    A[Video Input] --> B[Multi-threaded Pipeline]
+    
+    subgraph "Pipeline Architecture"
+        C[Worker 1: I/O & Preprocessing]
+        D[Worker 2: Unified Inference]
+        E[Worker 3: Postprocessing & Output]
+        
+        C --> D
+        D --> E
     end
-
-    subgraph "ステージ2: 後処理 & 準備 (CPU)"
-        G; H;
+    
+    subgraph "AI Components"
+        F[Ball Detection<br/>WASB-SBDT/LiteTrackNet]
+        G[Court Detection<br/>LiteTrackNet/Swin-UNet/ViT-UNet]
+        H[Player Detection<br/>RT-DETR]
+        I[Pose Estimation<br/>VitPose]
+        J[Event Detection<br/>EventTransformerV2]
     end
-
-    subgraph "ステージ3: イベント検出 (GPUチャンク処理)"
-        I;
-    end
-
-    subgraph "ステージ4: 可視化"
-        J; K;
-    end
+    
+    B --> F
+    B --> G
+    B --> H
+    B --> I
+    B --> J
+    
+    E --> K[Annotated Video Output]
+    E --> L[CSV Analysis Results]
 ```
 
-### 2.2. モジュール構成 (詳細版)
-- **`demo/event.py`**: システム全体の処理フローを統括する、最も重要なスクリプト。モデルのロード、バッチ/チャンク処理、可視化までを実装。
-- **`AppConfig`クラス**: チェックポイントのパス、画像サイズ、推論時の閾値など、すべての設定を管理するデータクラス。
-- **`ModelLoader`クラス**: 5つのAIモデルと、それぞれに対応する画像前処理パイプライン(`albumentations`, `transformers.Processor`)をロードし、一元的に管理。
-- **`BallTrajectorySmoother`クラス**: ボール検出結果の信頼性を向上させるための後処理クラス。確率によるフィルタリング、外れ値除去、欠損値補間を行う。
-- **`src/{component}`**: 各解析コンポーネントのコアロジック。
-    - **`models/`**: PyTorchモデルのアーキテクチャ定義 (`nn.Module`)。
-    - **`dataset/`**: データセットの定義 (`torch.utils.data.Dataset`)。
-    - **`lit_datamodule/`**: データ読み込みと前処理をカプセル化 (`pl.LightningDataModule`)。
-    - **`lit_module/`**: 学習、検証、テストのロジックをカプセル化 (`pl.LightningModule`)。
-    - **`api/`**: `train.py`など、外部からコンポーネントを操作するためのエントリーポイント。
+### 2.2 Component Architecture
 
-### 2.3. 入出力仕様 (詳細版)
-- **入力**:
-    - MP4形式の動画ファイル。
-- **出力**:
-    - **イベント確率グラフ**: 各フレームにおける「ヒット」「バウンド」の発生確率を滑らかな曲線で描画したPNG画像。
-    - **解析結果ビデオ**: 元の動画に以下の情報をオーバーレイ描画したMP4ファイル。
-        - 平滑化されたボールの軌跡
-        - イベント発生時のテキスト表示 ("HIT", "BOUNCE")
+#### 2.2.1 Core Components Structure
+```
+src/
+├── ball/              # Ball detection and tracking
+│   ├── models/        # Model architectures (LiteTrackNet, Video Swin)
+│   ├── pipeline/      # Standalone WASB pipeline
+│   └── local_classifier/  # Ball classification modules
+├── court/             # Court keypoint detection
+│   ├── models/        # LiteTrackNet, Swin-UNet, ViT-UNet
+│   └── pipeline/      # Court detection pipeline
+├── player/            # Player detection
+│   ├── models/        # RT-DETR implementation
+│   └── pipeline/      # Player detection pipeline
+├── pose/              # Pose estimation
+│   └── pipeline/      # VitPose integration
+├── event/             # Event detection
+│   └── model/         # EventTransformerV2
+└── integrate/         # Unified analysis pipeline
+    └── pipeline_demo.py  # Main integration script
+```
 
-### 2.4. 処理フロー (詳細版)
-`demo/event.py`における`full_analysis_pipeline`関数の処理フローは以下の通りです。
-
-1.  **ステージ1: 特徴量抽出 (バッチ処理)**
-    -   動画をフレームごとに読み込み、一定数（例：32フレーム）をメモリ上に溜める。
-    -   溜まったフレームのバッチに対し、**ボール・コート・選手モデル**の推論を並列的に実行。
-    -   選手検出結果（BBox）を使い、**姿勢推定モデル**の推論を実行。
-    -   このバッチ処理を動画の終わりまで繰り返す。
-2.  **ステージ1.5: ボール軌道平滑化**
-    -   全フレームのボール検出結果（座標と確率）に対し、`BallTrajectorySmoother`を適用。
-    -   確率の低い点を無効化し、物理的に不自然な跳び（外れ値）を除去後、欠損区間を線形補間する。
-3.  **ステージ2: テンソル準備**
-    -   全フレーム分の4種類の特徴量リストを、`EventTransformerV2`への入力形式に変換。
-    -   1フレーム内の選手数が変動するため、シーケンス全体での最大選手数に合わせてゼロパディングを行い、テンソルの形状を `(B, T, P, D)` に統一する。
-4.  **ステージ3: イベント検出 (チャンク処理)**
-    -   長大な時系列特徴量テンソルを、GPUメモリに収まる固定長の**チャンク**（例：300フレーム）に分割。
-    -   チャンクの境界での情報欠落を防ぐため、**オーバーラップ**（例：30フレーム）を持たせる。
-    -   各チャンクを`EventTransformerV2`モデルに入力し、イベント確率を計算。
-    -   全チャンクの結果を結合し、オーバーラップ部分を除去して、動画全体のイベント確率シーケンスを得る。
-5.  **ステージ4 & 5: 結果生成とレンダリング**
-    -   イベント確率からグラフ画像を生成。
-    -   平滑化されたボール軌道とイベント検出結果を、元のフレームに描画し、出力ビデオを生成する。
+#### 2.2.2 Configuration Architecture
+```
+configs/
+├── train/             # Training configurations
+│   ├── ball/         # Ball detection training configs
+│   ├── court/        # Court detection training configs
+│   ├── player/       # Player detection training config
+│   └── event/        # Event detection training configs
+└── infer/            # Inference configurations (NEW)
+    ├── ball/         # Ball tracking pipeline config
+    ├── court/        # Court detection pipeline config
+    ├── player/       # Player detection pipeline config
+    ├── pose/         # Pose estimation pipeline config
+    └── integrate/    # Unified pipeline config
+```
 
 ---
-## 3. 機械学習モデル詳細
 
-### 3.1. 使用モデル
-本システムでは、タスクの特性に応じて様々なモデルアーキテクチャを使い分けています。
+## 3. Model Specifications
 
-| タスク | モデルアーキテクチャ | 主な特徴 |
-| :--- | :--- | :--- |
-| **ボール検出** | LiteTrackNet, Video Swin Transformer | 軽量U-Net型モデルと高精度Transformerモデル |
-| **コート検出** | LiteTrackNet | ボール検出と類似のアーキテクチャをキーポイント検出に応用 |
-| **選手検出** | RT-DETR | リアルタイム性能に優れたTransformerベースの物体検出モデル |
-| **姿勢推定** | ViTPose | Vision Transformerベースの高精度な姿勢推定モデル |
-| **イベント検出**| EventTransformerV2 | 複数モダリティの時系列データを統合するカスタムTransformer |
+### 3.1 Ball Detection Models
 
-### 3.2. ボール検出モデル (`LiteTrackNet`)
-- **アーキテクチャ**:
-    - U-Netベースのエンコーダ・デコーダ構造。
-    - **効率化技術**:
-        - `DSConv`: Depthwise Separable Convolutionによりパラメータ数を削減。
-        - `SE Block`: Squeeze-and-Excitationブロックでチャネル間の特徴量の重み付けを学習。
-        - `PixelShuffle`: 効率的なアップサンプリング手法。
-- **学習データ**:
-    - 連続する3フレームの画像と、3フレーム目に対応するボール位置のヒートマップのペア。
-- **学習プロセス**:
-    - **損失関数**: `sigmoid_focal_loss` を使用。ヒートマップのように正解領域が非常に小さい（クラス不均衡な）場合に有効。
-    - **オプティマイザ**: `AdamW`
-    - **スケジューラ**: `CosineAnnealingLR` と線形ウォームアップを組み合わせ、安定した学習を実現。
-    - **評価指標**: `Masked IoU` (Intersection over Union)
-- **モデルの保存・読み込み**:
-    - PyTorch Lightningのチェックポイント（`.ckpt`）として保存。
-    - `LitLiteTracknetFocalLoss.load_from_checkpoint()` メソッドで読み込み可能。
+#### 3.1.1 WASB-SBDT (Primary)
+- **Architecture**: HRNet-based detection with online tracking
+- **Input**: 3-frame sequences (RGB)
+- **Output**: Ball coordinates with confidence scores
+- **Tracking**: OnlineTracker with motion prediction
+- **Implementation**: Standalone local modules (`src/ball/pipeline/wasb_modules/`)
 
-### 3.3. コート検出モデル (`LiteTrackNet`)
-- **アーキテクチャ**:
-    - **ボール検出モデルと共通の`LiteTrackNet`アーキテクチャを採用**しており、コードの再利用性が高い。
-    - **主な違い**:
-        - **入力**: 単一のRGB画像（3チャンネル）。
-        - **出力**: 15個のコートキーポイントに対応する15チャンネルのヒートマップ。
-- **学習データ**:
-    - 単一のフレーム画像と、それに対応する15チャンネルの目標ヒートマップのペア。各チャンネルが1つのキーポイントの位置を表す。
-- **学習プロセス**:
-    - ボール検出モデルと同様に、`Focal Loss`、`AdamW`、`CosineAnnealingLR`を使用。
-- **後処理**:
-    - 出力された15チャンネルのヒートマップそれぞれで最も確率の高いピクセルを検出し、15個のキーポイント座標 `(x, y)` を取得する。
+#### 3.1.2 LiteTrackNet (Alternative)
+- **Architecture**: Lightweight U-Net with efficiency optimizations
+- **Features**: DSConv, SE Blocks, PixelShuffle upsampling
+- **Input**: 3-frame sequences
+- **Output**: Heatmap-based ball position
 
-### 3.4. 選手検出モデル (`RT-DETR`)
-- **アーキテクチャ**:
-    - Hugging Face `transformers`ライブラリの**RT-DETR (Real-Time Detection Transformer)** をベースにしています。
-    - 事前学習済みモデル `PekingU/rtdetr_v2_r18vd` を利用し、テニス選手という単一クラスの検出に特化させています。
-- **学習プロセス**:
-    - **転移学習**: 大規模なデータセットで事前学習されたモデルをファインチューニングすることで、少ないデータでも高い性能を達成します。
-    - **段階的学習**:
-        1.  **初期エポック**: モデルの`backbone`（特徴抽出部）を凍結し、物体を検出する`head`部分のみを学習させます。
-        2.  **後期エポック**: `backbone`の凍結を解除し、モデル全体を低い学習率で微調整します。
-    - **差分学習率**: `backbone`と`head`で異なる学習率を適用し、学習の安定化を図っています。
-- **後処理**:
-    - モデルの出力は、`transformers`ライブラリの`RTDetrImageProcessor`を使用して、人間が解釈しやすいバウンディングボックスの座標と信頼度スコアのリストに変換されます。
+#### 3.1.3 Video Swin Transformer (High-accuracy)
+- **Architecture**: Transformer-based temporal modeling
+- **Input**: Multi-frame video sequences
+- **Output**: Temporally-aware ball detection
 
-### 3.5. 姿勢推定モデル (`ViTPose`)
-- **アーキテクチャ**:
-    - Hugging Face `transformers`ライブラリで提供されている**ViTPose (Vision Transformer for Pose Estimation)** を利用します。
-    - ベースモデルは `usyd-community/vitpose-base-simple` です。
-- **処理フロー**:
-    - **選手検出モデルの出力（バウンディングボックス）が必須**です。
-    - 検出された各選手の領域を画像から切り出し、`VitPose`モデルに入力することで、17点の骨格キーポイント（目、鼻、肩、肘など）の座標と信頼度スコアを取得します。
-- **特徴**:
-    - Vision Transformerをベースにしており、画像全体の文脈を捉える能力が高く、オクルージョン（隠れ）に強いとされています。
+### 3.2 Court Detection Models
 
-### 3.6. イベント検出モデル (`EventTransformerV2`)
-- **アーキテクチャ**:
-    - **本プロジェクトの核心となるマルチモーダル時系列Transformerモデル**です。
-    - **入力**: 他の4モデル（ボール、コート、選手、姿勢）から抽出・後処理された時系列特徴量。
-    - **構造**:
-        1.  **モダリティ別埋め込み**: 4種類の入力特徴量を、それぞれ独立した線形層で高次元ベクトルに変換。
-        2.  **Player Attention Pooling**: 複数選手の情報をAttention機構で一つのベクトルに集約。
-        3.  **モダリティ別Transformer**: ボール、コート、選手の各時系列データに、それぞれ独立したTransformerエンコーダを適用し、時間的文脈を抽出。
-        4.  **Cross-Attention融合**: 3つのTransformerの出力を、学習可能なクエリを用いたCross-Attentionで一つのベクトルに融合。
-        5.  **分類ヘッド**: 最終的なベクトルを線形層に通し、「ヒット」「バウンド」の2クラスの確率を出力。
-- **学習プロセス**:
-    - **カスタム損失関数**:
-        - **重み付きBCE**: イベントの有無（クラス不均衡）に応じてサンプルごとに損失の重みを変更。
-        - **Clarity Regularizer**: 「ヒット」と「バウンド」が同時に高い確率で予測されることを防ぐ正則化項を導入。
-- **特徴**:
-    - 複数の異なる情報源を統合し、それらの時間的な関係性を捉えることで、単一の情報源だけでは困難な高度なイベント（例：ボールと選手のラケットが接触する「ヒット」）を検出します。
+#### 3.2.1 LiteTrackNet (Standard)
+- **Architecture**: U-Net encoder-decoder
+- **Input**: Single RGB frame
+- **Output**: 15-channel heatmap (15 keypoints)
+- **Keypoints**: Baseline, service lines, net, court boundaries
 
-### 3.7. モデル連携とデータフロー
-各モデルは独立しているわけではなく、下流のモデルが上流のモデルの出力を利用する依存関係にあります。
+#### 3.2.2 Swin-UNet (Enhanced)
+- **Architecture**: Swin Transformer encoder + U-Net decoder
+- **Features**: Hierarchical attention, better global context
 
--   `選手検出` → `姿勢推定`: 選手検出モデルが出力したバウンディングボックスが、姿勢推定モデルの入力として必須です。
--   `ボール検出` + `コート検出` + `選手検出` + `姿勢推定` → `イベント検出`: 他の4モデルすべての後処理済み出力（時系列特徴量）が、イベント検出モデルの入力として必須です。
+#### 3.2.3 ViT-UNet (Experimental)
+- **Architecture**: Vision Transformer encoder + U-Net decoder
+- **Features**: Self-attention for global feature modeling
 
-この連携を実現するため、`demo/event.py`では、まず上流の4モデルの推論を全フレームに対して行い、得られた特徴量リストを`prepare_tensors`関数で整形・パディングしてから、最終段のイベント検出モデルに入力しています。
+### 3.3 Player Detection Model
+
+#### 3.3.1 RT-DETR v2
+- **Base Model**: `PekingU/rtdetr_v2_r18vd`
+- **Architecture**: Real-time Detection Transformer
+- **Training Strategy**: 
+  - Stage 1: Frozen backbone, head-only training
+  - Stage 2: Full model fine-tuning with differential learning rates
+- **Classes**: Player, Ball, Referee
+- **Post-processing**: NMS, confidence filtering
+
+### 3.4 Pose Estimation Model
+
+#### 3.4.1 VitPose
+- **Model**: `usyd-community/vitpose-base-simple`
+- **Architecture**: Vision Transformer for pose estimation
+- **Input**: Player bounding boxes (from RT-DETR)
+- **Output**: 17 COCO keypoints per player
+- **Features**: Strong occlusion handling, global context understanding
+
+### 3.5 Event Detection Model
+
+#### 3.5.1 EventTransformerV2
+- **Architecture**: Multi-modal time-series Transformer
+- **Inputs**: Ball, court, player, pose features
+- **Process**:
+  1. Modality-specific embeddings
+  2. Player attention pooling
+  3. Modality-specific Transformers
+  4. Cross-attention fusion
+  5. Classification head
+- **Outputs**: Hit/bounce probabilities
+- **Loss Function**: Weighted BCE + Clarity Regularizer
 
 ---
-## 4. データ処理パイプライン
 
-### 4.1. データ拡張
-学習時のデータ拡張は、`albumentations`ライブラリを用いて定義されています。`src/ball/api/train.py`の`hydra.utils.instantiate(cfg.litdatamodule)`で呼び出されるデータモジュール内で、以下のような拡張が設定されていると考えられます（`configs/train/ball/litdatamodule/*.yaml`参照）。
--   `Resize`: 画像を指定サイズ（例: 360x640）に統一。
--   `Normalize`: ピクセル値を平均0、標準偏差1付近に正規化。
--   （学習時のみ）`HorizontalFlip`, `RandomBrightnessContrast`など、モデルの汎化性能を高めるための拡張。
+## 4. Pipeline Implementation
 
-### 4.2. パディング処理 (`prepare_tensors`関数)
-イベント検出モデルは、固定長のテンソルを入力として要求します。しかし、フレームごとに検出される選手の数は変動します。この問題を解決するため、以下のパディング処理が行われます。
+### 4.1 Hydra Configuration System
 
-1.  動画全体（シーケンス）で、1フレームあたりに検出された選手の最大数 `max_players` を特定します。
-2.  各フレームについて、検出された選手数が `max_players` に満たない場合、その差の数だけ**ゼロベクトル**を追加します。
-3.  これにより、`player_bbox_tensor`は `(1, T, max_players, 5)`、`player_pose_tensor`は `(1, T, max_players, 51)` という固定形状のテンソルになります。
-4.  もし動画全体で選手が一人も検出されなかった場合でも、`max_players=0`の空のテンソルを作成し、処理が停止しないようになっています。
-
----
-## 5. 実装詳細
-
-### 5.1. 主要クラス・関数 (詳細版)
--   **`demo/event.py`**:
-    -   `full_analysis_pipeline()`: 推論パイプライン全体を制御するメイン関数。
-    -   `extract_features_batch()`: GPUのバッチ処理を活用して、動画から高速に特徴量を抽出する関数。
-    -   `prepare_tensors()`: 抽出した特徴量リストを、パディングしてPyTorchテンソルに変換する関数。
-    -   `render_output_video()`: 解析結果を元の動画フレームに描画する関数。
--   **`src/event/model/transformer_v2.py`**:
-    -   `EventTransformerV2.forward()`: 4つのモダリティ（ボール、コート、選手BBox、選手姿勢）を入力とし、Attention PoolingとCross-Attentionを用いて情報を融合し、イベントのロジットを出力する、このシステムの核心部。
--   **`src/event/lit_module/lit_transformer_v2.py`**:
-    -   `LitTransformerV2.custom_event_loss()`: 通常のBCE損失に加え、クラス不均衡を考慮したサンプル重み付けと、予測の明確性を促す「Clarity Regularizer」を組み合わせたカスタム損失関数。
-
-### 5.2. 設定管理 (Hydra)
-Hydraの設定は非常にモジュール化されています。例えば、ボール検出の学習(`src.ball.api.train`)では、`configs/train/ball/lite_tracknet_focal.yaml`がメインの設定ファイルとして読み込まれますが、その中身は以下のようになっています。
+#### 4.1.1 Configuration Structure
+All pipelines now use Hydra for unified configuration management:
 
 ```yaml
-# @package _global_
+# Example: configs/infer/integrate/pipeline_demo.yaml
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/integrate/pipeline_demo/${now:%Y-%m-%d_%H-%M-%S}
 
-defaults:
-  - trainer: default
-  - litdatamodule: 3_frames_cat_last
-  - litmodule: lite_tracknet
-  - callbacks: default
-  - _self_
+# Task enabling/disabling
+tasks:
+  court: true
+  pose: true  
+  ball: true
 
-seed: 42
-checkpoint_dir: "checkpoints/ball"
+# Component configurations
+court:
+  checkpoint: "checkpoints/court/lit_vit_unet/best_model.ckpt"
+  input_size: [224, 224]
+  score_threshold: 0.3
+
+player:
+  checkpoint: "checkpoints/player/lit_rt_detr/best_model.ckpt"
+  threshold: 0.7
+
+ball:
+  model_path: "checkpoints/ball/hrnet/wasb_tennis_best.pth.tar"
+  score_threshold: 0.5
+
+# Visualization settings
+visualization:
+  enabled: true
+  court:
+    draw_keypoints: true
+    draw_skeleton: true
+  pose:
+    draw_boxes: true
+    draw_keypoints: true
+  ball:
+    draw_trajectory: true
 ```
 
--   `defaults`: 他のYAMLファイルをインクルードしています。これにより、`trainer`の設定は`trainer/default.yaml`から、`litdatamodule`の設定は`litdatamodule/3_frames_cat_last.yaml`から読み込まれます。
--   **動的な設定変更**: この構造のおかげで、コマンドラインから特定のコンポーネントの設定だけを簡単に切り替えることができます。
-    ```bash
-    # データモジュールだけを別の設定に切り替えて学習
-    python -m src.ball.api.train litdatamodule=N_frames_stack_all
-    ```
+#### 4.1.2 Pipeline Execution
+```bash
+# Individual components
+python src/ball/pipeline/standalone_wasb_demo.py io.video=input.mp4
+python src/court/pipeline/pipeline_demo.py io.video=input.mp4 court.checkpoint_path=model.ckpt
+python src/player/pipeline/pipeline_demo.py io.video=input.mp4
+python src/pose/pipeline/pipeline_demo.py io.video=input.mp4
 
-### 5.3. エラーハンドリング
-- Pythonの標準的な`try...except`ブロックと`logging`モジュールを使用。
-- 学習スクリプトでは、エラー発生時にスタックトレースを含む詳細なログを出力。
+# Integrated analysis
+python src/integrate/pipeline_demo.py io.video=input.mp4
+```
 
-### 5.4. 最適化
-- **GPU利用**: PyTorch Lightningを通じて、GPUアクセラレーションを標準でサポート。
-- **並列処理**: `torch.utils.data.DataLoader`の`num_workers`により、データ読み込みを並列化。
-- **メモリ効率化**: `LiteTrackNet`のような軽量モデルの採用や、`RT-DETR`の段階的学習により、限られた計算資源でも動作するように配慮。
-- **混合精度計算**: `demo/event.py`の推論パイプラインでは、`torch.autocast`を用いて`bfloat16`形式での計算を行い、速度向上とメモリ削減を実現。
-- **チャンク処理**: 長大な時系列データを扱うイベント検出モデルでは、入力をチャンクに分割して処理することで、VRAMの消費を抑える。
+### 4.2 Multi-threaded Pipeline Architecture
 
----
-## 6. 使用方法・API仕様
+#### 4.2.1 Thread Organization
+1. **Worker 1 (I/O & Preprocessing)**:
+   - Video frame reading
+   - Batch preparation
+   - Preprocessing for all models
 
-### 6.1. インストール手順
-1.  **リポジトリのクローン**:
-    ```bash
-    git clone <repository_url>
-    cd tennis_systems
-    ```
-2.  **Python環境の構築**:
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate
-    ```
-3.  **依存関係のインストール**:
-    `requirements.txt`が存在しないため、主要なライブラリを手動でインストールする必要があります。（これは改善点です）
-    ```bash
-    # PyTorch (CUDAバージョンに合わせて公式サイトからインストール)
-    # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+2. **Worker 2 (Unified Inference)**:
+   - GPU-accelerated model inference
+   - Batch processing optimization
+   - Memory management
 
-    pip install pytorch-lightning hydra-core omegaconf transformers opencv-python gradio fvcore pandas matplotlib
-    ```
+3. **Worker 3 (Postprocessing & Output)**:
+   - Result visualization
+   - Video writing
+   - CSV export
 
-### 6.2. 基本的な使用方法
-- **学習の実行**:
-    ```bash
-    # ボール検出モデルの学習 (デフォルト設定)
-    python -m src.ball.api.train
+#### 4.2.2 Queue Management
+- **Configurable queue sizes**: `batch_size * queue_size_multiplier`
+- **Backpressure handling**: Prevents memory overflow
+- **Thread synchronization**: Clean shutdown mechanisms
 
-    # 設定を変更して学習
-    python -m src.ball.api.train litmodule=video_swin_transformer_focal trainer.max_epochs=10
-    ```
-- **推論の実行 (統合デモ)**:
-    ```bash
-    python demo/event.py
-    ```
-    これによりGradioベースのWeb UIが起動します。
+### 4.3 Standalone WASB Integration
 
-### 6.3. 推論パイプラインの実行
-このリポジトリの主要な使用方法は、`demo/event.py`を実行することです。
-これによりGradioベースのWeb UIが起動し、ユーザーはビデオファイルをアップロードして、`full_analysis_pipeline`関数による完全な分析を実行できます。現時点では、このスクリプトが事実上の推論APIとなっています。
+#### 4.3.1 Local Implementation
+The system now includes a complete standalone implementation of WASB-SBDT:
+
+```
+src/ball/pipeline/wasb_modules/
+├── __init__.py           # Core exports and tracker
+├── config.py            # Configuration management
+├── pipeline_modules.py  # Preprocessing, detection, postprocessing
+└── drawing_utils.py     # Visualization utilities
+```
+
+#### 4.3.2 Key Components
+- **BallPreprocessor**: Frame sequence preparation
+- **BallDetector**: HRNet-based ball detection
+- **DetectionPostprocessor**: Coordinate extraction and filtering
+- **OnlineTracker**: Motion-based ball tracking
+- **Configuration**: Default WASB settings with customization
 
 ---
-## 7. 実験結果・性能評価
-（このセクションは、具体的な実験結果のデータがないため、ドキュメントの構成のみ示します）
 
-### 7.1. 評価指標
-- **ボール・コート検出**: Masked IoU, ヒートマップに対するFocal Loss
-- **選手検出**: mAP (mean Average Precision), 各種損失（GIoU, L1, etc.）
-- **イベント検出**: F1スコア, 適合率, 再現率, AUROC
+## 5. Data Processing & Formats
 
-### 7.2. 制限事項
-- **カメラアングルへの依存**: 固定カメラからの映像を前提としており、大きく視点が動く映像には対応が困難。
-- **オクルージョン**: 選手や他の物体によってボールが隠れると、検出が途切れる可能性がある。`BallTrajectorySmoother`である程度は緩和されるが、限界はある。
-- **一般化性能**: 学習データに含まれないコートの照明条件や、特殊なカメラ設定では性能が低下する可能性がある。
+### 5.1 Input/Output Specifications
+
+#### 5.1.1 Input Requirements
+- **Video Format**: MP4, AVI, MOV (OpenCV-compatible)
+- **Resolution**: Any (automatically resized per model requirements)
+- **Frame Rate**: Any (preserved in output)
+
+#### 5.1.2 Output Formats
+
+##### 5.1.2.1 Video Output
+- **Format**: MP4 with annotations
+- **Annotations**:
+  - Ball trajectory with confidence visualization
+  - Court keypoints and skeleton
+  - Player bounding boxes
+  - Pose keypoints and skeleton
+  - Event markers (hit/bounce indicators)
+
+##### 5.1.2.2 CSV Output
+Comprehensive frame-by-frame analysis results:
+
+```csv
+frame_idx,ball_visible,ball_x,ball_y,ball_score,
+court_kp_0_x,court_kp_0_y,court_kp_0_score,...,
+p0_score,p0_x1,p0_y1,p0_x2,p0_y2,
+p0_kp0_x,p0_kp0_y,p0_kp0_s,...
+```
+
+### 5.2 Data Processing Pipeline
+
+#### 5.2.1 Preprocessing
+- **Standardization**: Consistent input formats across models
+- **Augmentation**: Training-time data augmentation (Albumentations)
+- **Batching**: Efficient GPU utilization
+
+#### 5.2.2 Postprocessing
+- **Coordinate Mapping**: Model output to original frame coordinates
+- **Filtering**: Confidence-based result filtering
+- **Smoothing**: Temporal consistency for tracking
+- **Visualization**: Annotation rendering
 
 ---
-## 8. 開発・運用ガイド
 
-### 8.1. テスト
-- **単体テスト・統合テスト**: `tests/`ディレクトリにテストコードが配置されている。`pytest`を使用して実行。
-    ```bash
-    pytest tests/infer_model_instantiate/
-    ```
+## 6. Training Infrastructure
+
+### 6.1 PyTorch Lightning Framework
+
+#### 6.1.1 Training Components
+- **LightningModule**: Model training logic
+- **LightningDataModule**: Data loading and preprocessing
+- **Trainer**: Training orchestration and optimization
+- **Callbacks**: Checkpointing, early stopping, logging
+
+#### 6.1.2 Training Execution
+```bash
+# Component-specific training
+bash scripts/train/ball/lite_tracknet_focal.sh
+bash scripts/train/court/lite_tracknet_focal.sh  
+bash scripts/train/player/rt_detr.sh
+bash scripts/train/event/event_transformer.sh
+
+# Direct API calls
+python -m src.ball.api.train --config-name lite_tracknet_focal
+python -m src.court.api.train --config-name config
+python -m src.player.api.train --config-name config
+python -m src.event.api.train --config-name config
+```
+
+### 6.2 Configuration Management
+
+#### 6.2.1 Modular Configuration
+- **Trainer configs**: Learning rates, epochs, optimization
+- **Model configs**: Architecture parameters
+- **Data configs**: Dataset paths, augmentation
+- **Callback configs**: Checkpointing, monitoring
+
+#### 6.2.2 Hydra Integration
+- **Composition**: Mix and match configuration components
+- **Override**: Command-line parameter overrides
+- **Experiment tracking**: Automatic output organization
 
 ---
-## 9. 今後の展開
 
-### 9.1. 改善計画
-- **依存関係管理の統一**: プロジェクトルートに`requirements.txt`や`pyproject.toml`を配置し、`pip install -e .`で開発環境を構築できるようにする。
-- **推論APIの整備**: `src/{component}/api/infer.py`を整備し、学習済みモデルを使った推論をより簡単に行えるようにする。
-- **ドキュメントの拡充**: 各設定項目の詳細な説明や、トラブルシューティングガイドを追加する。
+## 7. Testing & Quality Assurance
 
-### 9.2. 拡張可能性
-- **他スポーツへの適用**: モデルアーキテクチャの一部（特に物体検出やイベント検出）は、他のスポーツ（サッカー、バスケットボールなど）の分析にも応用可能。
-- **リアルタイム分析**: RT-DETRのようなリアルタイムモデルを中心にパイプラインを構築し、ライブ映像分析システムへ拡張。
+### 7.1 Test Suite Organization
+
+#### 7.1.1 Test Categories
+```bash
+# Model instantiation tests
+python -m pytest tests/infer_model_instantiate/
+
+# Dataset tests  
+python -m pytest tests/data/
+
+# Compatibility tests
+python -m pytest tests/valid_output_format/
+
+# Integration tests
+python -m pytest tests/ball_pipeline_integration_test.py
+```
+
+#### 7.1.2 Test Coverage
+- **Model Loading**: Checkpoint compatibility
+- **Data Pipeline**: Dataset loading and preprocessing
+- **Output Format**: Model output consistency
+- **Integration**: End-to-end pipeline functionality
+
+### 7.2 Performance Monitoring
+
+#### 7.2.1 Timing Analysis
+- **Stage-wise profiling**: I/O, inference, postprocessing times
+- **Memory tracking**: GPU/CPU memory usage
+- **Throughput metrics**: Frames per second processing
+
+#### 7.2.2 Quality Metrics
+- **Detection accuracy**: Precision, recall, F1 scores
+- **Tracking consistency**: Temporal smoothness
+- **System reliability**: Error handling and recovery
+
+---
+
+## 8. Development Tools & Utilities
+
+### 8.1 Annotation System
+
+#### 8.1.1 Web-based Annotation Interface
+```bash
+cd tools/annotation
+./run_annotation_system.sh setup
+./run_annotation_system.sh start
+# Access at http://localhost:8000
+```
+
+#### 8.1.2 Annotation Workflow
+- **Video upload**: Support for multiple formats
+- **Frame-by-frame annotation**: Precise labeling
+- **Export formats**: COCO JSON, custom formats
+- **Quality control**: Review and validation tools
+
+### 8.2 Development Scripts
+
+#### 8.2.1 Data Preparation
+```bash
+# Generate empty annotations
+python tools/annotation/generate_empty_annotations.py
+
+# Merge to COCO format
+python tools/annotation/merge_to_coco.py
+
+# Extract frames
+python tools/video_clipper/interactive_frame_extractor.py
+```
+
+#### 8.2.2 Model Utilities
+```bash
+# Checkpoint validation
+python tools/check/chekpoint_checker.py
+
+# Code collection
+python tools/collect/all_code_collector.py
+```
+
+---
+
+## 9. Deployment & Production
+
+### 9.1 Environment Setup
+
+#### 9.1.1 Dependencies
+```bash
+# Core ML frameworks
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install pytorch-lightning
+
+# Configuration and utilities
+pip install hydra-core omegaconf
+pip install transformers opencv-python
+pip install gradio pandas matplotlib
+
+# Optional: Development tools
+pip install pytest black flake8
+```
+
+#### 9.1.2 Model Checkpoints
+```
+checkpoints/
+├── ball/
+│   ├── wasb_tennis_best.pth.tar      # WASB-SBDT model
+│   └── lite_tracknet/                # LiteTrackNet models
+├── court/
+│   ├── lit_vit_unet/                 # ViT-UNet models
+│   └── lit_swin_unet/                # Swin-UNet models
+├── player/
+│   └── lit_rt_detr/                  # RT-DETR models
+└── event/
+    └── transformer_v2/               # Event detection models
+```
+
+### 9.2 Production Considerations
+
+#### 9.2.1 Performance Optimization
+- **GPU Memory Management**: Efficient batch processing
+- **Multi-threading**: Optimal resource utilization
+- **Model Selection**: Choose appropriate models for speed/accuracy trade-offs
+
+#### 9.2.2 Monitoring & Logging
+- **Structured logging**: Comprehensive event tracking
+- **Performance metrics**: Real-time monitoring
+- **Error handling**: Graceful degradation and recovery
+
+---
+
+## 10. API Reference
+
+### 10.1 Core Pipeline APIs
+
+#### 10.1.1 Individual Component APIs
+```python
+# Ball tracking
+from src.ball.pipeline.standalone_wasb_demo import StandaloneTennisTracker
+tracker = StandaloneTennisTracker(cfg)
+tracker.run()
+
+# Court detection  
+from src.court.pipeline.pipeline_demo import MultithreadedCourtDetector
+detector = MultithreadedCourtDetector(cfg)
+detector.run()
+
+# Player detection
+from src.player.pipeline.pipeline_demo import MultithreadedPlayerDetector
+detector = MultithreadedPlayerDetector(cfg)
+detector.run()
+
+# Pose estimation
+from src.pose.pipeline.pipeline_demo import MultithreadedPosePipeline
+pipeline = MultithreadedPosePipeline(cfg)
+pipeline.run()
+
+# Integrated analysis
+from src.integrate.pipeline_demo import IntegratedTennisAnalysisPipeline
+pipeline = IntegratedTennisAnalysisPipeline(cfg)
+pipeline.run()
+```
+
+#### 10.1.2 Configuration Loading
+```python
+import hydra
+from omegaconf import DictConfig
+
+@hydra.main(config_path="configs/infer/integrate", config_name="pipeline_demo", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Your pipeline code here
+    pass
+```
+
+### 10.2 Model Loading APIs
+
+#### 10.2.1 PyTorch Lightning Models
+```python
+# Standard Lightning checkpoint loading
+from src.ball.lit_module.lit_lite_tracknet_focal import LitLiteTracknetFocalLoss
+model = LitLiteTracknetFocalLoss.load_from_checkpoint("path/to/checkpoint.ckpt")
+model.eval()
+
+# Court detection
+from src.court.lit_module.lit_vit_unet import LitViTUNet
+model = LitViTUNet.load_from_checkpoint("path/to/checkpoint.ckpt")
+
+# Player detection
+from src.player.lit_module.lit_rtdetr import LitRtdetr
+model = LitRtdetr.load_from_checkpoint("path/to/checkpoint.ckpt")
+```
+
+#### 10.2.2 HuggingFace Models
+```python
+# Pose estimation
+from transformers import VitPoseForPoseEstimation
+model = VitPoseForPoseEstimation.from_pretrained("usyd-community/vitpose-base-simple")
+```
+
+---
+
+## 11. Troubleshooting Guide
+
+### 11.1 Common Issues
+
+#### 11.1.1 Environment Issues
+- **CUDA compatibility**: Ensure PyTorch CUDA version matches system CUDA
+- **Memory errors**: Reduce batch sizes in configuration
+- **FFmpeg errors**: Install FFmpeg for video processing
+- **Import errors**: Verify PYTHONPATH includes project root
+
+#### 11.1.2 Model Issues
+- **Checkpoint loading**: Verify model architecture matches checkpoint
+- **Performance degradation**: Check input preprocessing and model compatibility
+- **Memory overflow**: Adjust batch sizes and queue multipliers
+
+#### 11.1.3 Configuration Issues
+- **Missing parameters**: Check required configuration fields
+- **Path errors**: Ensure all paths are absolute and accessible
+- **Hydra errors**: Verify configuration file syntax and composition
+
+### 11.2 Debugging Tools
+
+#### 11.2.1 Logging Configuration
+```python
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s'
+)
+```
+
+#### 11.2.2 Performance Profiling
+```bash
+# Enable detailed timing
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+python src/integrate/pipeline_demo.py performance.track_timings=true performance.report_interval=50
+```
+
+---
+
+## 12. Future Development
+
+### 12.1 Planned Enhancements
+
+#### 12.1.1 Technical Improvements
+- **Model optimization**: Quantization and pruning for deployment
+- **Real-time streaming**: Live video analysis capabilities  
+- **API standardization**: REST API for service deployment
+- **Containerization**: Docker deployment support
+
+#### 12.1.2 Feature Extensions
+- **Multi-camera support**: Synchronized multi-view analysis
+- **Advanced analytics**: Shot classification, player tracking
+- **Interactive visualization**: Web-based result exploration
+- **Mobile deployment**: Edge device optimization
+
+### 12.2 Research Directions
+
+#### 12.2.1 Model Architecture
+- **Unified models**: End-to-end multi-task learning
+- **Attention mechanisms**: Improved temporal modeling
+- **Self-supervised learning**: Reduced annotation requirements
+
+#### 12.2.2 Application Domains
+- **Other sports**: Adaptation to basketball, soccer, etc.
+- **Broadcast integration**: Real-time sports production
+- **Coaching tools**: Advanced performance analytics
+
+---
+
+## 13. Contributing & Maintenance
+
+### 13.1 Development Workflow
+
+#### 13.1.1 Code Standards
+- **PEP 8 compliance**: Python code style guidelines
+- **Type hints**: Comprehensive type annotations
+- **Documentation**: Google-style docstrings
+- **Testing**: Comprehensive test coverage
+
+#### 13.1.2 Version Control
+- **Branch strategy**: Feature branches with PR reviews
+- **Commit conventions**: Conventional commit messages
+- **Release management**: Semantic versioning
+
+### 13.2 Maintenance Schedule
+
+#### 13.2.1 Regular Tasks
+- **Dependency updates**: Monthly security and compatibility updates
+- **Model retraining**: Periodic retraining with new data
+- **Performance monitoring**: Continuous system health checks
+- **Documentation updates**: Keep documentation current with codebase
+
+---
+
+This documentation provides a comprehensive overview of the Tennis Systems platform, covering architecture, implementation, deployment, and maintenance aspects. The system represents a mature, production-ready solution for AI-powered tennis video analysis with modular design and comprehensive configuration management.

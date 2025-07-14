@@ -1,0 +1,135 @@
+# Advanced Tennis Analysis Pipeline Configuration with Tracking
+
+# Device configuration
+device: auto  # auto, cuda, cpu
+
+# Batch processing
+batch_size: 16
+
+# Buffer settings
+buffer_size: 100
+
+# Threading configuration
+threading:
+  mode: single  # single, multi
+  queue_size: 50
+  workers:
+    video_input: 1
+    preprocessing: 2
+    inference: 1
+    postprocessing: 2
+    video_output: 1
+
+# I/O configuration
+io:
+  input_video: ???  # Required: path to input video
+  output_video: null  # Optional: path to output video
+  output_csv: null  # Optional: path to CSV results file
+  codec: mp4v
+
+# Logging configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+
+# Visualization configuration
+visualization:
+  enabled: true
+  court:
+    keypoint_color: [0, 255, 0]
+    keypoint_radius: 3
+    skeleton_color: [255, 0, 0]
+    skeleton_thickness: 2
+    score_threshold: 0.5
+  ball_tracking:
+    color: [0, 0, 255]
+    radius: 8
+    trail_color: [255, 255, 0]
+    show_trail: true
+    show_prediction: true
+    show_score: true
+  player:
+    bbox_color: [255, 255, 0]
+    bbox_thickness: 2
+    show_score: true
+  pose:
+    keypoint_color: [0, 255, 255]
+    keypoint_radius: 3
+    skeleton_color: [255, 0, 255]
+    skeleton_thickness: 2
+    score_threshold: 0.3
+
+# Task configuration
+tasks:
+  - name: court_detection
+    module: src.integrate.tasks.court_task
+    class_name: CourtDetectionTask
+    enabled: true
+    critical: true
+    dependencies: []
+    config:
+      checkpoint: checkpoints/court/lit_vit_unet/best_model.ckpt
+      input_size: [224, 224]
+      score_threshold: 0.5
+      multi_channel: true
+
+  - name: ball_tracking  # 新しいトラッキングタスク
+    module: src.integrate.tasks.ball_tracking_task
+    class_name: BallTrackingTask
+    enabled: true
+    critical: false
+    dependencies: []
+    config:
+      model_path: checkpoints/ball/hrnet/wasb_tennis_best.pth.tar
+      score_threshold: 0.3
+      tracking_enabled: true
+      max_tracking_distance: 100
+      tracking_history_length: 10
+      min_detection_confidence: 0.2
+
+  - name: player_detection
+    module: src.integrate.tasks.player_task
+    class_name: PlayerDetectionTask
+    enabled: true
+    critical: false
+    dependencies: []
+    config:
+      checkpoint: checkpoints/player/lit_rt_detr/best_model.ckpt
+      confidence_threshold: 0.5
+
+  - name: pose_estimation
+    module: src.integrate.tasks.pose_task
+    class_name: PoseEstimationTask
+    enabled: true
+    critical: false
+    dependencies: [player_detection]
+    config:
+      model_name: "usyd-community/vitpose-base-simple"
+      keypoint_threshold: 0.3
+
+  # 新しいタスクの例
+  - name: shot_classification
+    module: src.integrate.tasks.shot_classification_task
+    class_name: ShotClassificationTask
+    enabled: false  # 開発中
+    critical: false
+    dependencies: [ball_tracking, pose_estimation]
+    config:
+      model_path: checkpoints/shot_classifier/model.pth
+      shot_types: [serve, forehand, backhand, volley, smash]
+      confidence_threshold: 0.6
+
+# Performance monitoring
+performance:
+  enable_profiling: false
+  log_timing: true
+  memory_monitoring: false
+
+# Error handling
+error_handling:
+  continue_on_task_failure: true
+  max_retries: 3
+  retry_delay: 1.0
+
+defaults:
+  - _self_

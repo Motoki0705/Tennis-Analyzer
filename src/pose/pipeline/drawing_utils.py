@@ -8,7 +8,7 @@ import argparse
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-def draw_results_on_frame(frame: np.ndarray, player_detections: Dict, pose_results: List[Dict], args: argparse.Namespace) -> np.ndarray:
+def draw_results_on_frame(frame: np.ndarray, player_detections: Dict, pose_results: List[Dict], pose_keypoint_threshold: float) -> np.ndarray:
     """フレームにプレイヤーのBBoxと骨格を描画する"""
     # --- Drawing Helpers ---
     SKELETON = [
@@ -33,12 +33,12 @@ def draw_results_on_frame(frame: np.ndarray, player_detections: Dict, pose_resul
             keypoints = person_pose['keypoints']
             scores = person_pose['scores']
             for i, (point, score) in enumerate(zip(keypoints, scores)):
-                if score > args.pose_keypoint_threshold:
+                if score > pose_keypoint_threshold:
                     cv2.circle(frame, tuple(map(int, point)), 5, KEYPOINT_COLOR, -1, cv2.LINE_AA)
             
             for joint in SKELETON:
                 idx1, idx2 = joint
-                if scores[idx1] > args.pose_keypoint_threshold and scores[idx2] > args.pose_keypoint_threshold:
+                if scores[idx1] > pose_keypoint_threshold and scores[idx2] > pose_keypoint_threshold:
                     pt1, pt2 = tuple(map(int, keypoints[idx1])), tuple(map(int, keypoints[idx2]))
                     cv2.line(frame, pt1, pt2, SKELETON_COLOR, 2, cv2.LINE_AA)
     return frame

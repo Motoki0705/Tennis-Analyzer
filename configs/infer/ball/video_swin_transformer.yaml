@@ -1,0 +1,82 @@
+# @package _global_
+
+# Hydra configuration for VideoSwinTransformer ball detection inference
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/infer/ball/video_swin_transformer/${now:%Y-%m-%d_%H-%M-%S}
+
+# Default configuration
+defaults:
+  - _self_
+
+# Task identifier
+task: ball
+
+# Input/Output settings
+io:
+  video: datasets/test/video_input2.mp4  # Path to the input video (required)
+  output: "video_swin_ball_output.mp4"  # Output video file
+  results_csv: "video_swin_ball_results.csv"  # Output CSV file for detection results
+  
+# Device configuration
+device: auto  # Device to use: cuda, cpu, auto
+
+# Processing configuration
+batch_size: 1  # Batch size for processing (keep low for video sequences)
+
+# VideoSwinTransformer model configuration
+model:
+  checkpoint_path: "checkpoints/ball/video_swin_transformer_focal/best_model.ckpt"
+  img_size: [320, 640]  # Input image size [H, W]
+  window_size: 5
+  feature_dim: 128
+  transformer_blocks: 1
+  transformer_heads: 4
+  n_frames: 5  # Number of frames in sequence
+  in_channels: 3
+  out_channels: 1
+
+# Input sequence configuration
+input:
+  sequence_length: 5  # Number of frames to process at once
+  overlap: 2  # Number of overlapping frames between sequences
+  frame_interval: 1  # Interval between consecutive frames
+
+# Post-processing configuration
+postprocess:
+  peak_threshold: 0.5  # Threshold for peak detection in heatmap
+  min_distance: 10  # Minimum distance between detected peaks
+  gaussian_sigma: 2.0  # Gaussian smoothing sigma for heatmap
+  use_temporal_smoothing: true  # Apply temporal smoothing across sequence
+  temporal_weight: 0.6  # Weight for center frame in temporal smoothing
+
+# Detection configuration
+detection:
+  use_tracking: false  # Tracking disabled, using simple detection
+  confidence_threshold: 0.3  # Minimum confidence for ball detection
+  
+# Visualization settings
+visualization:
+  enabled: true
+  show_score: true
+  show_heatmap: true  # Whether to show heatmap overlay
+  circle_radius: 8
+  colors:
+    ball: [0, 255, 0]  # Green for VideoSwin ball detection
+    heatmap: [255, 0, 0]  # Red for heatmap visualization
+
+# Processing limits (for demo purposes)
+processing:
+  max_frames: null  # Maximum number of frames to process (null for all frames)
+  
+# Memory optimization
+memory:
+  clear_cache_interval: 50  # Clear GPU cache every N frames
+  max_sequence_buffer: 10  # Maximum number of sequences to keep in buffer
+  
+# Logging configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  log_inference_time: true  # Log inference time for each sequence
