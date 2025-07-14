@@ -1,0 +1,14 @@
+# RT-DETR Model Configuration
+_target_: transformers.RTDetrForObjectDetection.from_pretrained
+
+# Model parameters
+pretrained_model_name_or_path: "PekingU/rtdetr_v2_r18vd"
+num_labels: 1
+ignore_mismatched_sizes: true
+
+# Meta information
+meta:
+  name: rtdetr
+  architecture: "RT-DETR"
+  backbone: "ResNet18"
+  description: "RT-DETR v2 with ResNet18 backbone for player detection"
