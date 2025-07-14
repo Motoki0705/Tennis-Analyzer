@@ -1,0 +1,13 @@
+# SwinUNet model configuration
+# @package _global_.model
+
+_target_: src.court.models.swin_unet.SwinUNet
+model_name: 'swin_tiny_patch4_window7_224'
+in_channels: 3
+out_channels: 15
+
+# Meta information
+meta:
+  name: swin_unet
+  architecture: "Swin Transformer + U-Net decoder"
+  output_type: "heatmap"

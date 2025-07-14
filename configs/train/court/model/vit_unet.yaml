@@ -1,0 +1,13 @@
+# VitUNet model configuration
+# @package _global_.model
+
+_target_: src.court.models.vit_unet.VitUNet
+model_name: 'vit_base_patch16_224'
+in_channels: 3
+out_channels: 15
+
+# Meta information
+meta:
+  name: vit_unet
+  architecture: "Vision Transformer + U-Net decoder"
+  output_type: "heatmap"

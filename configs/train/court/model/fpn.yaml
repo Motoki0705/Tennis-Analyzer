@@ -1,0 +1,13 @@
+# FPN model configuration
+# @package _global_.model
+
+_target_: src.court.models.fpn.FPN
+backbone: 'resnet50'
+in_channels: 3
+out_channels: 15
+
+# Meta information
+meta:
+  name: fpn
+  architecture: "Feature Pyramid Network"
+  output_type: "heatmap"

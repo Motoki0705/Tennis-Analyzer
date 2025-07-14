@@ -1,0 +1,22 @@
+# @package _global_
+
+# hydra設定
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: .
+
+# デフォルト設定
+defaults:
+  - model: fpn
+  - litmodule: generic_focal_loss
+  - litdatamodule: court_data
+  - trainer: default
+  - callbacks: default
+  - _self_
+
+# 実験名（ディレクトリ名）の設定
+version: ${model.meta.name}_court_generic
+
+# 再現性のための乱数シード
+seed: 42
