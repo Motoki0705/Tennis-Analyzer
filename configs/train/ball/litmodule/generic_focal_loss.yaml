@@ -1,9 +1,7 @@
-# @package _group_
-
 _target_: src.ball.lit_module.lit_generic_ball_model.LitGenericBallModel
 
 # The 'model' parameter will be injected from the main config file.
-model: null
+model: ${model}
 
 # Loss function definition
 criterion:
