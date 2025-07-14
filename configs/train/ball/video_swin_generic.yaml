@@ -1,0 +1,10 @@
+# @package _global_
+
+defaults:
+  - model: video_swin
+  - litmodule: generic_focal_loss
+  - litdatamodule: N_frames_stack_all # Use a compatible datamodule
+  - trainer: default
+  - callbacks: default
+  - _self_
+

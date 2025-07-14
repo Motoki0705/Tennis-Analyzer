@@ -1,0 +1,13 @@
+# @package _global_
+
+# This is the main configuration file for a specific experiment.
+# It composes different components (model, lit_module, datamodule, etc.)
+
+defaults:
+  - model: lite_tracknet
+  - litmodule: generic_focal_loss
+  - litdatamodule: 3_frames_cat_last
+  - trainer: default
+  - callbacks: default
+  - _self_
+

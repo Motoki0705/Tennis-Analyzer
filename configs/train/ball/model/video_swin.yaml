@@ -1,0 +1,9 @@
+_target_: src.ball.models.video_swin_transformer.VideoSwinTransformer
+img_size: [320, 640]
+in_channels: 3
+out_channels: 1
+n_frames: 10
+window_size: 7
+feature_dim: 256
+transformer_blocks: 2
+transformer_heads: 8
