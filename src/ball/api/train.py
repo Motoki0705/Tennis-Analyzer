@@ -150,7 +150,9 @@ def main(cfg: DictConfig) -> None:
         
         # LightningModuleの作成
         log.info("LightningModuleを作成中...")
-        lit_module = hydra.utils.instantiate(cfg.litmodule.module)
+        # Hydraがネストされた設定（model, criterionなど）を自動的にインスタンス化し、
+        # LitGenericBallModelに注入します。
+        lit_module = hydra.utils.instantiate(cfg.lit_module)
         
         # Callbacksの設定
         callbacks = setup_callbacks(cfg)

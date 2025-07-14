@@ -1,0 +1,27 @@
+# @package _group_
+
+_target_: src.ball.lit_module.lit_generic_ball_model.LitGenericBallModel
+
+# The 'model' parameter will be injected from the main config file.
+model: null
+
+# Loss function definition
+criterion:
+  _target_: torchvision.ops.sigmoid_focal_loss
+  alpha: 0.25
+  gamma: 2.0
+  reduction: "mean"
+
+# Optimizer parameters
+optimizer_params:
+  lr: 1e-4
+  weight_decay: 1e-4
+
+# Scheduler parameters
+scheduler_params:
+  warmup_epochs: 1
+  # max_epochs will be inherited from the trainer config
+  max_epochs: ${trainer.max_epochs}
+
+# Logging parameters
+num_log_images: 4
