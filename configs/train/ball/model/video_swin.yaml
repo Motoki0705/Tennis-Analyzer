@@ -1,8 +1,4 @@
-# @package _group_
-
 _target_: src.ball.models.video_swin_transformer.VideoSwinTransformer
-
-# Parameters for the VideoSwinTransformer model
 img_size: [320, 640]
 in_channels: 3
 out_channels: 1

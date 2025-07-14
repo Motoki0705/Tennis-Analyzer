@@ -4,14 +4,10 @@
 # It composes different components (model, lit_module, datamodule, etc.)
 
 defaults:
-  - override /model: lite_tracknet
-  - override /litmodule: generic_focal_loss
-  - override /litdatamodule: 3_frames_cat_last
-  - override /trainer: default
-  - override /callbacks: default
+  - model: lite_tracknet
+  - litmodule: generic_focal_loss
+  - litdatamodule: 3_frames_cat_last
+  - trainer: default
+  - callbacks: default
   - _self_
 
-# Inject the instantiated 'model' into the 'litmodule' configuration.
-# This is where the dependency injection happens.
-litmodule:
-  model: ${model}
