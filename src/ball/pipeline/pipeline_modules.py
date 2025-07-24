@@ -1,13 +1,15 @@
 """
-VideoSwinTransformer pipeline modules for ball detection inference.
+Generic pipeline modules for ball detection inference.
+Supports multiple model architectures through a unified interface.
 """
 import os
 import cv2
 import torch
 import numpy as np
 import logging
+import importlib
 from collections import deque
-from typing import List, Tuple, Dict, Optional, Any
+from typing import List, Tuple, Dict, Optional, Any, Union
 from scipy.ndimage import gaussian_filter
 try:
     from skimage.feature import peak_local_maxima
@@ -34,13 +36,57 @@ except ImportError:
         coords = np.where(local_maxima)
         return coords
 
-from src.ball.lit_module.lit_video_swin_transformer_focal import LitVideoSwinTransformerFocalLoss
-
 log = logging.getLogger(__name__)
 
 
+class ModelFactory:
+    """Factory class for creating different model architectures."""
+    
+    @staticmethod
+    def create_model(cfg: Dict[str, Any], device: torch.device):
+        """Create model instance based on configuration."""
+        model_type = cfg['models']['model']['type']
+        
+        if model_type == "video_swin_transformer":
+            return ModelFactory._create_video_swin_transformer(cfg, device)
+        elif model_type == "conv3d_tsm_fpn":
+            return ModelFactory._create_conv3d_tsm_fpn(cfg, device)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+    
+    @staticmethod
+    def _create_video_swin_transformer(cfg: Dict[str, Any], device: torch.device):
+        """Create VideoSwinTransformer model."""
+        from src.ball.lit_module.lit_video_swin_transformer_focal import LitVideoSwinTransformerFocalLoss
+        
+        checkpoint_path = cfg['models']['model']['checkpoint_path']
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        
+        log.info(f"Loading VideoSwinTransformer from {checkpoint_path}")
+        model = LitVideoSwinTransformerFocalLoss.load_from_checkpoint(checkpoint_path)
+        model.to(device)
+        model.eval()
+        return model
+    
+    @staticmethod
+    def _create_conv3d_tsm_fpn(cfg: Dict[str, Any], device: torch.device):
+        """Create Conv3D+TSM+FPN model."""
+        from src.ball.lit_module.lit_generic_ball_model import LitGenericBallModel
+        
+        checkpoint_path = cfg['models']["model"]['checkpoint_path']
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        
+        log.info(f"Loading Conv3D+TSM+FPN from {checkpoint_path}")
+        model = LitGenericBallModel.load_from_checkpoint(checkpoint_path)
+        model.to(device)
+        model.eval()
+        return model
+
+
 class FrameSequenceManager:
-    """Manages frame sequences for VideoSwinTransformer inference."""
+    """Manages frame sequences for temporal model inference."""
     
     def __init__(self, sequence_length: int = 5, overlap: int = 2, frame_interval: int = 1):
         self.sequence_length = sequence_length
@@ -77,8 +123,8 @@ class FrameSequenceManager:
         self.frame_count = 0
 
 
-class VideoSwinPostProcessor:
-    """Post-processor for VideoSwinTransformer heatmap outputs."""
+class HeatmapPostProcessor:
+    """Generic post-processor for heatmap outputs from different models."""
     
     def __init__(self, 
                  peak_threshold: float = 0.5,
@@ -159,56 +205,40 @@ class VideoSwinPostProcessor:
         return detections
 
 
-class VideoSwinBallTracker:
-    """Main tracker class for VideoSwinTransformer ball detection."""
+class GenericBallTracker:
+    """Generic ball tracker that works with different model architectures."""
     
     def __init__(self, cfg: Dict[str, Any], device: torch.device):
         self.cfg = cfg
         self.device = device
+        self.model_type = cfg['models']['model']['type']
         
         # Initialize model
-        self._load_model()
+        self.model = ModelFactory.create_model(cfg, device)
         
         # Initialize components
         self.sequence_manager = FrameSequenceManager(
-            sequence_length=cfg['input']['sequence_length'],
-            overlap=cfg['input']['overlap'],
-            frame_interval=cfg['input']['frame_interval']
+            sequence_length=cfg['models']['input']['sequence_length'],
+            overlap=cfg['models']['input']['overlap'],
+            frame_interval=cfg['models']['input']['frame_interval']
         )
         
-        self.postprocessor = VideoSwinPostProcessor(
-            peak_threshold=cfg['postprocess']['peak_threshold'],
-            min_distance=cfg['postprocess']['min_distance'],
-            gaussian_sigma=cfg['postprocess']['gaussian_sigma'],
-            use_temporal_smoothing=cfg['postprocess']['use_temporal_smoothing'],
-            temporal_weight=cfg['postprocess']['temporal_weight']
+        self.postprocessor = HeatmapPostProcessor(
+            peak_threshold=cfg['models']['postprocess']['peak_threshold'],
+            min_distance=cfg['models']['postprocess']['min_distance'],
+            gaussian_sigma=cfg['models']['postprocess']['gaussian_sigma'],
+            use_temporal_smoothing=cfg['models']['postprocess']['use_temporal_smoothing'],
+            temporal_weight=cfg['models']['postprocess']['temporal_weight']
         )
         
         # Model input configuration
-        self.img_size = tuple(cfg['model']['img_size'])
-        self.n_frames = cfg['model']['n_frames']
+        self.img_size = tuple(cfg['models']['model']['img_size'])
         
         # Processing state
         self.processed_frames = 0
         self.total_inference_time = 0.0
         
-    def _load_model(self):
-        """Load VideoSwinTransformer model from checkpoint."""
-        checkpoint_path = self.cfg['model']['checkpoint_path']
-        
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-        
-        log.info(f"Loading VideoSwinTransformer from {checkpoint_path}")
-        
-        # Load model from Lightning checkpoint
-        self.model = LitVideoSwinTransformerFocalLoss.load_from_checkpoint(
-            checkpoint_path
-        )
-        
-        self.model.to(self.device)
-        self.model.eval()
-        log.info("Model loaded successfully")
+        log.info(f"Initialized {self.model_type} tracker")
     
     def _preprocess_sequence(self, frames: List[np.ndarray]) -> Tuple[torch.Tensor, Tuple[float, float]]:
         """Preprocess frame sequence for model input."""
@@ -242,7 +272,26 @@ class VideoSwinBallTracker:
         
         return batch_tensor, (scale_x, scale_y)
     
-    def process_frame(self, frame: np.ndarray, return_heatmap: bool = False) -> Optional[List[Dict[str, Any]]]:
+    def _extract_heatmaps(self, model_output: torch.Tensor) -> np.ndarray:
+        """Extract heatmaps from model output based on model type."""
+        if self.model_type == "video_swin_transformer":
+            # VideoSwinTransformer output: (B, N, C_out, H, W)
+            heatmaps = model_output[0].cpu().numpy()  # (N, C_out, H, W)
+            if heatmaps.ndim == 4:
+                heatmaps = heatmaps.squeeze(1)  # Remove channel dimension: (N, H, W)
+        elif self.model_type == "conv3d_tsm_fpn":
+            # Conv3D+TSM+FPN output: (B, N, H, W)
+            heatmaps = model_output[0].cpu().numpy()  # (N, H, W)
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+        
+        # Apply sigmoid to get probabilities
+        heatmaps = 1 / (1 + np.exp(-heatmaps))
+        
+        return heatmaps
+    
+    def process_frame(self, frame: np.ndarray, return_heatmap: bool = False) -> Optional[Union[List[Dict[str, Any]], Tuple[List[Dict[str, Any]], np.ndarray]]]:
+        """Process a single frame and return detections."""
         # Add frame to sequence manager
         ready_for_inference = self.sequence_manager.add_frame(frame)
         
@@ -263,7 +312,7 @@ class VideoSwinBallTracker:
             start_time = time.time()
             
             # Model inference
-            output = self.model(input_tensor)  # (B, N, C_out, H, W)
+            output = self.model(input_tensor)
             
             inference_time = time.time() - start_time
             self.total_inference_time += inference_time
@@ -272,11 +321,7 @@ class VideoSwinBallTracker:
                 log.debug(f"Inference time: {inference_time:.4f}s")
         
         # Extract heatmaps from output
-        heatmaps = output[0].cpu().numpy()  # (N, C_out, H, W)
-        heatmaps = heatmaps.squeeze(1)  # Remove channel dimension: (N, H, W)
-        
-        # Apply sigmoid to get probabilities
-        heatmaps = 1 / (1 + np.exp(-heatmaps))
+        heatmaps = self._extract_heatmaps(output)
         
         # Post-process to get detections
         detections = self.postprocessor.process_sequence(heatmaps, scale_factors)
@@ -312,6 +357,6 @@ class VideoSwinBallTracker:
         }
 
 
-def create_video_swin_tracker(cfg: Dict[str, Any], device: torch.device) -> VideoSwinBallTracker:
-    """Factory function to create VideoSwinBallTracker."""
-    return VideoSwinBallTracker(cfg, device)
+def create_ball_tracker(cfg: Dict[str, Any], device: torch.device) -> GenericBallTracker:
+    """Factory function to create ball tracker."""
+    return GenericBallTracker(cfg, device)

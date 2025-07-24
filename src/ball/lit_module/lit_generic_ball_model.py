@@ -42,7 +42,7 @@ class LitGenericBallModel(pl.LightningModule):
         # This saves all the arguments passed to __init__ into self.hparams
         # It allows us to access them with self.hparams.model, self.hparams.criterion, etc.
         # Importantly, it makes the configuration reproducible from a checkpoint.
-        self.save_hyperparameters(ignore=['model', 'criterion'])
+        self.save_hyperparameters(ignore=['model'])
 
         self.model = model
         
@@ -69,18 +69,34 @@ class LitGenericBallModel(pl.LightningModule):
             frames, heatmaps, _, _ = batch
             logits = self(frames)
             
-            # Ensure logits and heatmaps have a channel dimension
-            if logits.dim() == 3:
-                logits = logits.unsqueeze(1)
-            if heatmaps.dim() == 3:
-                heatmaps = heatmaps.unsqueeze(1)
+            # Handle different output formats from the model
+            # For BallDetNet: logits = [B, N, H, W], heatmaps = [B, N, H, W]
+            # For other models: logits = [B, H, W] or [B, C, H, W]
+            if logits.dim() == 4 and heatmaps.dim() == 4:
+                # BallDetNet format: [B, N, H, W]
+                # Take the middle frame for visualization
+                middle_frame_idx = logits.size(1) // 2
+                logits_vis = logits[:, middle_frame_idx].unsqueeze(1)  # [B, 1, H, W]
+                heatmaps_vis = heatmaps[:, middle_frame_idx].unsqueeze(1)  # [B, 1, H, W]
+                frames_vis = frames[:, middle_frame_idx]  # [B, C, H, W]
+            else:
+                # Standard format: ensure channel dimension
+                if logits.dim() == 3:
+                    logits_vis = logits.unsqueeze(1)
+                else:
+                    logits_vis = logits
+                if heatmaps.dim() == 3:
+                    heatmaps_vis = heatmaps.unsqueeze(1)
+                else:
+                    heatmaps_vis = heatmaps
+                frames_vis = frames
                 
-            preds = torch.sigmoid(logits)
+            preds_vis = torch.sigmoid(logits_vis)
             
             self._val_batch_outputs_for_log = {
-                "frames": frames.cpu(),
-                "preds": preds.cpu(),
-                "targets": heatmaps.cpu()
+                "frames": frames_vis.cpu(),
+                "preds": preds_vis.cpu(),
+                "targets": heatmaps_vis.cpu()
             }
             
         return self._common_step(batch, "val")
@@ -94,6 +110,15 @@ class LitGenericBallModel(pl.LightningModule):
         frames, heatmaps, _, _ = batch
         logits = self(frames)
         
+        # Handle different output formats from the model
+        # For BallDetNet: logits = [B, N, H, W], heatmaps = [B, N, H, W]
+        # For other models: logits = [B, H, W] or [B, C, H, W]
+        if logits.dim() == 4 and heatmaps.dim() == 4:
+            # BallDetNet format: [B, N, H, W] - reshape for loss calculation
+            B, N, H, W = logits.shape
+            logits = logits.view(B * N, H, W)
+            heatmaps = heatmaps.view(B * N, H, W)
+            
         # Ensure heatmaps and logits have the same dimensions for loss calculation
         if heatmaps.dim() == 3:
             heatmaps = heatmaps.unsqueeze(1)
@@ -125,17 +150,29 @@ class LitGenericBallModel(pl.LightningModule):
         selected_indices = random.sample(range(batch_size), num_images)
 
         for idx, batch_idx in enumerate(selected_indices):
-            # Assuming input is [C*T, H, W], take the first 3 channels for visualization
-            frame_img = frames[batch_idx, :3] 
+            # Handle frame input format properly
+            if frames.dim() == 4:
+                # Standard format: [B, C, H, W]
+                frame_img = frames[batch_idx, :3]
+            else:
+                # BallDetNet format: frames already processed to [B, C, H, W] in validation_step
+                frame_img = frames[batch_idx, :3]
+            
             pred_heatmap = preds[batch_idx]
             target_heatmap = targets[batch_idx]
+
+            # Ensure heatmaps have the right dimensions for visualization
+            if pred_heatmap.dim() == 3:
+                pred_heatmap = pred_heatmap[0]  # Take first channel
+            if target_heatmap.dim() == 3:
+                target_heatmap = target_heatmap[0]  # Take first channel
 
             # Create a grid: [Original Frame, Predicted Heatmap, Ground Truth Heatmap]
             combined_image = torch.cat([
                 frame_img,
                 pred_heatmap.repeat(3, 1, 1), # Repeat grayscale heatmap for 3 channels
                 target_heatmap.repeat(3, 1, 1)
-            ], dim=2) # Concatenate vertically
+            ], dim=2) # Concatenate horizontally
 
             filename = os.path.join(save_dir, f"epoch_{self.current_epoch:03d}_sample_{idx:02d}.png")
             torchvision.utils.save_image(combined_image, filename)

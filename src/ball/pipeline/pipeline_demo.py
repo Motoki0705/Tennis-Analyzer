@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-VideoSwinTransformer ball detection inference demo.
+Generic ball detection inference demo.
+Supports multiple model architectures through unified interface.
 """
 
 import hydra
@@ -16,14 +17,14 @@ import time
 from typing import Dict, List, Any
 
 # Local imports
-from .custom_modules import VideoSwinBallTracker
+from .pipeline_modules import create_ball_tracker
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
 
-class VideoSwinTennisDetector:
-    """VideoSwinTransformer tennis ball detector."""
+class GenericTennisDetector:
+    """Generic tennis ball detector that works with different model architectures."""
     
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
@@ -49,9 +50,10 @@ class VideoSwinTennisDetector:
         log.info(f"Using device: {self.device}")
     
     def _initialize_tracker(self):
-        """Initialize VideoSwin tracker."""
-        self.tracker = VideoSwinBallTracker(self.cfg, self.device)
-        log.info("VideoSwinTransformer tracker initialized")
+        """Initialize ball tracker."""
+        self.tracker = create_ball_tracker(self.cfg, self.device)
+        model_type = self.cfg.model.type
+        log.info(f"Initialized {model_type} tracker")
     
     def _initialize_video_io(self):
         """Initialize video input and output."""
@@ -100,7 +102,7 @@ class VideoSwinTennisDetector:
         x, y = int(detection['x']), int(detection['y'])
         confidence = detection['confidence']
         
-        # Draw circle
+        # Get color from model configuration
         color = self.cfg.visualization.colors.ball
         radius = self.cfg.visualization.circle_radius
         cv2.circle(frame_viz, (x, y), radius, color, 2)
@@ -133,7 +135,7 @@ class VideoSwinTennisDetector:
         # Normalize heatmap to 0-255
         heatmap_norm = (heatmap_resized * 255).astype(np.uint8)
         
-        # Apply colormap (red for high values)
+        # Apply colormap (jet for visualization)
         heatmap_colored = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
         
         return heatmap_colored
@@ -187,7 +189,7 @@ class VideoSwinTennisDetector:
                 torch.cuda.empty_cache()
     
     def run(self):
-        """Run the VideoSwinTransformer inference pipeline."""
+        """Run the ball detection inference pipeline."""
         if self.cfg.io.video is None:
             raise ValueError("Video path is required. Use --io.video=path/to/video.mp4")
         
@@ -203,7 +205,7 @@ class VideoSwinTennisDetector:
             total_frames = min(max_frames or self.video_properties['total_frames'], 
                              self.video_properties['total_frames'])
             
-            log.info(f"Processing {total_frames} frames...")
+            log.info(f"Processing {total_frames} frames with {self.cfg.model.type} model...")
             
             # Process frames
             frame_idx = 0
@@ -282,6 +284,7 @@ class VideoSwinTennisDetector:
         # Print final statistics
         stats = self.tracker.get_stats()
         log.info("Processing completed!")
+        log.info(f"Model: {self.cfg.model.type}")
         log.info(f"Total frames processed: {stats['processed_frames']}")
         log.info(f"Total inference time: {stats['total_inference_time']:.2f}s")
         log.info(f"Average inference time: {stats['avg_inference_time']:.4f}s")
@@ -293,11 +296,11 @@ class VideoSwinTennisDetector:
         log.info(f"Results CSV saved: {self.cfg.io.results_csv}")
 
 
-@hydra.main(version_base=None, config_path="../../../configs/infer/ball", config_name="video_swin_transformer")
+@hydra.main(version_base=None, config_path="../../../configs/infer/ball", config_name="pipeline_demo")
 def main(cfg: DictConfig) -> None:
     """Main entry point."""
     try:
-        detector = VideoSwinTennisDetector(cfg)
+        detector = GenericTennisDetector(cfg)
         detector.run()
     except Exception as e:
         log.error(f"Pipeline failed: {e}")

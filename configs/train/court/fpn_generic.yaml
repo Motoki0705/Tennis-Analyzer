@@ -15,8 +15,5 @@ defaults:
   - callbacks: default
   - _self_
 
-# 実験名（ディレクトリ名）の設定
-version: ${model.meta.name}_court_generic
-
 # 再現性のための乱数シード
 seed: 42

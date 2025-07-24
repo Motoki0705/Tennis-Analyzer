@@ -10,7 +10,7 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-from src.utils.heatmap import generate_gaussian_heatmap
+from src.utils.heatmap import draw_gaussian
 from src.utils.visualization.ball import overlay_heatmaps_on_frames
 
 
@@ -170,18 +170,13 @@ class SequenceKeypointDataset(Dataset):
 
             img_aug = out["image"]
             kp_aug = out["keypoints"]
-
+            hm = torch.zeros(self.heatmap_size, dtype=torch.float32)
             if kp_aug:
-                hm = generate_gaussian_heatmap(
-                    raw_label={"keypoints": [*kp_aug[0], 2]},
-                    input_size=self.input_size,
-                    output_size=self.heatmap_size,
-                ).squeeze(
-                    0
-                )  # [H, W]
-            else:
-                hm = torch.zeros(self.heatmap_size, dtype=torch.float32)
-
+                hm = draw_gaussian(
+                    hm,
+                    kp_aug[0],
+                    sigma=3
+                )
             frames.append(img_aug)
             heatmaps.append(hm)
 

@@ -1,0 +1,35 @@
+# VideoSwinTransformer model configuration
+model:
+  type: "video_swin_transformer"
+  checkpoint_path: "checkpoints/ball/video_swin_transformer_focal/best_model.ckpt"
+  img_size: [320, 640]  # Input image size [H, W]
+  window_size: 5
+  feature_dim: 128
+  transformer_blocks: 1
+  transformer_heads: 4
+  n_frames: 5  # Number of frames in sequence
+  in_channels: 3
+  out_channels: 1
+  
+  # Lightning module class
+  lit_module: "src.ball.lit_module.lit_video_swin_transformer_focal.LitVideoSwinTransformerFocalLoss"
+
+# Input sequence configuration
+input:
+  sequence_length: 5  # Number of frames to process at once
+  overlap: 2  # Number of overlapping frames between sequences
+  frame_interval: 1  # Interval between consecutive frames
+
+# Post-processing configuration
+postprocess:
+  peak_threshold: 0.5  # Threshold for peak detection in heatmap
+  min_distance: 10  # Minimum distance between detected peaks
+  gaussian_sigma: 2.0  # Gaussian smoothing sigma for heatmap
+  use_temporal_smoothing: true  # Apply temporal smoothing across sequence
+  temporal_weight: 0.6  # Weight for center frame in temporal smoothing
+
+# Visualization settings
+visualization:
+  colors:
+    ball: [0, 255, 0]  # Green for VideoSwin ball detection
+    heatmap: [255, 0, 0]  # Red for heatmap visualization

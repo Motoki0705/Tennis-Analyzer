@@ -14,7 +14,7 @@ early_stopping:
   patience: 3  # より短いpatience
   mode: "min"
   verbose: true
-  min_delta: 0.001  # 最小改善量を設定
+  min_delta: 0.01  # 最小改善量を設定
   strict: true  # より厳格な判定
 
 lr_monitor:

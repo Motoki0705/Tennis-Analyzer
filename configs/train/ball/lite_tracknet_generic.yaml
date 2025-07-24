@@ -11,3 +11,5 @@ defaults:
   - callbacks: default
   - _self_
 
+# 再現性のための乱数シード
+seed: 42

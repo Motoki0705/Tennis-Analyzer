@@ -1,0 +1,30 @@
+# BallDetNet model configuration
+model:
+  type: "conv3d_tsm_fpn"
+  checkpoint_path: "checkpoints/ball/conv3d_tsm_fpn/best_model.ckpt"
+  img_size: [320, 640]  # Input image size [H, W]
+  num_frames: 8  # Number of frames in sequence
+  num_classes: 1
+  
+  # Lightning module class
+  lit_module: "src.ball.lit_module.lit_generic_ball_model.LitGenericBallModel"
+
+# Input sequence configuration
+input:
+  sequence_length: 8  # Number of frames to process at once
+  overlap: 2  # Number of overlapping frames between sequences
+  frame_interval: 1  # Interval between consecutive frames
+
+# Post-processing configuration
+postprocess:
+  peak_threshold: 0.4  # Threshold for peak detection in heatmap
+  min_distance: 8  # Minimum distance between detected peaks
+  gaussian_sigma: 1.5  # Gaussian smoothing sigma for heatmap
+  use_temporal_smoothing: true  # Apply temporal smoothing across sequence
+  temporal_weight: 0.7  # Weight for center frame in temporal smoothing
+
+# Visualization settings
+visualization:
+  colors:
+    ball: [0, 0, 255]  # Red for Conv3D+TSM+FPN ball detection
+    heatmap: [0, 255, 255]  # Yellow for heatmap visualization

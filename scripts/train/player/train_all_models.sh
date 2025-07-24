@@ -21,7 +21,7 @@ LOG_DIR="${PROJECT_ROOT}/logs/training"
 # Array of model configurations to train
 # Add new model config names here to include them in the training cycle.
 MODELS_TO_TRAIN=(
-    "rtdetr_generic"
+    "rtdetr"
 )
 
 # Training configuration
@@ -106,6 +106,12 @@ validate_checkpoint() {
         return 1
     fi
     
+    # Optional: Add more sophisticated validation using Python
+    # python -c "import torch; torch.load('${ckpt_path}', map_location='cpu'); print('Checkpoint is valid')" 2>/dev/null || {
+    #     print_error "Checkpoint file is corrupted: ${ckpt_path}"
+    #     return 1
+    # }
+    
     print_success "Checkpoint validation passed for ${config_name}"
     return 0
 }
@@ -115,15 +121,16 @@ find_best_checkpoint() {
     local source_ckpt_dir=$1
     local config_name=$2
     
-    print_info "Searching for best checkpoint in ${source_ckpt_dir}"
+    # この関数のログメッセージは標準エラー出力に送る
+    print_info "Searching for best checkpoint in ${source_ckpt_dir}" >&2
     
     # First, try to find a checkpoint with 'best' in the name
     local best_ckpt
     best_ckpt=$(find "${source_ckpt_dir}" -name "*best*.ckpt" -type f | head -n 1)
     
     if [ -n "${best_ckpt}" ]; then
-        print_info "Found best checkpoint: ${best_ckpt}"
-        echo "${best_ckpt}"
+        print_info "Found best checkpoint: ${best_ckpt}" >&2
+        echo "${best_ckpt}" # ✅ ファイルパスだけが標準出力に残る
         return 0
     fi
     
@@ -131,8 +138,8 @@ find_best_checkpoint() {
     best_ckpt=$(find "${source_ckpt_dir}" -name "*last*.ckpt" -type f | head -n 1)
     
     if [ -n "${best_ckpt}" ]; then
-        print_info "Found last checkpoint: ${best_ckpt}"
-        echo "${best_ckpt}"
+        print_info "Found last checkpoint: ${best_ckpt}" >&2
+        echo "${best_ckpt}" # ✅ ファイルパスだけが標準出力に残る
         return 0
     fi
     
@@ -140,12 +147,12 @@ find_best_checkpoint() {
     best_ckpt=$(find "${source_ckpt_dir}" -name "*.ckpt" -type f -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)
     
     if [ -n "${best_ckpt}" ]; then
-        print_info "Found most recent checkpoint: ${best_ckpt}"
-        echo "${best_ckpt}"
+        print_info "Found most recent checkpoint: ${best_ckpt}" >&2
+        echo "${best_ckpt}" # ✅ ファイルパスだけが標準出力に残る
         return 0
     fi
     
-    print_warning "No checkpoint found in ${source_ckpt_dir}"
+    print_warning "No checkpoint found in ${source_ckpt_dir}" >&2
     return 1
 }
 
@@ -175,15 +182,17 @@ train_and_archive_model() {
     # Run the training script using python -m for robust path handling
     print_info "Executing training command for ${config_name}"
     local training_log="${run_output_dir}/training.log"
-    
+
+    # 既存のPython実行とエラーハンドリングのコード
     if ! python -m src.player.api.train \
-        --config-path="${PROJECT_ROOT}/configs/train/player" \
-        --config-name="${config_name}" \
-        hydra.run.dir="${run_output_dir}" \
-        trainer.default_root_dir="${run_output_dir}" \
-        callbacks.checkpoint.dirpath="${run_output_dir}/checkpoints" \
-        hydra.job.chdir=false \
-        > "${training_log}" 2>&1; then
+            --config-path="${PROJECT_ROOT}/configs/train/player" \
+            --config-name="${config_name}" \
+            hydra.run.dir="${run_output_dir}" \
+            trainer.default_root_dir="${run_output_dir}" \
+            callbacks.checkpoint.dirpath="${run_output_dir}/checkpoints" \
+            hydra.job.chdir=false \
+            > "${training_log}" 2>&1; then
+        
         print_error "Training failed for ${config_name}. Check log: ${training_log}"
         
         # Show last few lines of the log for debugging
