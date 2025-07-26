@@ -1,0 +1,151 @@
+src
+├── api
+├── ball
+│   ├── api
+│   │   └── train.py
+│   ├── arguments
+│   │   └── prepare_transform.py
+│   ├── dataset
+│   │   ├── local_tracker_dataset.py
+│   │   ├── seq_coord_dataset.py
+│   │   └── seq_key_dataset.py
+│   ├── lit_datamodule
+│   │   └── ball_data_module.py
+│   ├── lit_module
+│   │   └── lit_ball_model.py
+│   ├── local_classifier
+│   │   ├── dataset.py
+│   │   ├── inference.py
+│   │   ├── model.py
+│   │   ├── patch_generator.py
+│   │   ├── train.py
+│   │   └── weights
+│   │       └── local_ball.pth
+│   ├── models
+│   │   ├── conv3d_tsm_fpn.py
+│   │   ├── lite_tracknet.py
+│   │   └── video_swin_transformer.py
+│   ├── pipeline
+│   │   ├── README.md
+│   │   ├── demo.py
+│   │   ├── model_factory.py
+│   │   ├── pipeline_demo.py
+│   │   ├── pipeline_modules.py
+│   │   ├── postprocessing.py
+│   │   ├── preprocessing.py
+│   │   ├── unified_ball_detector.py
+│   │   └── wasb_modules
+│   │       ├── drawing_utils.py
+│   │       ├── models
+│   │       │   └── hrnet.py
+│   │       ├── pipeline_modules.py
+│   │       └── standalone_wasb_demo.py
+│   └── visualization
+│       └── visualize_dataset.py
+├── common
+│   ├── api
+│   │   └── training.py
+│   ├── lit_module
+│   │   └── base.py
+│   └── visualization
+│       └── dataset_visualizer.py
+├── court
+│   ├── api
+│   │   └── train.py
+│   ├── app.py
+│   ├── arguments
+│   │   └── prepare_transform.py
+│   ├── callbacks
+│   │   └── save_heatmap.py
+│   ├── dataset
+│   │   ├── court_dataset.py
+│   │   └── visualize_dataset.py
+│   ├── lit_datamodule
+│   │   └── court_datamodule.py
+│   ├── lit_module
+│   │   └── lit_court_model.py
+│   ├── models
+│   │   ├── fpn.py
+│   │   ├── lite_tracknet.py
+│   │   ├── swin_unet.py
+│   │   └── vit_unet.py
+│   ├── pipeline
+│   │   ├── drawing_utils.py
+│   │   ├── pipeline_demo.py
+│   │   └── pipeline_modules.py
+│   └── visualization
+│       └── visualize_dataset.py
+├── event
+│   ├── api
+│   │   └── train.py
+│   ├── dataset
+│   │   └── event_dataset.py
+│   ├── lit_datamodule
+│   │   └── event_data_module.py
+│   ├── lit_module
+│   │   └── lit_transformer_v2.py
+│   ├── model
+│   │   └── transformer_v2.py
+│   └── visualization
+│       └── visualize_dataset.py
+├── integrate
+│   ├── README.md
+│   ├── WORKFLOW.md
+│   ├── core
+│   │   ├── base_task.py
+│   │   ├── data_flow.py
+│   │   ├── flexible_pipeline.py
+│   │   ├── task_manager.py
+│   │   ├── task_registry.py
+│   │   ├── unified_pipeline.py
+│   │   └── video_io.py
+│   ├── demo_flexible_pipeline.py
+│   ├── pipeline_demo.py
+│   └── tasks
+│       ├── ball_task.py
+│       ├── ball_tracking_task.py
+│       ├── court_task.py
+│       ├── player_task.py
+│       ├── pose_task.py
+│       ├── pose_task_old.py
+│       └── shot_classification_task.py
+├── player
+│   ├── api
+│   │   └── train.py
+│   ├── arguments
+│   │   └── prepare_transform.py
+│   ├── dataset
+│   │   └── coco_dataset.py
+│   ├── lit_datamodule
+│   │   └── coco_datamodule.py
+│   ├── lit_module
+│   │   ├── lit_player_model.py
+│   │   └── lit_rtdetr.py
+│   ├── pipeline
+│   │   ├── pipeline_demo.py
+│   │   └── pipeline_module.py
+│   ├── self_training
+│   │   ├── clip_visualizer.py
+│   │   ├── clipwise_player_tracking.py
+│   │   ├── specipy_player_by_FT_detr.py
+│   │   └── track_clip_globally.py
+│   └── visualization
+│       └── visualize_dataset.py
+├── pose
+│   └── pipeline
+│       ├── drawing_utils.py
+│       ├── pipeline_demo.py
+│       └── pipeline_module.py
+└── utils
+    ├── event_status_dict.py
+    ├── heatmap
+    │   └── gaussian.py
+    ├── logging_utils.py
+    └── visualization
+        ├── ball.py
+        ├── base.py
+        ├── court.py
+        ├── player.py
+        └── visualization.py
+
+53 directories, 96 files

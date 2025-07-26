@@ -1,25 +1,25 @@
 # @package _global_
 
-# hydra設定
+# Event detection model configuration using TransformerV2
+
+defaults:
+  - litmodule: transformer_v2
+  - litdatamodule: event_data
+  - /common/trainer: default
+  - /common/callbacks: default
+  - /common/optimizer: adamw
+  - /common/scheduler: cosine_with_warmup
+  - _self_
+
+# Global configuration
+seed: 42
+module_name: event
+
+# Balanced dataset path (if specified)
+balanced_dataset_path: null
+
+# Hydra configuration  
 hydra:
   output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
   run:
-    dir: outputs/event/${litmodule.meta.name}/${now:%Y-%m-%d_%H-%M-%S}
-
-# デフォルト設定
-defaults:
-  - litmodule: transformer_v2  # 新しいLitModuleのデフォルト設定
-  - litdatamodule: event_data
-  - trainer: default
-  - callbacks: default
-  - _self_
-
-# 再現性のための乱数シード
-seed: 42
-
-# バランス調整済みデータセットのパス（指定された場合に使用）
-balanced_dataset_path: null
-
-# 実験名（ディレクトリ名）の設定
-# モデル名とデータセットタイプから自動生成
-version: ${litmodule.meta.name}_${litdatamodule.output_type} 
+    dir: outputs/train/${module_name}/${litmodule.meta.name}/${now:%Y-%m-%d_%H-%M-%S} 

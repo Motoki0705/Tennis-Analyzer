@@ -1,0 +1,26 @@
+_target_: src.court.lit_module.lit_court_model.LitCourtModel
+
+# The 'model' parameter will be injected from the main config file
+model: ${model}
+
+# Loss function configuration
+criterion:
+  alpha: 1.0
+  gamma: 2.0
+  reduction: "mean"
+
+# Optimizer configuration - inherited from common config, can be overridden
+optimizer_config: ${optimizer}
+
+# Scheduler configuration - inherited from common config, can be overridden  
+scheduler_config: ${scheduler}
+
+# Court-specific parameters
+accuracy_threshold: 5.0
+use_peak_valley_heatmaps: true
+
+# Logging configuration
+logging_config:
+  num_log_images: 4
+  save_validation_outputs: true
+  save_validation_images: true

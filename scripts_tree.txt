@@ -1,0 +1,20 @@
+scripts
+├── common
+│   └── train_template.sh
+├── datasets
+│   ├── visualize_all_datasets.sh
+│   ├── visualize_ball_dataset.sh
+│   ├── visualize_court_dataset.sh
+│   ├── visualize_event_dataset.sh
+│   └── visualize_player_dataset.sh
+└── train
+    ├── ball
+    │   └── train_all_models.sh
+    ├── court
+    │   └── train_all_models.sh
+    ├── event
+    │   └── train_all_models.sh
+    └── player
+        └── train_all_models.sh
+
+8 directories, 10 files

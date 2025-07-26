@@ -1,0 +1,3 @@
+"""
+Player detection visualization utilities.
+"""

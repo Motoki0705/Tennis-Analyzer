@@ -7,7 +7,7 @@ model:
   num_classes: 1
   
   # Lightning module class
-  lit_module: "src.ball.lit_module.lit_generic_ball_model.LitGenericBallModel"
+  lit_module: "src.ball.lit_module.lit_ball_model.LitBallModel"
 
 # Input sequence configuration
 input:

@@ -1,0 +1,45 @@
+/
+├── .pytest_cache/
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   ├── README.md
+│   └── v/
+│       └── cache/
+│           ├── lastfailed
+│           ├── nodeids
+│           └── stepwise
+├── PHASE1_TEST_REPORT.md
+├── PHASE2_TEST_REPORT.md
+├── PHASE3_TEST_REPORT.md
+├── __init__.py
+├── conftest.py
+├── fixtures/
+│   ├── __init__.py
+│   └── mock_data.py
+├── integration/
+│   ├── __init__.py
+│   ├── test_checkpoint_loading.py
+│   ├── test_data_loading.py
+│   ├── test_inference_pipeline.py
+│   └── test_training_pipeline.py
+├── pytest.ini
+├── unit/
+│   ├── __init__.py
+│   ├── dataset/
+│   │   ├── __init__.py
+│   │   └── test_seq_coord_dataset.py
+│   ├── lit_datamodule/
+│   │   ├── __init__.py
+│   │   └── test_ball_data_module.py
+│   ├── lit_module/
+│   │   ├── __init__.py
+│   │   └── test_lit_ball_model.py
+│   └── models/
+│       ├── __init__.py
+│       ├── test_conv3d_tsm_fpn.py
+│       └── test_lite_tracknet.py
+└── validation/
+    ├── __init__.py
+    ├── test_config_schemas.py
+    ├── test_fixture_validity.py
+    └── test_mock_data_integrity.py

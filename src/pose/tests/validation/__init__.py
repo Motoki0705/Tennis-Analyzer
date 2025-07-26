@@ -1,0 +1,1 @@
+"""Validation tests for pose estimation test fixtures and configurations."""

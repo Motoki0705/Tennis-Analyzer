@@ -1,0 +1,1 @@
+"""Validation tests for test fixtures and configurations."""

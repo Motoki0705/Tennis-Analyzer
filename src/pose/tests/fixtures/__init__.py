@@ -1,0 +1,1 @@
+"""Test fixtures for pose estimation tests."""

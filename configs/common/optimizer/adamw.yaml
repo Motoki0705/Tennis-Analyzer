@@ -1,0 +1,7 @@
+# Standard AdamW optimizer configuration
+type: AdamW
+lr: 5e-4  # ←この1行の修正で全モジュールに反映！
+weight_decay: 1e-4
+
+# Optional backbone learning rate (for models with backbone)
+# lr_backbone: 1e-5

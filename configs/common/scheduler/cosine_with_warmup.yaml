@@ -1,0 +1,5 @@
+# Cosine annealing with warmup scheduler configuration
+type: cosine_with_warmup
+warmup_epochs: 5
+max_epochs: 100
+eta_min_factor: 1e-2

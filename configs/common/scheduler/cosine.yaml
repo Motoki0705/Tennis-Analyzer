@@ -1,0 +1,4 @@
+# Simple cosine annealing scheduler configuration
+type: cosine
+max_epochs: 100
+eta_min_factor: 1e-2

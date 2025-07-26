@@ -1,0 +1,27 @@
+# Base configuration for integrated pipeline
+# Contains common settings shared across all pipeline configurations
+
+# Performance settings
+performance:
+  enable_gpu_optimization: true
+  enable_mixed_precision: true
+  memory_efficient: true
+  batch_processing: true
+
+# Output settings
+output:
+  save_raw_results: false
+  save_visualization_frames: false
+  compress_output: true
+  quality: 95
+
+# Error handling
+error_handling:
+  continue_on_task_failure: true
+  retry_failed_frames: false
+  max_retries: 3
+
+# Task dependencies
+dependencies:
+  pose: [player]  # Pose estimation requires player detection
+  event: [ball, court, player]  # Event classification requires all other tasks

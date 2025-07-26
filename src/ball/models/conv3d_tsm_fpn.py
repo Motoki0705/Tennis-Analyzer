@@ -186,7 +186,7 @@ class BallDetNet(nn.Module):
     """
     stack+all 形式のビデオクリップを一括推論する小物体検出ネット
     """
-    def __init__(self, num_frames: int = 5, num_classes: int = 1):
+    def __init__(self, num_frames: int = 8, num_classes: int = 1):
         super().__init__()
         self.num_frames  = num_frames
         self.num_classes = num_classes

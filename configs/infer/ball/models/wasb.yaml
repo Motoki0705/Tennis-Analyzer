@@ -1,0 +1,43 @@
+# WASB Ball Detection Model Configuration
+
+# Model type and basic settings
+model_type: wasb
+checkpoint_path: checkpoints/ball/wasb_tennis_best.pth.tar
+
+# WASB-specific configuration
+wasb_config_override:
+  model:
+    frames_in: 5
+    frames_out: 3
+    inp_width: 288
+    inp_height: 512
+  detector:
+    postprocessor:
+      score_threshold: 0.3
+
+# Sequence processing
+sequence_length: 5
+overlap: 2
+frame_interval: 1
+
+# Input preprocessing
+input_size: [288, 512]
+use_rgb: true
+normalize: true
+
+# Post-processing parameters
+peak_threshold: 0.3
+min_distance: 10
+gaussian_sigma: 2.0
+max_detections: 3
+use_temporal_smoothing: true
+temporal_weight: 0.6
+
+# Visualization settings
+visualization:
+  enabled: true
+  color: [0, 0, 255]  # Red
+  radius: 8
+  thickness: -1
+  show_confidence: true
+  confidence_threshold: 0.3

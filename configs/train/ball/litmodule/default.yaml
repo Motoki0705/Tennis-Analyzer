@@ -1,0 +1,22 @@
+_target_: src.ball.lit_module.lit_ball_model.LitBallModel
+
+# The 'model' parameter will be injected from the main config file
+model: ${model}
+
+# Loss function configuration
+criterion:
+  alpha: 0.25
+  gamma: 2.0
+  reduction: "mean"
+
+# Optimizer configuration - inherited from common config, can be overridden
+optimizer_config: ${optimizer}
+
+# Scheduler configuration - inherited from common config, can be overridden  
+scheduler_config: ${scheduler}
+
+# Logging configuration
+logging_config:
+  num_log_images: 4
+  save_validation_outputs: true
+  save_validation_images: true

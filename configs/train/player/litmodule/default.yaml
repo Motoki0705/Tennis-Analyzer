@@ -1,0 +1,29 @@
+_target_: src.player.lit_module.lit_player_model.LitPlayerModel
+
+# The 'model' parameter will be injected from the main config file
+model: ${model}
+
+# Optimizer configuration - inherited from common config, can be overridden
+optimizer_config: 
+  ${optimizer}
+  lr_backbone: 1e-5  # Special backbone learning rate for detection models
+
+# Scheduler configuration - inherited from common config, can be overridden  
+scheduler_config: ${scheduler}
+
+# Player detection specific parameters
+num_freeze_epochs: 3
+
+# Criterion parameters (optional, loss handled by model)
+criterion: {}
+
+# Logging configuration
+logging_config:
+  save_validation_outputs: false
+  save_validation_images: false
+
+# Meta information
+meta:
+  name: generic_detection
+  output_type: "detection"
+  description: "Generic Lightning module for object detection models"

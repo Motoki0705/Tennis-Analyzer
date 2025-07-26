@@ -1,0 +1,4 @@
+# Step learning rate scheduler configuration
+type: step
+step_size: 30
+gamma: 0.1

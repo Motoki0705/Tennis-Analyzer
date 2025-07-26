@@ -2,7 +2,7 @@
 
 defaults:
   - model: conv3d_tsm_fpn
-  - litmodule: generic_focal_loss
+  - litmodule: default
   - litdatamodule: N_frames_stack_all
   - trainer: default
   - callbacks: default

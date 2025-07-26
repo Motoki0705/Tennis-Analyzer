@@ -1,0 +1,3 @@
+"""
+Court detection visualization utilities.
+"""

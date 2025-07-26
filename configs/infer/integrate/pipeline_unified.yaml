@@ -1,0 +1,138 @@
+# Unified Inference Pipeline Configuration
+# Supports all model types with flexible task configuration
+
+# Default pipeline settings
+defaults:
+  - base_config
+
+# Device configuration
+device: auto  # auto, cuda, cpu
+
+# Processing configuration
+batch_size: 4
+threading:
+  mode: single  # single, multi
+  queue_size: 50
+  num_workers: 4
+
+# I/O Configuration
+io:
+  input_video: null  # Required: path to input video
+  output_video: "output/pipeline_result.mp4"
+  output_csv: "output/analysis_results.csv"
+  codec: "mp4v"
+
+# Task Configuration
+tasks:
+  # Ball Detection Task
+  ball:
+    enabled: true
+    model_type: wasb  # wasb, conv3d_tsm_fpn, video_swin_transformer
+    checkpoint_path: null  # Required when enabled
+    config_path: null  # Optional: override model config
+    
+    # Model-specific parameters
+    sequence_length: 5
+    overlap: 2
+    frame_interval: 1
+    input_size: [288, 512]
+    
+    # Post-processing
+    peak_threshold: 0.5
+    min_distance: 10
+    gaussian_sigma: 2.0
+    use_temporal_smoothing: true
+    temporal_weight: 0.6
+    
+    # Visualization
+    visualization:
+      enabled: true
+      color: [0, 0, 255]  # Red
+      radius: 8
+      thickness: -1
+      show_confidence: true
+
+  # Court Detection Task
+  court:
+    enabled: true
+    model_type: lite_tracknet  # lite_tracknet, fpn, swin_unet, vit_unet
+    checkpoint_path: null  # Required when enabled
+    
+    # Model parameters
+    input_size: [224, 224]
+    multi_channel: true
+    score_threshold: 0.3
+    
+    # Visualization
+    visualization:
+      enabled: true
+      keypoint_color: [0, 255, 0]  # Green
+      skeleton_color: [255, 255, 0]  # Yellow
+      keypoint_radius: 3
+      line_thickness: 2
+
+  # Player Detection Task
+  player:
+    enabled: true
+    model_type: rtdetr  # rtdetr
+    checkpoint_path: null  # Required when enabled
+    
+    # Detection parameters
+    confidence_threshold: 0.5
+    nms_threshold: 0.5
+    max_detections: 10
+    
+    # Visualization
+    visualization:
+      enabled: true
+      bbox_color: [255, 0, 0]  # Blue
+      bbox_thickness: 2
+      show_labels: true
+      show_confidence: true
+
+  # Pose Estimation Task (depends on player)
+  pose:
+    enabled: true
+    model_type: vitpose  # vitpose
+    
+    # Parameters
+    keypoint_threshold: 0.3
+    
+    # Visualization
+    visualization:
+      enabled: true
+      keypoint_color: [0, 255, 255]  # Cyan
+      skeleton_color: [255, 0, 255]  # Magenta
+      keypoint_radius: 3
+      line_thickness: 2
+
+  # Event Classification Task
+  event:
+    enabled: false
+    model_type: transformer_v2
+    checkpoint_path: null
+    
+    # Parameters
+    sequence_length: 512
+    num_classes: 4
+    
+    # Visualization
+    visualization:
+      enabled: true
+      show_predictions: true
+
+# Global Visualization Settings
+visualization:
+  enabled: true
+  output_fps: null  # null = same as input
+  show_frame_info: true
+  font_scale: 0.6
+  font_thickness: 1
+  info_position: [10, 30]
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+  log_inference_time: false
+  save_performance_log: true

@@ -1,25 +1,23 @@
-# event_detection_lit_module.py
-# ------------------------------------------------------------
-# LightningModule for hit / bounce event detection (multilabel)
-# 2025-06-09  (modified to print sample predictions each epoch)
-# ------------------------------------------------------------
+"""
+LightningModule for Event Detection (Hit/Bounce Detection)
+Standardized using the common base class for unified training interface.
+"""
 
-import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR
 from torchmetrics import AUROC
 from torchmetrics.classification import (
     MultilabelF1Score,
     MultilabelPrecision,
     MultilabelRecall,
 )
+from typing import Dict, Any
 
-# the actual backbone
+from src.common.lit_module.base import BaseLitModule
 from src.event.model.transformer_v2 import EventTransformerV2
 
 
-class LitTransformerV2(pl.LightningModule):
+class LitTransformerV2(BaseLitModule):
     """
     Predicts two mutually–exclusive event flags — *hit* and *bounce* —
     for every time-step in a rally.
@@ -27,92 +25,123 @@ class LitTransformerV2(pl.LightningModule):
 
     def __init__(
         self,
-        d_model: int = 128,
-        nhead: int = 8,
-        num_layers: int = 4,
-        dropout: float = 0.1,
-        max_seq_len: int = 512,
-        pose_dim: int = 51,
-        lr: float = 1e-3,
-        weight_decay: float = 1e-4,
-        warmup_epochs: int = 5,
-        max_epochs: int = 100,
-        no_hit_weight: float = 0.01,  # [0,0]
-        hit_weight: float = 1.0,      # [1,0]
-        bounce_weight: float = 1.0,   # [0,1]
-        clarity_weight: float = 0.02,
+        model: EventTransformerV2,
+        optimizer_config: Dict[str, Any],
+        scheduler_config: Dict[str, Any],
+        criterion_config: Dict[str, Any] = None,
+        logging_config: Dict[str, Any] = None,
     ):
-        super().__init__()
-        self.save_hyperparameters()
-
-        # network
-        self.model = EventTransformerV2(
-            d_model=d_model,
-            nhead=nhead,
-            num_layers=num_layers,
-            dropout=dropout,
-            max_seq_len=max_seq_len,
-            pose_dim=pose_dim,
+        """
+        Initialize event detection model.
+        
+        Args:
+            model: The EventTransformerV2 model
+            optimizer_config: Optimizer configuration
+            scheduler_config: Learning rate scheduler configuration
+            criterion_config: Loss function configuration
+            logging_config: Logging and visualization configuration
+        """
+        # Default criterion configuration
+        if criterion_config is None:
+            criterion_config = {
+                "no_hit_weight": 0.01,    # [0,0]
+                "hit_weight": 1.0,        # [1,0]
+                "bounce_weight": 1.0,     # [0,1]
+                "clarity_weight": 0.02,
+            }
+        
+        # Default logging configuration
+        if logging_config is None:
+            logging_config = {
+                "save_validation_outputs": True,
+                "save_validation_images": False,
+                "max_samples": 5,
+                "peak_thresh": 0.30,
+            }
+        
+        super().__init__(
+            model=model,
+            optimizer_config=optimizer_config,
+            scheduler_config=scheduler_config,
+            criterion_config=criterion_config,
+            logging_config=logging_config,
         )
 
-        # loss weights
-        self.no_hit_weight = no_hit_weight
-        self.hit_weight = hit_weight
-        self.bounce_weight = bounce_weight
-        self.clarity_weight = clarity_weight
-
-        # metrics
+        # Initialize metrics
         self.train_f1 = MultilabelF1Score(num_labels=2)
         self.val_f1 = MultilabelF1Score(num_labels=2)
         self.val_precision = MultilabelPrecision(num_labels=2)
         self.val_recall = MultilabelRecall(num_labels=2)
         self.val_auroc = AUROC(task="multilabel", num_labels=2)
 
-        # ────────── buffers for sample printing ──────────
-        self.train_samples = []  # list[tuple[p, t]]
-        self.val_samples: list[tuple[torch.Tensor, torch.Tensor]] = []
+        # Sample collection buffers
+        self.train_samples = []
+        self.val_samples = []
 
-    # ──────────────────────────── forward ───────────────────────────
-
-    def forward(
-        self,
-        ball_features,
-        player_bbox_features,
-        player_pose_features,
-        court_features,
-    ):
+    def forward(self, batch):
+        """Forward pass through the event detection model."""
+        ball_features, player_bbox_features, player_pose_features, court_features, targets, _ = batch
         return self.model(
             ball_features, player_bbox_features, player_pose_features, court_features
         )
 
-    # ──────────────────────────── loss ──────────────────────────────
-
-    def custom_event_loss(self, logits, targets):
-        """Binary-cross-entropy + sample weights + clarity regulariser."""
-        # flatten
-        logits = logits.view(-1, 2)
-        targets = targets.view(-1, 2)
+    def compute_loss(self, batch, outputs, stage: str) -> torch.Tensor:
+        """Compute loss for event detection task."""
+        ball_features, player_bbox_features, player_pose_features, court_features, targets, _ = batch
+        logits = outputs
+        
+        # Binary-cross-entropy + sample weights + clarity regularizer
+        logits_flat = logits.view(-1, 2)
+        targets_flat = targets.view(-1, 2)
 
         # BCE
-        bce = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+        bce = F.binary_cross_entropy_with_logits(logits_flat, targets_flat, reduction="none")
 
-        # sample weights
-        w = torch.ones_like(targets)
-        mask_no    = (targets[:, 0] == 0) & (targets[:, 1] == 0)
-        mask_hit   = (targets[:, 0] != 1) & (targets[:, 1] == 0)
-        mask_bnc   = (targets[:, 0] == 0) & (targets[:, 1] != 1)
-        w[mask_no]  = self.no_hit_weight
-        w[mask_hit] = self.hit_weight
-        w[mask_bnc] = self.bounce_weight
+        # Sample weights
+        w = torch.ones_like(targets_flat)
+        mask_no = (targets_flat[:, 0] == 0) & (targets_flat[:, 1] == 0)
+        mask_hit = (targets_flat[:, 0] == 1) & (targets_flat[:, 1] == 0)
+        mask_bounce = (targets_flat[:, 0] == 0) & (targets_flat[:, 1] == 1)
+        
+        w[mask_no] = self.criterion_config.get("no_hit_weight", 0.01)
+        w[mask_hit] = self.criterion_config.get("hit_weight", 1.0)
+        w[mask_bounce] = self.criterion_config.get("bounce_weight", 1.0)
+        
         w_bce = (bce * w).mean()
 
-        # clarity: encourage mutually-exclusive predictions
-        probs = torch.sigmoid(logits)
+        # Clarity: encourage mutually-exclusive predictions
+        probs = torch.sigmoid(logits_flat)
         clarity = (probs[:, 0] * probs[:, 1]).mean()
+        clarity_weight = self.criterion_config.get("clarity_weight", 0.02)
 
-        return w_bce + self.clarity_weight * clarity
+        return w_bce + clarity_weight * clarity
 
-    # ─────────────────────── util: collect samples ──────────────────
+    def compute_metrics(self, batch, outputs, stage: str) -> Dict[str, torch.Tensor]:
+        """Compute metrics for event detection task."""
+        ball_features, player_bbox_features, player_pose_features, court_features, targets, _ = batch
+        logits = outputs
+        
+        probs = torch.sigmoid(logits)
+        preds = (probs > 0.5).float()
+
+        flat_preds = preds.view(-1, 2)
+        flat_targets = targets.view(-1, 2).long()
+
+        if stage == "train":
+            self.train_f1(flat_preds, flat_targets)
+            return {"f1": self.train_f1}
+        else:
+            self.val_f1(flat_preds, flat_targets)
+            self.val_precision(flat_preds, flat_targets)
+            self.val_recall(flat_preds, flat_targets)
+            self.val_auroc(probs.view(-1, 2), flat_targets)
+
+            return {
+                "f1": self.val_f1,
+                "precision": self.val_precision,
+                "recall": self.val_recall,
+                "auroc": self.val_auroc,
+            }
 
     @torch.no_grad()
     def _collect_samples(
@@ -120,56 +149,88 @@ class LitTransformerV2(pl.LightningModule):
         probs: torch.Tensor,      # [B, S, 2] after sigmoid
         targets: torch.Tensor,    # [B, S, 2] soft labels (Gaussian)
         buffer: list,
-        max_samples: int = 5,
-        peak_thresh: float = 0.30,  # 0.0〜1.0: 「イベントらしさ」の下限
     ):
-        """
-        Gaussian ラベルのピーク (局所最大) を抽出して保存する。
-
-        条件:
-          • target が左右より大きい (local maximum)
-          • target ≥ peak_thresh
-          • buffer が max_samples に達するまで
-        """
+        """Collect sample predictions for logging."""
+        max_samples = self.logging_config.get("max_samples", 5)
+        peak_thresh = self.logging_config.get("peak_thresh", 0.30)
 
         if len(buffer) >= max_samples:
             return
 
         B, S, C = targets.shape  # C=2 (hit, bounce)
 
-        # ──ユーティリティ: 1Dテンソルのローカルピーク検出──
+        # Utility: 1D tensor local peak detection
         def _find_peaks_1d(seq: torch.Tensor) -> torch.Tensor:
-            """返り値: peak のインデックス (1D LongTensor)"""
-            left  = torch.cat([seq.new_tensor([-1.0]), seq[:-1]])
+            """Return peak indices (1D LongTensor)"""
+            left = torch.cat([seq.new_tensor([-1.0]), seq[:-1]])
             right = torch.cat([seq[1:], seq.new_tensor([-1.0])])
             return ((seq > left) & (seq >= right) & (seq >= peak_thresh)).nonzero(as_tuple=False).squeeze(-1)
 
-        # ──走査──
+        # Scan for peaks
         for b in range(B):
             if len(buffer) >= max_samples:
                 break
-            for c in range(C):                      # 0:hit, 1:bounce
-                tgt_seq = targets[b, :, c]          # [S]
+            for c in range(C):  # 0:hit, 1:bounce
+                tgt_seq = targets[b, :, c]  # [S]
                 peak_idx = _find_peaks_1d(tgt_seq)  # [...,]
                 for idx in peak_idx:
                     if len(buffer) >= max_samples:
                         break
                     buffer.append((
-                        probs  [b, idx].detach().cpu(),   # [2] predicted probs
-                        targets[b, idx].detach().cpu(),   # [2] soft GT at peak
+                        probs[b, idx].detach().cpu(),    # [2] predicted probs
+                        targets[b, idx].detach().cpu(),  # [2] soft GT at peak
                     ))
 
-    # ──────────────────────────── hooks ─────────────────────────────
+    def training_step(self, batch, batch_idx):
+        """Training step with sample collection."""
+        loss = super().training_step(batch, batch_idx)
+        
+        # Collect samples for logging
+        if self.global_rank == 0 and self.logging_config.get("save_validation_outputs", False):
+            _, _, _, _, targets, _ = batch
+            logits = self(batch)
+            probs = torch.sigmoid(logits)
+            self._collect_samples(probs, targets, self.train_samples)
+        
+        return loss
 
-    # clear buffers
+    def validation_step(self, batch, batch_idx):
+        """Validation step with sample collection."""
+        loss = super().validation_step(batch, batch_idx)
+        
+        # Collect samples for logging
+        if self.global_rank == 0 and self.logging_config.get("save_validation_outputs", False):
+            _, _, _, _, targets, _ = batch
+            logits = self(batch)
+            probs = torch.sigmoid(logits)
+            self._collect_samples(probs, targets, self.val_samples)
+        
+        return loss
+
     def on_train_epoch_start(self):
+        """Clear sample buffers at the start of training epoch."""
+        super().on_train_epoch_start()
         self.train_samples = []
 
     def on_validation_epoch_start(self):
+        """Clear sample buffers at the start of validation epoch."""
+        super().on_validation_epoch_start() 
         self.val_samples = []
 
-    # pretty print
+    def on_train_epoch_end(self):
+        """Pretty print training samples."""
+        super().on_train_epoch_end()
+        if self.global_rank == 0:
+            self._pretty_print(self.train_samples, "train")
+
+    def on_validation_epoch_end(self):
+        """Pretty print validation samples."""
+        super().on_validation_epoch_end()
+        if self.global_rank == 0:
+            self._pretty_print(self.val_samples, "val")
+
     def _pretty_print(self, samples, stage):
+        """Pretty print sample predictions."""
         if not samples:
             return
         bar = "=" * 52
@@ -182,109 +243,3 @@ class LitTransformerV2(pl.LightningModule):
                 f"GT → hit={th:5.2f}  bounce={tb:5.2f}"
             )
         print(f"{bar}\n", flush=True)
-
-
-    def on_train_epoch_end(self):
-        if self.global_rank == 0:
-            self._pretty_print(self.train_samples, "train")
-
-    def on_validation_epoch_end(self):
-        if self.global_rank == 0:
-            self._pretty_print(self.val_samples, "val")
-
-    # ─────────────────────────── core step ──────────────────────────
-
-    def _step(self, batch, stage):
-        (
-            ball_features,
-            player_bbox_features,
-            player_pose_features,
-            court_features,
-            targets,
-            _,
-        ) = batch
-
-        logits = self(
-            ball_features, player_bbox_features, player_pose_features, court_features
-        )
-        loss = self.custom_event_loss(logits, targets)
-
-        probs = torch.sigmoid(logits)
-        preds = (probs > 0.5).float()
-
-        flat_preds = preds.view(-1, 2)
-        flat_targets = targets.view(-1, 2).long()
-
-        if stage == "train":
-            self.train_f1(flat_preds, flat_targets)
-            self.log(
-                "train_f1",
-                self.train_f1,
-                on_step=True,
-                on_epoch=True,
-                prog_bar=True,
-            )
-        else:
-            self.val_f1(flat_preds, flat_targets)
-            self.val_precision(flat_preds, flat_targets)
-            self.val_recall(flat_preds, flat_targets)
-            self.val_auroc(probs.view(-1, 2), flat_targets)
-
-            self.log("val_f1", self.val_f1, prog_bar=True)
-            self.log("val_precision", self.val_precision)
-            self.log("val_recall", self.val_recall)
-            self.log("val_auroc", self.val_auroc)
-
-        self.log(
-            f"{stage}_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        return loss, probs, targets
-
-    # ─────────────────────────── steps ──────────────────────────────
-
-    def training_step(self, batch, batch_idx):
-        loss, probs, targets = self._step(batch, "train")
-        if self.global_rank == 0:
-            self._collect_samples(probs, targets, self.train_samples)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss, probs, targets = self._step(batch, "val")
-        if self.global_rank == 0:
-            self._collect_samples(probs, targets, self.val_samples)
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        loss, _, _ = self._step(batch, "test")
-        return loss
-
-    # ─────────────────────── optim / sched ──────────────────────────
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay
-        )
-
-        warmup = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=lambda e: min(1.0, float(e + 1) / self.hparams.warmup_epochs),
-        )
-        cosine = CosineAnnealingLR(
-            optimizer,
-            T_max=self.hparams.max_epochs - self.hparams.warmup_epochs,
-            eta_min=self.hparams.lr * 1e-2,
-        )
-        scheduler = SequentialLR(
-            optimizer, [warmup, cosine], milestones=[self.hparams.warmup_epochs]
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
-        }

@@ -200,26 +200,6 @@ all_code/
 # hydra output
 hydra_outputs/
 
-<<<<<<< HEAD
-# model weights
-*.tar
-*.pth
-*.pt         # PyTorchの別の拡張子
-*.bin        # Hugging Faceなどで使われるバイナリ形式
-*.safetensors # 安全で高速なモデル保存形式
-*.h5         # TensorFlow/Keras
-*.ckpt       # チェックポイントファイル
-
-# Large data files
-*.zip
-*.csv
-*.tsv
-*.gz
-
-# Python cache
-__pycache__/
-*.pyc
-=======
 .tmp.driveupload/
 
 # =============================================================================
@@ -381,10 +361,6 @@ test_output/
 test_results/
 coverage_html/
 
-# ドキュメント一時ファイル
-*.md.bak
-*.md~
-
 # =============================================================================
 # プロジェクト固有の除外パターン
 # =============================================================================
@@ -408,4 +384,3 @@ test_*.md
 # 動的生成されるファイル
 generated_*
 auto_generated_*
->>>>>>> 52fab602c77af7a47bcdc276d9ea0c9bfd7756ab

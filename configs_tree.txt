@@ -1,0 +1,99 @@
+configs
+├── common
+│   ├── callbacks
+│   │   ├── default.yaml
+│   │   └── minimal.yaml
+│   ├── optimizer
+│   │   ├── adam.yaml
+│   │   ├── adamw.yaml
+│   │   └── sgd.yaml
+│   ├── scheduler
+│   │   ├── cosine.yaml
+│   │   ├── cosine_with_warmup.yaml
+│   │   ├── none.yaml
+│   │   └── step.yaml
+│   └── trainer
+│       ├── cpu.yaml
+│       ├── default.yaml
+│       └── multi_gpu.yaml
+├── infer
+│   ├── ball
+│   │   ├── models
+│   │   │   ├── conv3d_tsm_fpn.yaml
+│   │   │   ├── video_swin_transformer.yaml
+│   │   │   └── wasb.yaml
+│   │   ├── pipeline_demo.yaml
+│   │   ├── pipeline_wasb.yaml
+│   │   └── unified_ball_demo.yaml
+│   ├── court
+│   │   └── pipeline_demo.yaml
+│   ├── integrate
+│   │   ├── advanced_pipeline.yaml
+│   │   ├── base_config.yaml
+│   │   ├── flexible_pipeline.yaml
+│   │   ├── pipeline_demo.yaml
+│   │   └── pipeline_unified.yaml
+│   ├── player
+│   │   └── pipeline_demo.yaml
+│   └── pose
+│       └── pipeline_demo.yaml
+└── train
+    ├── ball
+    │   ├── callbacks
+    │   │   └── default.yaml
+    │   ├── conv3d_tsm_fpn.yaml
+    │   ├── litdatamodule
+    │   │   ├── 3_frames_cat_last.yaml
+    │   │   └── N_frames_stack_all.yaml
+    │   ├── lite_tracknet_generic.yaml
+    │   ├── litmodule
+    │   │   └── default.yaml
+    │   ├── model
+    │   │   ├── conv3d_tsm_fpn.yaml
+    │   │   ├── lite_tracknet.yaml
+    │   │   └── video_swin.yaml
+    │   ├── trainer
+    │   │   └── default.yaml
+    │   └── video_swin_generic.yaml
+    ├── court
+    │   ├── callbacks
+    │   │   └── default.yaml
+    │   ├── fpn_generic.yaml
+    │   ├── litdatamodule
+    │   │   └── court_data.yaml
+    │   ├── lite_tracknet_generic.yaml
+    │   ├── litmodule
+    │   │   └── default.yaml
+    │   ├── model
+    │   │   ├── fpn.yaml
+    │   │   ├── lite_tracknet.yaml
+    │   │   ├── swin_unet.yaml
+    │   │   └── vit_unet.yaml
+    │   ├── swin_unet_generic.yaml
+    │   ├── trainer
+    │   │   └── default.yaml
+    │   └── vit_unet_generic.yaml
+    ├── event
+    │   ├── callbacks
+    │   │   └── default.yaml
+    │   ├── config.yaml
+    │   ├── litdatamodule
+    │   │   └── event_data.yaml
+    │   ├── litmodule
+    │   │   └── transformer_v2.yaml
+    │   └── trainer
+    │       └── default.yaml
+    └── player
+        ├── callbacks
+        │   └── default.yaml
+        ├── litdatamodule
+        │   └── coco_data.yaml
+        ├── litmodule
+        │   └── default.yaml
+        ├── model
+        │   └── rtdetr.yaml
+        ├── rtdetr_generic.yaml
+        └── trainer
+            └── default.yaml
+
+37 directories, 60 files

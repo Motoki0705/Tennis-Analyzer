@@ -1,0 +1,1 @@
+"""Unit tests for ball detection module components."""

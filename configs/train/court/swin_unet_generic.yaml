@@ -3,7 +3,7 @@
 # デフォルト設定
 defaults:
   - model: swin_unet
-  - litmodule: generic_focal_loss
+  - litmodule: default
   - litdatamodule: court_data
   - trainer: default
   - callbacks: default

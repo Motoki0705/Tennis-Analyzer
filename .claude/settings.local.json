@@ -22,7 +22,11 @@
       "Bash(scripts/train/player/)",
       "Bash(git commit:*)",
       "Bash(git config:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(./run.sh test:*)",
+      "Bash(/usr/bin/python3.11 -m pytest src/court/tests/validation/ -v --tb=short)",
+      "Bash(./docker/run.sh:*)",
+      "Bash(./run.sh:*)"
     ],
     "deny": []
   }

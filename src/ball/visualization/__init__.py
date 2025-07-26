@@ -1,0 +1,3 @@
+"""
+Ball detection visualization utilities.
+"""

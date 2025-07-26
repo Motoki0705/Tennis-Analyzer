@@ -1,17 +1,6 @@
 import os
 import shutil
 
-# --- 設定項目 ---
-
-# .pyファイルを探す対象のフォルダ（このフォルダとそのサブフォルダが対象になります）
-source_folder = 'src/multi/streaming_overlayer'  # ← ここに移動元のフォルダパスを記入
-
-# .pyファイルを集める先のフォルダ（存在しない場合は自動で作成されます）
-destination_folder = 'src/multi/all_code_collection'  # ← ここに集めたい先のフォルダパスを記入
-
-# --- 設定はここまで ---
-
-
 def collect_py_files(src_dir, dest_dir):
     """
     指定されたフォルダ(src_dir)から.pyファイルを再帰的に探し、
@@ -92,6 +81,15 @@ def save_directory_tree(root_dir, output_file):
 
 # --- メイン処理 ---
 if __name__ == "__main__":
+    # --- 設定項目 ---
+
+    # .pyファイルを探す対象のフォルダ（このフォルダとそのサブフォルダが対象になります）
+    source_folder = 'src/ball/tests/'  # ← ここに移動元のフォルダパスを記入
+
+    # .pyファイルを集める先のフォルダ（存在しない場合は自動で作成されます）
+    destination_folder = 'all_code_collection'  # ← ここに集めたい先のフォルダパスを記入
+
+    # --- 設定はここまで ---
     # source_folderやdestination_folderが設定されているかチェック
     if source_folder == r'C:\your_source_project_folder' or destination_folder == r'C:\python_files_collection':
         print("エラー: スクリプト上部の `source_folder` と `destination_folder` のパスをあなたの環境に合わせて設定してください。")

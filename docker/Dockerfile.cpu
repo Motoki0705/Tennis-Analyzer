@@ -1,62 +1,59 @@
-# Tennis Systems Development Environment - CPU Only
-FROM ubuntu:22.04
+# --- Build Stage ---
+FROM python:3.11-slim as builder
 
-# Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-dev \
-    python3-pip \
-    python3.11-venv \
-    git \
-    wget \
-    curl \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    pkg-config \
+    git \
+    wget \
+    curl
+
+# Create a virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip and install wheels
+RUN python -m pip install --upgrade pip wheel
+
+# Install Python dependencies into the virtual environment using BuildKit cache
+COPY docker/requirements-cpu.txt /tmp/requirements-cpu.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r /tmp/requirements-cpu.txt
+
+# --- Runtime Stage ---
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install only runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
     libgl1-mesa-glx \
-    libglib2.0-0 \
-    libgtk-3-0 \
     ffmpeg \
-    libavcodec-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswscale-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+# Copy the virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
 
-# Upgrade pip
-RUN python3 -m pip install --upgrade pip setuptools wheel
-
-# Set working directory
+# Set working directory and PATH
 WORKDIR /workspace
-
-# Copy requirements first for better caching
-COPY docker/requirements-cpu.txt /tmp/requirements-cpu.txt
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r /tmp/requirements-cpu.txt
-
-# Set PYTHONPATH to include the workspace
+ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH="/workspace:$PYTHONPATH"
 
-# Create non-root user for development
+# Create non-root user
 RUN useradd -m -s /bin/bash developer && \
     chown -R developer:developer /workspace
 
 USER developer
 
-# Default command
 CMD ["bash"]

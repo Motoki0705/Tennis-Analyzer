@@ -1,15 +1,23 @@
 # @package _global_
 
-# This is the main configuration file for a specific experiment.
-# It composes different components (model, lit_module, datamodule, etc.)
+# Ball detection model configuration using LiteTrackNet
 
 defaults:
   - model: lite_tracknet
-  - litmodule: generic_focal_loss
+  - litmodule: default
   - litdatamodule: 3_frames_cat_last
-  - trainer: default
-  - callbacks: default
+  - /common/trainer: default
+  - /common/callbacks: default
+  - /common/optimizer: adamw
+  - /common/scheduler: cosine_with_warmup
   - _self_
 
-# 再現性のための乱数シード
+# Global configuration
 seed: 42
+module_name: ball
+
+# Hydra configuration  
+hydra:
+  output_subdir: hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+  run:
+    dir: outputs/train/${module_name}/${model.name}/${now:%Y-%m-%d_%H-%M-%S}

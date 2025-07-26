@@ -1,0 +1,61 @@
+# Unified Ball Detection Demo Configuration
+# Supports all ball detection models with flexible configuration
+
+# Default model configuration
+defaults:
+  - models/wasb  # Default to WASB model
+
+# Device configuration
+device: auto  # auto, cuda, cpu
+
+# I/O Configuration
+io:
+  input_video: datasets/test/video_input2.mp4  # Required: path to input video
+  output_video: "output/ball_detection_result.mp4"
+  output_csv: "output/ball_detections.csv"
+  save_heatmaps: false
+  heatmap_output_dir: "output/heatmaps"
+
+# Processing Configuration
+batch_size: 1
+enable_batch_processing: false  # Set to true for batch inference
+
+# Performance settings
+performance:
+  enable_mixed_precision: true
+  enable_gpu_optimization: true
+  log_inference_time: true
+
+# Visualization Configuration
+visualization:
+  enabled: true
+  show_frame_info: true
+  show_confidence: true
+  confidence_threshold: 0.3
+  font_scale: 0.6
+  font_thickness: 1
+  
+  # Ball visualization
+  ball_color: [0, 0, 255]  # Red (BGR)
+  ball_radius: 8
+  ball_thickness: -1  # Filled circle
+  
+  # Trajectory visualization
+  show_trajectory: false
+  trajectory_length: 10
+  trajectory_color: [255, 255, 0]  # Yellow
+  trajectory_thickness: 2
+
+# Output Configuration
+output:
+  save_raw_detections: true
+  save_confidence_scores: true
+  save_heatmaps: false
+  coordinate_format: "absolute"  # absolute, normalized
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+  save_log_file: true
+  log_file: "output/ball_detection.log"
